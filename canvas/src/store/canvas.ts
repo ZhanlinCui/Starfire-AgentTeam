@@ -18,15 +18,26 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   role: string;
   lastErrorRate: number;
   lastSampleError: string;
+  url: string;
+  parentId: string | null;
 }
+
+export type PanelTab = "details" | "chat" | "config" | "memory" | "events";
 
 interface CanvasState {
   nodes: Node<WorkspaceNodeData>[];
   edges: Edge[];
+  selectedNodeId: string | null;
+  panelTab: PanelTab;
   hydrate: (workspaces: WorkspaceData[]) => void;
   applyEvent: (msg: WSMessage) => void;
   onNodesChange: (changes: NodeChange<Node<WorkspaceNodeData>>[]) => void;
   savePosition: (nodeId: string, x: number, y: number) => void;
+  selectNode: (id: string | null) => void;
+  setPanelTab: (tab: PanelTab) => void;
+  getSelectedNode: () => Node<WorkspaceNodeData> | null;
+  updateNodeData: (id: string, data: Partial<WorkspaceNodeData>) => void;
+  removeNode: (id: string) => void;
 }
 
 function buildNodesAndEdges(workspaces: WorkspaceData[]) {
@@ -45,6 +56,8 @@ function buildNodesAndEdges(workspaces: WorkspaceData[]) {
       role: ws.role,
       lastErrorRate: ws.last_error_rate,
       lastSampleError: ws.last_sample_error,
+      url: ws.url,
+      parentId: ws.parent_id,
     },
   }));
 
@@ -65,6 +78,55 @@ function buildNodesAndEdges(workspaces: WorkspaceData[]) {
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
+  selectedNodeId: null,
+  panelTab: "details",
+
+  selectNode: (id) => set({ selectedNodeId: id }),
+  setPanelTab: (tab) => set({ panelTab: tab }),
+
+  getSelectedNode: () => {
+    const { nodes, selectedNodeId } = get();
+    if (!selectedNodeId) return null;
+    return nodes.find((n) => n.id === selectedNodeId) ?? null;
+  },
+
+  updateNodeData: (id, data) => {
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === id ? { ...n, data: { ...n.data, ...data } } : n
+      ),
+    });
+  },
+
+  removeNode: (id) => {
+    const { nodes, edges, selectedNodeId } = get();
+    // Re-parent children to the deleted node's parent (or root)
+    const deletedNode = nodes.find((n) => n.id === id);
+    const parentOfDeleted = deletedNode?.parentId;
+    set({
+      nodes: nodes
+        .filter((n) => n.id !== id)
+        .map((n) =>
+          n.parentId === id
+            ? { ...n, parentId: parentOfDeleted, data: { ...n.data, parentId: parentOfDeleted ?? null } }
+            : n
+        ),
+      edges: edges
+        .filter((e) => e.source !== id && e.target !== id)
+        .concat(
+          // Re-create edges from the grandparent to orphaned children
+          edges
+            .filter((e) => e.source === id)
+            .filter((e) => parentOfDeleted)
+            .map((e) => ({
+              ...e,
+              id: `edge-${parentOfDeleted}-${e.target}`,
+              source: parentOfDeleted!,
+            }))
+        ),
+      selectedNodeId: selectedNodeId === id ? null : selectedNodeId,
+    });
+  },
 
   hydrate: (workspaces: WorkspaceData[]) => {
     const { nodes, edges } = buildNodesAndEdges(workspaces);
@@ -140,6 +202,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                   role: "",
                   lastErrorRate: 0,
                   lastSampleError: "",
+                  url: "",
+                  parentId: null,
                 },
               },
             ],

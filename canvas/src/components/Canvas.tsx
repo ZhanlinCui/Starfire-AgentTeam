@@ -14,6 +14,8 @@ import "@xyflow/react/dist/style.css";
 
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { WorkspaceNode } from "./WorkspaceNode";
+import { SidePanel } from "./SidePanel";
+import { CreateWorkspaceButton } from "./CreateWorkspaceDialog";
 
 const nodeTypes = {
   workspaceNode: WorkspaceNode,
@@ -24,6 +26,8 @@ export function Canvas() {
   const edges = useCanvasStore((s) => s.edges);
   const onNodesChange = useCanvasStore((s) => s.onNodesChange);
   const savePosition = useCanvasStore((s) => s.savePosition);
+  const selectNode = useCanvasStore((s) => s.selectNode);
+  const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
 
   const onNodeDragStop: OnNodeDrag<Node<WorkspaceNodeData>> = useCallback(
     (_event, node) => {
@@ -32,6 +36,10 @@ export function Canvas() {
     [savePosition]
   );
 
+  const onPaneClick = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
+
   return (
     <div className="w-screen h-screen">
       <ReactFlow
@@ -39,6 +47,7 @@ export function Canvas() {
         edges={edges}
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
+        onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
         fitView
         minZoom={0.1}
@@ -73,6 +82,9 @@ export function Canvas() {
           }}
         />
       </ReactFlow>
+
+      <SidePanel />
+      {!selectedNodeId && <CreateWorkspaceButton />}
     </div>
   );
 }

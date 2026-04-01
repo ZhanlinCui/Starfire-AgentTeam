@@ -18,6 +18,10 @@ Each workspace is a `WorkspaceNode` rendered from its Agent Card. The node displ
 - Online/offline status (with busy indicator from `active_tasks`)
 - Skill list
 
+Nodes are **selectable** — clicking a node highlights it with a blue border/ring and opens the [Side Panel](#side-panel). Clicking the canvas background (pane) deselects the current node.
+
+Status colors include a **pulse animation** for the `provisioning` state, giving clear visual feedback that the workspace is starting up.
+
 The node reflects `active_tasks` from the workspace heartbeat:
 
 | `active_tasks` | Display |
@@ -76,11 +80,36 @@ The flow: Platform broadcasts event via Redis pub/sub -> WebSocket handler pushe
 
 See [WebSocket Events](../api-protocol/websocket-events.md) for the full JSON payload format of each event.
 
+## Side Panel
+
+Clicking a workspace node opens a **420px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. It contains five tabs:
+
+| Tab | Component | Description |
+|-----|-----------|-------------|
+| **Details** | `DetailsTab` | Inline editing of name/role/tier, peer list from `/registry/:id/peers`, delete with confirmation |
+| **Chat** | `ChatTab` | Send A2A `message/send` to the workspace agent, discover agent URL via `/registry/discover/:id` |
+| **Config** | `ConfigTab` | JSON editor for workspace config, load via `GET /workspaces/:id/config`, save changes |
+| **Memory** | `MemoryTab` | Browse key/value memory entries from `GET /workspaces/:id/memory`, add new entries with optional TTL |
+| **Events** | `EventsTab` | Workspace-scoped event log from `GET /events/:workspaceId`, color-coded by event type |
+
+Tab state is managed in the Zustand store via `panelTab` and `setPanelTab`. The panel closes when the user clicks the close button or clicks the canvas background.
+
+The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, and delete removes it via `removeNode()`.
+
 ## Creating Workspaces
 
-There are no blank workspaces. Every workspace starts from a template, a bundle, or a duplication. Three ways to add a workspace to the canvas:
+### Quick Create Dialog
 
-### 1. Template Palette
+A floating "**+ New Workspace**" button appears in the bottom-right corner when no node is selected (`canvas/src/components/CreateWorkspaceDialog.tsx`). Clicking it opens a modal dialog with fields for:
+
+- **Name** (required)
+- **Role** (optional)
+- **Tier** (1–4 dropdown)
+- **Parent Workspace ID** (optional — leave empty for root-level)
+
+On submit, the dialog sends `POST /workspaces` with the form data and a random canvas position. The workspace node appears on the canvas once the platform broadcasts the creation event via WebSocket.
+
+### Template Palette (planned)
 
 A sidebar panel listing available workspace templates. Templates come from `workspace-configs-templates/` — each folder is a template. The platform serves them via `GET /templates`.
 
@@ -181,11 +210,42 @@ function hydrate(workspaces: WorkspaceRow[]) {
       agentCard: ws.agent_card,
       activeTasks: ws.active_tasks,
       collapsed: ws.collapsed,
+      url: ws.url,
+      parentId: ws.parent_id,
     }
   }))
   setNodes(nodes)
 }
 ```
+
+### Zustand Store Shape
+
+The canvas store (`canvas/src/store/canvas.ts`) manages both React Flow state and UI selection state:
+
+```typescript
+interface CanvasState {
+  // React Flow state
+  nodes: Node<WorkspaceNodeData>[];
+  edges: Edge[];
+
+  // Selection / panel state
+  selectedNodeId: string | null;
+  panelTab: PanelTab; // "details" | "chat" | "config" | "memory" | "events"
+
+  // Actions
+  hydrate(workspaces): void;
+  applyEvent(msg): void;
+  onNodesChange(changes): void;
+  savePosition(nodeId, x, y): void;
+  selectNode(id: string | null): void;
+  setPanelTab(tab: PanelTab): void;
+  getSelectedNode(): Node | null;
+  updateNodeData(id, data): void;  // patch node data in-place
+  removeNode(id): void;            // remove node + edges + clear selection
+}
+```
+
+`removeNode` cleans up edges connected to the removed node and clears selection if the removed node was selected.
 
 Edges are derived from the parent/child hierarchy — no separate topology endpoint needed.
 
