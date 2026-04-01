@@ -1,129 +1,59 @@
-# Memory
+# 🧠 Memory Architecture (HMA)
 
-Workspace agents maintain memory (conversation context, learned information) across tasks. The memory backend is configurable in `config.yaml`.
+Starfire uses a completely novel approach to agent memory called **HMA (Hierarchical Memory Architecture)**. 
 
-## Backends
+Unlike traditional multi-agent systems (like Mem0 or MemU) that utilize primitive global "Shared Memory" (where all agents query a massive, flat vector database), Starfire treats memory like **corporate data silos**. 
 
-### filesystem (default)
+If a company's HR department shouldn't expose employee salaries to the Engineering department, why should their respective AI Agents store facts in the same vector database? 
 
-Memory lives in a Docker volume mounted from the host. The provisioner mounts a named volume per workspace:
+## Core Philosophy: Org-Chart Driven Isolation
 
-```
-docker volume: ws-{id}-memory -> mounted at /memory inside container
-```
+HMA enforces that **memory isolation perfectly mirrors the org chart topology**. We define three distinct tiers of memory scopes, strictly controlled by Postgres Row-Level Security (RLS) and the platform's `CanCommunicate` rules.
 
-The volume is named after the workspace ID, not the container name. Survives container restarts and re-provisions as long as the volume isn't deleted.
+---
 
-```yaml
-memory:
-  backend: filesystem
-  path: /memory
-```
+### 1. L1: Local Memory (Personal Scratchpad)
+- **Scope**: Entirely isolated to the current independent Workspace node.
+- **Analogy**: A worker's personal notepad or clipboard.
+- **Usage**: Automatically managed by the agent's internal LangGraph `StateGraph`. Used for storing intermediate execution state, short-term task tracking, and specialized prompt iterations.
+- **Access Control**: **Invisible** to any other agent on the canvas, including direct parents or children.
 
-**Best for:** Local dev, single-machine deployments. Zero config, works out of the box.
+### 2. L2: Team Shared Memory (Department Drive)
+- **Scope**: Accessible exclusively by a "Team" (defined as a parent node and its direct children).
+- **Analogy**: A departmental Google Drive folder or a team Slack channel.
+- **Usage**: When a child agent synthesizes valuable information (e.g., Frontend Agent learns a new API schema), it purposefully calls the `commit_memory(fact, scope='TEAM')` A2A tool. This fact is written to L2 memory.
+- **Access Control**: Any sibling agent (e.g., Backend Agent) or the Team Lead (parent) can use the `search_memory(scope='TEAM')` tool to retrieve it. Requests originating from outside this immediate team structure are hard-rejected with a HTTP 403 Forbidden.
 
-### langgraph_store
+### 3. L3: Global Corporate Memory (Company Wiki)
+- **Scope**: Available to the entire organizational tree.
+- **Analogy**: The company Wiki, All-Hands announcements, or Employee Handbooks.
+- **Usage**: Top-down knowledge distribution. For instance, the company's brand voice guidelines, specific coding standards, or global APIs.
+- **Access Control**: Usually mounted physically at the Root Workspace. Readable by all nodes globally down the tree. Writable **only** by explicitly authorized Admin nodes or human users.
 
-Memory lives in Postgres via LangGraph's built-in `AsyncPostgresSaver` checkpointer. Reads `DATABASE_URL` from the environment — already present in every workspace container, no extra config needed.
+---
 
-```yaml
-memory:
-  backend: langgraph_store
-  # uses DATABASE_URL env var automatically
-  # LangGraph handles the schema
-```
+## Technical Implementation
 
-```python
-# workspace-template/memory/backend.py
+### 1. PostgreSQL + pgvector
+We leverage the platform's existing PostgreSQL instance equipped with the `pgvector` extension. 
+By persisting memory centrally rather than locally in each container, we drastically reduce memory fragmentation while letting the Platform gracefully enforce access control.
 
-if config.memory.backend == "langgraph_store":
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-    checkpointer = AsyncPostgresSaver.from_conn_string(
-        os.getenv("DATABASE_URL")
-    )
-```
-
-Memory lives in Postgres alongside everything else. Any workspace instance on any machine reads the same memory.
-
-**Best for:** Production self-hosted, multi-machine deployments. Memory in same DB as everything else.
-
-### s3
-
-Memory synced to S3-compatible object storage.
-
-```yaml
-memory:
-  backend: s3
-  bucket: agent-molecule-memory   # or reads S3_BUCKET env var
-  prefix: ws-{id}/
+**Schema Concept:**
+```sql
+CREATE TABLE agent_memories (
+    id UUID PRIMARY KEY,
+    workspace_id UUID REFERENCES workspaces(id),
+    content TEXT NOT NULL,
+    embedding vector(1536),
+    scope VARCHAR(10) CHECK (scope IN ('LOCAL', 'TEAM', 'GLOBAL')),
+    created_at TIMESTAMP DEFAULT NOW()
+);
 ```
 
-Requires additional env vars injected at provision time:
+### 2. A2A Memory Operations
+Memory interactions happen via standardized tool definitions exposed to the language model:
+- `search_memory("what is the database password", scope="TEAM")`
+- `commit_memory("the staging API URL is api.stage.com", scope="TEAM")`
 
-```
-S3_BUCKET
-S3_REGION
-AWS_ACCESS_KEY_ID
-AWS_SECRET_ACCESS_KEY
-```
-
-Most durable, most portable — memory survives even if Postgres is wiped.
-
-**Best for:** Tier 4 EC2 workspaces that run in isolation from the main platform. Disaster recovery scenarios.
-
-### When to Pick Each
-
-```
-filesystem      → MVP, single machine, simplest
-                  memory dies if volume deleted
-                  zero config
-
-langgraph_store → multi-machine, DATABASE_URL already available
-                  memory in same DB as everything else
-                  best default for production self-hosted
-
-s3              → Tier 4 isolated VMs, disaster recovery
-                  memory survives total platform rebuild
-                  requires AWS credentials
-```
-
-## When Is Memory Lost?
-
-| Backend | Memory lost only when |
-|---------|----------------------|
-| `filesystem` | Volume explicitly deleted (`nuke.sh` or user delete) |
-| `langgraph_store` | Postgres data deleted |
-| `s3` | S3 bucket/prefix deleted |
-
-Memory is **NOT** lost on: container restart, re-provision, image update, machine reboot, offline/online cycle, **or agent replacement**.
-
-## Agent Handoff via Memory
-
-Memory persistence is what makes agent replacement seamless. When an agent is replaced:
-
-1. The outgoing agent finishes its current task
-2. The outgoing agent writes a handoff document to memory — current work state, in-progress TODOs, decisions made, relevant context
-3. The new agent starts and reads the handoff files from the same memory store
-4. The new agent picks up where the old one left off
-
-The workspace always persists its TODO list and current work state as files in memory. This serves double duty: it's the agent's working memory during normal operation, and it's the handoff mechanism when the agent is swapped.
-
-See [Core Concepts — Agent Handoff](../product/core-concepts.md#agent-handoff) for the conceptual overview.
-
-## Cleanup on Workspace Deletion
-
-When a user deletes a workspace, the platform cleans up memory based on the backend:
-
-| Backend | Cleanup action |
-|---------|---------------|
-| `filesystem` | Remove the named Docker volume |
-| `langgraph_store` | Delete memory rows from Postgres |
-| `s3` | Delete S3 prefix |
-
-Structure events and agent card history are **never** deleted — only conversational memory is cleaned.
-
-## Related Docs
-
-- [Config Format](../agent-runtime/config-format.md) — Where memory backend is configured
-- [Provisioner](./provisioner.md) — How volumes are mounted
-- [Workspace Runtime](../agent-runtime/workspace-runtime.md) — Runtime that uses memory
+### 3. Asynchronous Cognitive Consolidation
+Since Local Memory degrades as the context window fills, agents feature an independent Consolidation Loop. Similar to human sleep, when an agent reaches a configurable TTL of heartbeat-idleness, it can wake up a background goroutine/LangGraph thread to summarize noisy local scratchpad entries into dense, high-value knowledge facts, committing them back to L1 or L2 memory.

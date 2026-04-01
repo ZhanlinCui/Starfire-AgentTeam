@@ -41,6 +41,12 @@ There are zero edge-drawing wires on the Starfire canvas. Edges are inferred pur
 - Children report up to parents.
 **The organizational structure intrinsically enforces your access control policies.**
 
+### 🧠 Hierarchical Memory Architecture (HMA)
+Current agent memory frameworks (like Mem0 or MemU) use flat global vector databases, completely breaking organizational data silos. Starfire instead introduces **Topology-Aware Memory Isolation**:
+- **L1 (Local Memory):** Scratchpads strictly isolated to the individual agent.
+- **L2 (Team Shared Memory):** Retrievable only by a Team Lead and its direct children. Enforced by Row-Level Security.
+- **L3 (Corporate Memory):** Top-down global knowledge bases (like employee handbooks) managed by the Root Workspace.
+
 ### 📈 Full Observability & Hierarchical Human-in-the-Loop
 Every LLM call across your entire distributed team is traced automatically via a unified **Langfuse** instance. More importantly, when an agent detects a high-risk action, it pauses and escalates *up its org chart*. If the parent doesn't have authority, it goes up until the Root Workspace prompts a human on the UI for final approval.
 
