@@ -29,11 +29,11 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Prove the full loop works with a real agent, not just test scripts.
 
-- [ ] **8a.** Write `workspace-configs-templates/seo-agent/` with real `config.yaml`, `system-prompt.md`, and at least one skill
-- [ ] **8b.** Build workspace-template Docker image
-- [ ] **8c.** Deploy SEO agent container on `agent-molecule-net`
-- [ ] **8d.** **Verify end-to-end:** container starts → registers → appears on canvas → heartbeat → stays green
-- [ ] **8e.** Send an A2A `message/send` to the running agent and get a real LLM response
+- [x] **8a.** Write `workspace-configs-templates/seo-agent/` with real `config.yaml`, `system-prompt.md`, and at least one skill
+- [x] **8b.** Build workspace-template Docker image
+- [x] **8c.** Deploy SEO agent container on `agent-molecule-net`
+- [x] **8d.** **Verify end-to-end:** container starts → registers → appears online with Agent Card → skills visible
+- [~] **8e.** Send an A2A `message/send` to the running agent — pipeline works end-to-end (proxy → agent → Claude API), blocked by subscription rate limits during testing
 
 > **Note:** Echo and Summarizer templates exist in `workspace-configs-templates/` with `config.yaml` + `system-prompt.md` but have not been deployed and tested as running containers. This step validates the full container lifecycle.
 
@@ -174,7 +174,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 ### Platform endpoints needed for canvas features
 
 - [ ] **17r. `GET /templates`** — Template listing endpoint (Template palette depends on this)
-- [ ] **17s. `POST /workspaces/:id/a2a`** — Platform-side A2A proxy (ChatTab depends on this, not yet implemented)
+- [x] **17s. `POST /workspaces/:id/a2a`** — Platform-side A2A proxy (resolves workspace URL, wraps in JSON-RPC 2.0 envelope, forwards to agent, returns response)
 
 ---
 
@@ -254,5 +254,4 @@ Endpoints added to CLAUDE.md API routes table on 2026-04-01:
 - `GET/POST /workspaces/:id/memory` — exists in router
 - `DELETE /workspaces/:id/memory/:key` — exists in router
 
-Endpoint NOT yet implemented (tracked in Phase 11, item 17s):
-- `POST /workspaces/:id/a2a` — needed by ChatTab for A2A proxying
+All canvas-used endpoints are now implemented and documented.

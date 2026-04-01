@@ -1,6 +1,5 @@
 """Create the Deep Agent with model + skills + tools."""
 
-from langchain_core.language_models import init_chat_model
 from langgraph.prebuilt import create_react_agent
 
 
@@ -19,7 +18,20 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
         provider = "anthropic"
         model_name = model_str
 
-    llm = init_chat_model(model_name, model_provider=provider)
+    if provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+        llm = ChatAnthropic(model=model_name)
+    elif provider == "openai":
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(model=model_name)
+    elif provider == "google_genai":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        llm = ChatGoogleGenerativeAI(model=model_name)
+    elif provider == "ollama":
+        from langchain_ollama import ChatOllama
+        llm = ChatOllama(model=model_name)
+    else:
+        raise ValueError(f"Unsupported model provider: {provider}")
 
     agent = create_react_agent(
         model=llm,

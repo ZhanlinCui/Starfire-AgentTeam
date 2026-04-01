@@ -60,10 +60,11 @@ def load_skill_tools(tools_dir: Path) -> list[Any]:
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
 
-        # Look for functions decorated with @tool
+        # Look for functions decorated with @tool (BaseTool instances)
+        from langchain_core.tools import BaseTool
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
-            if callable(attr) and hasattr(attr, "is_tool"):
+            if isinstance(attr, BaseTool):
                 tools.append(attr)
 
     return tools

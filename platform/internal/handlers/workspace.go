@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
@@ -243,4 +246,88 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, gin.H{"status": "removed"})
+}
+
+// ProxyA2A handles POST /workspaces/:id/a2a
+// Proxies A2A JSON-RPC requests from the canvas to workspace agents,
+// avoiding CORS and Docker network issues.
+func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
+	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	// Resolve workspace URL (cache first, then DB)
+	agentURL, err := db.GetCachedURL(ctx, workspaceID)
+	if err != nil {
+		var urlNullable sql.NullString
+		var status string
+		err := db.DB.QueryRowContext(ctx,
+			`SELECT url, status FROM workspaces WHERE id = $1`, workspaceID,
+		).Scan(&urlNullable, &status)
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
+		if err != nil {
+			log.Printf("ProxyA2A lookup error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+			return
+		}
+		if !urlNullable.Valid || urlNullable.String == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace has no URL", "status": status})
+			return
+		}
+		agentURL = urlNullable.String
+		db.CacheURL(ctx, workspaceID, agentURL)
+	}
+
+	// Read the incoming request body
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	// Build the JSON-RPC envelope if the client sent just method+params
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+		return
+	}
+	if _, hasJSONRPC := payload["jsonrpc"]; !hasJSONRPC {
+		// Wrap in JSON-RPC 2.0 envelope
+		rpcID := uuid.New().String()
+		envelope := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      rpcID,
+			"method":  payload["method"],
+			"params":  payload["params"],
+		}
+		body, _ = json.Marshal(envelope)
+	}
+
+	// Forward to the agent
+	client := &http.Client{Timeout: 120 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "POST", agentURL, bytes.NewReader(body))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("ProxyA2A forward error: %v", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to reach workspace agent"})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Stream the response back
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read agent response"})
+		return
+	}
+
+	c.Data(resp.StatusCode, "application/json", respBody)
 }

@@ -110,5 +110,3 @@ async def delegate_to_workspace(
         }
 
 
-# Mark as a tool for skill loader discovery
-delegate_to_workspace.is_tool = True

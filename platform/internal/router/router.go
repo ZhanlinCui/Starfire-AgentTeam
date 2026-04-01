@@ -30,6 +30,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster) *gin.Engine {
 	r.GET("/workspaces/:id", wh.Get)
 	r.PATCH("/workspaces/:id", wh.Update)
 	r.DELETE("/workspaces/:id", wh.Delete)
+	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
 	// Registry
 	rh := handlers.NewRegistryHandler(broadcaster)

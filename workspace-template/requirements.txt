@@ -1,4 +1,4 @@
-a2a-python>=0.2.0
+a2a-sdk[http-server]>=0.3.0
 langchain-core>=0.3.0
 langchain-anthropic>=0.3.0
 langgraph>=0.3.0

@@ -1,8 +1,12 @@
 """Bridge between LangGraph agent and A2A protocol."""
 
+import logging
+
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.utils import new_agent_text_message
+
+logger = logging.getLogger(__name__)
 
 
 class LangGraphA2AExecutor(AgentExecutor):
@@ -14,25 +18,41 @@ class LangGraphA2AExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue):
         """Execute a task from an A2A request."""
         # Extract text from message parts
-        user_input = " ".join(
-            part.text
-            for part in context.message.parts
-            if hasattr(part, "text")
-        )
+        parts = context.message.parts
+        text_parts = []
+        for part in parts:
+            if hasattr(part, "text") and part.text:
+                text_parts.append(part.text)
+            elif hasattr(part, "root") and hasattr(part.root, "text"):
+                text_parts.append(part.root.text)
+
+        user_input = " ".join(text_parts).strip()
+        if not user_input:
+            user_input = str(parts)
+
+        logger.info("A2A execute: user_input=%s", user_input[:200])
 
         # Stream through LangGraph agent
+        final_content = ""
         async for chunk in self.agent.astream(
-            {"messages": [{"role": "user", "content": user_input}]},
+            {"messages": [("user", user_input)]},
             config={"configurable": {"thread_id": context.context_id}},
         ):
             if "messages" in chunk:
                 last_msg = chunk["messages"][-1]
                 content = getattr(last_msg, "content", str(last_msg))
                 if isinstance(content, str) and content.strip():
-                    await event_queue.enqueue_event(
-                        new_agent_text_message(content)
-                    )
+                    final_content = content
+
+        if final_content:
+            await event_queue.enqueue_event(
+                new_agent_text_message(final_content)
+            )
+        else:
+            await event_queue.enqueue_event(
+                new_agent_text_message("(no response generated)")
+            )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue):
         """Cancel a running task."""
-        pass  # LangGraph interrupt not easily exposed; no-op for Phase 1
+        pass
