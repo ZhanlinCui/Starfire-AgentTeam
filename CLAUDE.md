@@ -17,10 +17,11 @@ Canvas (Next.js :3000) ←WebSocket→ Platform (Go :8080) ←HTTP→ Postgres +
                                         └───── Platform ─────┘
 ```
 
-Three main components:
+Four main components:
 - **Platform** (`platform/`): Go/Gin control plane — workspace CRUD, registry, discovery, WebSocket hub, liveness monitoring
 - **Canvas** (`canvas/`): Next.js 15 + React Flow (@xyflow/react v12) + Zustand + Tailwind — visual workspace graph
 - **Workspace Runtime** (`workspace-template/`): Python template — LangGraph agent wrapped in A2A server, registers with platform, sends heartbeats
+- **molecli** (`platform/cmd/cli/`): Go TUI dashboard (Bubbletea + Lipgloss) — real-time workspace monitoring, event log, health overview, delete/filter operations
 
 ## Build & Run Commands
 
@@ -33,10 +34,14 @@ Three main components:
 ### Platform (Go)
 ```bash
 cd platform
-go build ./cmd/server       # Build
-go run ./cmd/server          # Run (requires Postgres + Redis running)
+go build ./cmd/server       # Build server
+go run ./cmd/server          # Run server (requires Postgres + Redis running)
+go build -o molecli ./cmd/cli  # Build TUI dashboard
+./molecli                    # Run TUI dashboard (requires platform running)
 ```
 Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT` (defaults: postgres://dev:dev@localhost:5432/agentmolecule?sslmode=disable, redis://localhost:6379, 8080).
+
+`molecli` reads `MOLECLI_URL` (default http://localhost:8080) to locate the platform. Logs are written to `molecli.log` in the working directory (already covered by `*.log` in `.gitignore`).
 
 ### Canvas (Next.js)
 ```bash

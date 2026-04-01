@@ -1,5 +1,6 @@
 # Binaries
 platform/server
+platform/molecli
 *.exe
 *.out
 *.bin

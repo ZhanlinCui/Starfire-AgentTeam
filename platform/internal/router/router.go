@@ -48,6 +48,18 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster) *gin.Engine {
 	r.GET("/events", eh.List)
 	r.GET("/events/:workspaceId", eh.ListByWorkspace)
 
+	// Config
+	cfgh := handlers.NewConfigHandler()
+	r.GET("/workspaces/:id/config", cfgh.Get)
+	r.PATCH("/workspaces/:id/config", cfgh.Patch)
+
+	// Memory
+	memh := handlers.NewMemoryHandler()
+	r.GET("/workspaces/:id/memory", memh.List)
+	r.GET("/workspaces/:id/memory/:key", memh.Get)
+	r.POST("/workspaces/:id/memory", memh.Set)
+	r.DELETE("/workspaces/:id/memory/:key", memh.Delete)
+
 	// WebSocket
 	sh := handlers.NewSocketHandler(hub)
 	r.GET("/ws", sh.HandleConnect)
