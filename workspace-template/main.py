@@ -1,0 +1,155 @@
+"""Workspace runtime entry point.
+
+Loads config -> loads skills -> creates agent -> wraps in A2A -> registers -> starts heartbeat.
+"""
+
+import asyncio
+import json
+import os
+import socket
+
+import httpx
+import uvicorn
+from a2a.server.apps import A2AStarletteApplication
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.types import AgentCard, AgentCapabilities, AgentSkill
+
+from a2a_executor import LangGraphA2AExecutor
+from agent import create_agent
+from config import load_config
+from heartbeat import HeartbeatLoop
+from prompt import build_system_prompt, get_peer_capabilities
+from skills.loader import load_skills
+from tools.delegation import delegate_to_workspace
+
+
+def get_machine_ip() -> str:
+    """Get the machine's IP for A2A discovery."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+async def main():
+    workspace_id = os.environ.get("WORKSPACE_ID", "workspace-default")
+    config_path = os.environ.get("WORKSPACE_CONFIG_PATH", "/configs")
+    platform_url = os.environ.get("PLATFORM_URL", "http://platform:8080")
+
+    # 1. Load config
+    config = load_config(config_path)
+    port = config.a2a.port
+
+    # 2. Load skills
+    loaded_skills = load_skills(config_path, config.skills)
+    print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
+
+    # 3. Gather tools from skills + built-in delegation tool
+    all_tools = [delegate_to_workspace]
+    for skill in loaded_skills:
+        all_tools.extend(skill.tools)
+
+    # 4. Fetch peer capabilities and build system prompt
+    peers = await get_peer_capabilities(platform_url, workspace_id)
+    system_prompt = build_system_prompt(config_path, workspace_id, loaded_skills, peers)
+
+    # 5. Create the agent
+    agent = create_agent(config.model, all_tools, system_prompt)
+
+    # 6. Build Agent Card
+    machine_ip = os.environ.get("HOSTNAME", get_machine_ip())
+    workspace_url = f"http://{machine_ip}:{port}"
+
+    agent_card = AgentCard(
+        name=config.name,
+        description=config.description,
+        version=config.version,
+        url=workspace_url,
+        capabilities=AgentCapabilities(
+            streaming=config.a2a.streaming,
+            pushNotifications=config.a2a.push_notifications,
+        ),
+        skills=[
+            AgentSkill(
+                id=skill.metadata.id,
+                name=skill.metadata.name,
+                description=skill.metadata.description,
+                tags=skill.metadata.tags,
+                examples=skill.metadata.examples,
+            )
+            for skill in loaded_skills
+        ],
+        defaultInputModes=["text/plain", "application/json"],
+        defaultOutputModes=["text/plain", "application/json"],
+    )
+
+    # 7. Wrap in A2A
+    executor = LangGraphA2AExecutor(agent)
+    handler = DefaultRequestHandler(
+        agent_executor=executor,
+        task_store=InMemoryTaskStore(),
+    )
+
+    app = A2AStarletteApplication(
+        agent_card=agent_card,
+        http_handler=handler,
+    )
+
+    # 8. Register with platform
+    agent_card_dict = {
+        "name": config.name,
+        "description": config.description,
+        "version": config.version,
+        "url": workspace_url,
+        "skills": [
+            {
+                "id": s.metadata.id,
+                "name": s.metadata.name,
+                "description": s.metadata.description,
+                "tags": s.metadata.tags,
+            }
+            for s in loaded_skills
+        ],
+        "capabilities": {
+            "streaming": config.a2a.streaming,
+            "pushNotifications": config.a2a.push_notifications,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.post(
+                f"{platform_url}/registry/register",
+                json={
+                    "id": workspace_id,
+                    "url": workspace_url,
+                    "agent_card": agent_card_dict,
+                },
+            )
+            print(f"Registered with platform: {resp.status_code}")
+        except Exception as e:
+            print(f"Warning: failed to register with platform: {e}")
+
+    # 9. Start heartbeat
+    heartbeat = HeartbeatLoop(platform_url, workspace_id)
+    heartbeat.start()
+
+    # 10. Run the A2A server
+    print(f"Workspace {workspace_id} starting on port {port}")
+    server_config = uvicorn.Config(
+        app.build(),
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+    )
+    server = uvicorn.Server(server_config)
+    await server.serve()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

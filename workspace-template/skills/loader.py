@@ -1,0 +1,103 @@
+"""Load skill packages from the workspace config directory."""
+
+import importlib.util
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+@dataclass
+class SkillMetadata:
+    id: str
+    name: str
+    description: str
+    tags: list[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LoadedSkill:
+    metadata: SkillMetadata
+    instructions: str
+    tools: list[Any] = field(default_factory=list)
+
+
+def parse_skill_frontmatter(skill_md_path: Path) -> tuple[dict, str]:
+    """Parse YAML frontmatter from a SKILL.md file."""
+    content = skill_md_path.read_text()
+
+    if not content.startswith("---"):
+        return {}, content
+
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return {}, content
+
+    frontmatter = yaml.safe_load(parts[1]) or {}
+    body = parts[2].strip()
+    return frontmatter, body
+
+
+def load_skill_tools(tools_dir: Path) -> list[Any]:
+    """Dynamically load tool functions from a skill's tools/ directory."""
+    tools = []
+    if not tools_dir.exists():
+        return tools
+
+    for py_file in sorted(tools_dir.glob("*.py")):
+        if py_file.name.startswith("_"):
+            continue
+
+        module_name = f"skill_tool_{py_file.stem}"
+        spec = importlib.util.spec_from_file_location(module_name, py_file)
+        if spec is None or spec.loader is None:
+            continue
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+
+        # Look for functions decorated with @tool
+        for attr_name in dir(module):
+            attr = getattr(module, attr_name)
+            if callable(attr) and hasattr(attr, "is_tool"):
+                tools.append(attr)
+
+    return tools
+
+
+def load_skills(config_path: str, skill_names: list[str]) -> list[LoadedSkill]:
+    """Load all skills specified in the config."""
+    skills_dir = Path(config_path) / "skills"
+    loaded = []
+
+    for skill_name in skill_names:
+        skill_path = skills_dir / skill_name
+        skill_md = skill_path / "SKILL.md"
+
+        if not skill_md.exists():
+            print(f"Warning: SKILL.md not found for {skill_name}, skipping")
+            continue
+
+        frontmatter, instructions = parse_skill_frontmatter(skill_md)
+
+        metadata = SkillMetadata(
+            id=skill_name,
+            name=frontmatter.get("name", skill_name),
+            description=frontmatter.get("description", ""),
+            tags=frontmatter.get("tags", []),
+            examples=frontmatter.get("examples", []),
+        )
+
+        tools = load_skill_tools(skill_path / "tools")
+
+        loaded.append(LoadedSkill(
+            metadata=metadata,
+            instructions=instructions,
+            tools=tools,
+        ))
+
+    return loaded

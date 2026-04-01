@@ -1,0 +1,50 @@
+# Binaries
+platform/server
+*.exe
+*.out
+*.bin
+
+# Go
+*.test
+
+# Dependencies
+node_modules/
+
+# Next.js
+canvas/.next/
+canvas/tsconfig.tsbuildinfo
+canvas/next-env.d.ts
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Docker
+*.log
+
+# Claude Code
+.claude/
+
+# Langfuse / ClickHouse volumes
+langfuse_data/
+clickhouse_data/

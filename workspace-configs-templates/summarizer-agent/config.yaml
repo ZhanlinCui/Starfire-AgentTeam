@@ -1,0 +1,29 @@
+name: Summarizer Agent
+description: Summarizes content and delegates confirmations to peers.
+version: 1.0.0
+tier: 1
+
+model: anthropic:claude-sonnet-4-6
+
+skills:
+  - summarize
+
+tools: []
+
+a2a:
+  port: 8000
+  streaming: true
+  push_notifications: true
+
+delegation:
+  retry_attempts: 3
+  retry_delay: 5
+  timeout: 120
+  escalate: true
+
+sub_workspaces: []
+
+env:
+  required:
+    - ANTHROPIC_API_KEY
+  optional: []
