@@ -121,3 +121,66 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 5 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, agent_card JSONB, heartbeat columns), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `agents`, `workspace_secrets`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
+
+<!-- AWARENESS_RULES_START -->
+# Project Memory (Awareness MCP)
+
+> IMPORTANT: These instructions override default behavior. You must follow them exactly.
+
+## Awareness Memory Integration (MANDATORY)
+
+awareness_* = cross-session persistent memory (past decisions, knowledge, tasks).
+Other tools = current codebase navigation (file search, code index).
+Use BOTH - they serve different purposes.
+
+STEP 1 - SESSION START:
+  Call awareness_init(source="claude-code") -> get session_id, review context.
+  If active_skills[] is returned: skill = reusable procedure done 2+ times;
+  summary = injectable instruction, methods = steps. Apply matching skills to tasks.
+
+STEP 2 - RECALL BEFORE WORK (progressive disclosure):
+  1. awareness_recall(semantic_query=..., keyword_query=..., detail='summary') → lightweight index.
+  2. Review summaries/scores, pick relevant IDs.
+  3. awareness_recall(detail='full', ids=[...]) → expand only what you need.
+
+STEP 3 - RECORD EVERY CHANGE:
+  After EVERY code edit, decision, or bug fix:
+  awareness_record(content=<detailed natural language description>,
+    insights={knowledge_cards:[...], action_items:[...], risks:[...]})
+  Content should be RICH and DETAILED — include reasoning, key code snippets,
+  user quotes, alternatives considered, and files changed. Do NOT compress into
+  a single-line summary. The content IS the memory — more detail = better recall.
+  Include insights to create searchable knowledge in ONE step (recommended).
+  Skipping = permanent data loss.
+
+STEP 4 - CATEGORY GUIDE (for insights.knowledge_cards):
+  - decision = choice made between alternatives.
+  - problem_solution = bug/problem plus the fix that resolved it.
+  - workflow = process, setup, or configuration steps only.
+  - pitfall = blocker, warning, or limitation without a fix yet.
+  - insight = reusable pattern or general learning.
+  - skill = reusable procedure done 2+ times; summary = injectable instruction, methods = steps.
+  - key_point = important technical fact when nothing else fits.
+  Never default everything to workflow.
+
+STEP 5 - SESSION END:
+  awareness_record(content=[step1, step2, ...], insights={...}) with final summary.
+
+BACKFILL (if applicable):
+  If MCP connected late: awareness_record(content=<transcript>)
+
+RULES VERSION: Pass rules_version="2" to awareness_init so the server knows you have these rules.
+If the server returns _setup_action, the rules have been updated — follow the instruction to re-sync.
+
+NOTE: memory_id from X-Awareness-Memory-Id header. source/actor/event_type auto-inferred.
+
+## Compliance Check
+
+Before responding to ANY user request:
+
+1. Have you called awareness_init yet this session? If not, call it NOW.
+
+2. Did you just edit a file? Call awareness_record(content=<detailed description>, insights={...}) IMMEDIATELY.
+
+3. Is the user asking about past work? Call awareness_recall FIRST.
+<!-- AWARENESS_RULES_END -->

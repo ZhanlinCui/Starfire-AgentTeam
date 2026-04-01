@@ -43,9 +43,6 @@ venv/
 # Docker
 *.log
 
-# Claude Code
-.claude/
-
 # Langfuse / ClickHouse volumes
 langfuse_data/
 clickhouse_data/
