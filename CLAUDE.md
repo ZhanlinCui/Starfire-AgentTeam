@@ -107,6 +107,9 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 |--------|------|---------|
 | GET | /health | inline |
 | POST/GET/PATCH/DELETE | /workspaces[/:id] | workspace.go |
+| GET/PATCH | /workspaces/:id/config | workspace.go |
+| GET/POST | /workspaces/:id/memory | workspace.go |
+| DELETE | /workspaces/:id/memory/:key | workspace.go |
 | POST | /registry/register | registry.go |
 | POST | /registry/heartbeat | registry.go |
 | POST | /registry/update-card | registry.go |
@@ -118,7 +121,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 
 ## Database
 
-5 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, agent_card JSONB, heartbeat columns), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `agents`, `workspace_secrets`.
+6 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, agent_card JSONB, heartbeat columns), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `agents`, `workspace_secrets`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
 
