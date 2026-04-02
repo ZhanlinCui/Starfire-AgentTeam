@@ -18,20 +18,26 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
         provider = "anthropic"
         model_name = model_str
 
-    if provider == "anthropic":
-        from langchain_anthropic import ChatAnthropic
-        llm = ChatAnthropic(model=model_name)
-    elif provider == "openai":
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(model=model_name)
-    elif provider == "google_genai":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(model=model_name)
-    elif provider == "ollama":
-        from langchain_ollama import ChatOllama
-        llm = ChatOllama(model=model_name)
-    else:
-        raise ValueError(f"Unsupported model provider: {provider}")
+    try:
+        if provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+            llm = ChatAnthropic(model=model_name)
+        elif provider == "openai":
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(model=model_name)
+        elif provider == "google_genai":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            llm = ChatGoogleGenerativeAI(model=model_name)
+        elif provider == "ollama":
+            from langchain_ollama import ChatOllama
+            llm = ChatOllama(model=model_name)
+        else:
+            raise ValueError(f"Unsupported model provider: {provider}")
+    except ImportError as e:
+        raise ImportError(
+            f"Provider '{provider}' requires package 'langchain-{provider}'. "
+            f"Install it with: pip install langchain-{provider}"
+        ) from e
 
     agent = create_react_agent(
         model=llm,

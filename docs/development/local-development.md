@@ -70,7 +70,7 @@ Node.js         20+
 Next.js         15
 React Flow      11+  (xyflow)
 deepagents      0.4+
-a2a-python      latest   (A2A server SDK)
+a2a-sdk         latest   (A2A server SDK, install with a2a-sdk[http-server])
 langfuse        3.x  (self-hosted Docker)
 Postgres        16
 Redis           7

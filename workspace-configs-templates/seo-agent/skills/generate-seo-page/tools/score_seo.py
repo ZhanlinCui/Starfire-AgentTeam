@@ -30,8 +30,8 @@ def score_seo(content: str, primary_keyword: str) -> dict:
     else:
         scores["word_count"] = {"score": 3, "detail": f"{word_count} words (outside ideal range)"}
 
-    # Keyword density (target: 1-2%)
-    keyword_count = content_lower.count(keyword_lower)
+    # Keyword density (target: 1-2%) — whole-word matches only
+    keyword_count = len(re.findall(r"\b" + re.escape(keyword_lower) + r"\b", content_lower))
     density = (keyword_count / max(word_count, 1)) * 100
     if 1.0 <= density <= 2.0:
         scores["keyword_density"] = {"score": 10, "detail": f"{density:.1f}% (ideal)"}

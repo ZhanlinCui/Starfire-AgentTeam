@@ -28,7 +28,11 @@ class LangGraphA2AExecutor(AgentExecutor):
 
         user_input = " ".join(text_parts).strip()
         if not user_input:
-            user_input = str(parts)
+            logger.warning("A2A execute: no text content in message parts: %s", parts)
+            await event_queue.enqueue_event(
+                new_agent_text_message("Error: message contained no text content.")
+            )
+            return
 
         logger.info("A2A execute: user_input=%s", user_input[:200])
 

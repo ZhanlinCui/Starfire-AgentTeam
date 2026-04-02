@@ -16,6 +16,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// maxProxyRequestBody is the maximum size of an A2A proxy request body (1MB).
+const maxProxyRequestBody = 1 << 20
+
+// maxProxyResponseBody is the maximum size of an A2A proxy response body (10MB).
+const maxProxyResponseBody = 10 << 20
+
+// a2aClient is a shared HTTP client for proxying A2A requests to workspace agents.
+var a2aClient = &http.Client{Timeout: 120 * time.Second}
+
 type WorkspaceHandler struct {
 	broadcaster *events.Broadcaster
 }
@@ -280,8 +289,8 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 		db.CacheURL(ctx, workspaceID, agentURL)
 	}
 
-	// Read the incoming request body
-	body, err := io.ReadAll(c.Request.Body)
+	// Read the incoming request body (capped at 1MB)
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxProxyRequestBody))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
 		return
@@ -294,7 +303,6 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 		return
 	}
 	if _, hasJSONRPC := payload["jsonrpc"]; !hasJSONRPC {
-		// Wrap in JSON-RPC 2.0 envelope
 		rpcID := uuid.New().String()
 		envelope := map[string]interface{}{
 			"jsonrpc": "2.0",
@@ -302,11 +310,15 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 			"method":  payload["method"],
 			"params":  payload["params"],
 		}
-		body, _ = json.Marshal(envelope)
+		var marshalErr error
+		body, marshalErr = json.Marshal(envelope)
+		if marshalErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build JSON-RPC envelope"})
+			return
+		}
 	}
 
 	// Forward to the agent
-	client := &http.Client{Timeout: 120 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "POST", agentURL, bytes.NewReader(body))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
@@ -314,7 +326,7 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := a2aClient.Do(req)
 	if err != nil {
 		log.Printf("ProxyA2A forward error: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to reach workspace agent"})
@@ -322,8 +334,8 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	// Stream the response back
-	respBody, err := io.ReadAll(resp.Body)
+	// Read agent response (capped at 10MB)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyResponseBody))
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read agent response"})
 		return

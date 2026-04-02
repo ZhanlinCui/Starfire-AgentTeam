@@ -43,6 +43,8 @@ def parse_skill_frontmatter(skill_md_path: Path) -> tuple[dict, str]:
 
 def load_skill_tools(tools_dir: Path) -> list[Any]:
     """Dynamically load tool functions from a skill's tools/ directory."""
+    from langchain_core.tools import BaseTool
+
     tools = []
     if not tools_dir.exists():
         return tools
@@ -61,7 +63,6 @@ def load_skill_tools(tools_dir: Path) -> list[Any]:
         spec.loader.exec_module(module)
 
         # Look for functions decorated with @tool (BaseTool instances)
-        from langchain_core.tools import BaseTool
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
             if isinstance(attr, BaseTool):

@@ -10,13 +10,14 @@ Write `docker-compose.yml` that starts Postgres, Redis, and Langfuse. Verify all
 
 ## Step 2: Database Migrations
 
-Write the five SQL migration files:
+Write the SQL migration files:
 
 1. `001_workspaces.sql` — full workspaces table (includes `parent_id`, heartbeat columns, `forwarded_to` — all core workspace state in one migration)
 2. `002_agents.sql` — agents table
 3. `003_events.sql` — structure_events table + indexes
 4. `004_secrets.sql` — workspace_secrets table
 5. `005_canvas_layouts.sql` — canvas_layouts + canvas_viewport tables
+6. `006_workspace_config_memory.sql` — workspace config and memory key-value tables
 
 See [Database Schema](../architecture/database-schema.md) for the full table definitions.
 
@@ -32,7 +33,7 @@ See [Registry & Heartbeat](../api-protocol/registry-and-heartbeat.md) for the fu
 
 ## Step 5: Workspace-Template Python Runtime
 
-Write `main.py`, `config.py`, `heartbeat.py`, `a2a_executor.py`. Create a minimal deepagent that just echoes responses. Wrap it with `a2a-python` SDK (`A2AStarletteApplication`) to create the A2A server. Verify:
+Write `main.py`, `config.py`, `heartbeat.py`, `a2a_executor.py`. Create a minimal deepagent that just echoes responses. Wrap it with `a2a-sdk` (`A2AStarletteApplication`) to create the A2A server. Verify:
 
 - Agent Card is served at `/.well-known/agent-card.json`
 - Heartbeat POSTs reach the platform

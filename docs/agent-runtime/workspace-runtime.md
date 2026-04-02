@@ -59,7 +59,7 @@ skills/loader.py dynamically loads skill files from config
 agent.py creates deepagent with loaded model + skills + tools
       |
       v
-main.py wraps agent in A2A server (a2a-python SDK)
+main.py wraps agent in A2A server (a2a-sdk)
       |
       v
 A2AStarletteApplication auto-registers all A2A routes:
@@ -83,9 +83,9 @@ Workspace is live, discoverable, and receiving peer events
 
 | File | Role |
 |------|------|
-| `main.py` | Entry point — wraps agent in A2A server via `a2a-python` |
+| `main.py` | Entry point — wraps agent in A2A server via `a2a-sdk` |
 | `config.py` | Loads workspace config from `WORKSPACE_CONFIG_PATH` |
-| `agent.py` | Creates the Deep Agent with model + skills + tools |
+| `agent.py` | Creates the LangGraph ReAct agent with model + skills + tools |
 | `a2a_executor.py` | Bridges deepagent (LangGraph) to A2A request/response |
 | `skills/loader.py` | Loads skill packages (SKILL.md + tools) from config |
 | `heartbeat.py` | Sends 30s heartbeat to platform registry |
@@ -93,49 +93,30 @@ Workspace is live, discoverable, and receiving peer events
 
 ## A2A Server Wrapping
 
-The workspace uses the `a2a-python` SDK (not `deepagents-acp` — that's for ACP/editor integration, a different protocol). `A2AStarletteApplication` auto-registers all routes:
+The workspace uses the `a2a-sdk` package (PyPI: `a2a-sdk[http-server]`). `A2AStarletteApplication` auto-registers all A2A routes at the root URL.
 
 ```python
-# workspace-template/main.py
+# workspace-template/main.py (simplified)
 
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard, AgentCapabilities, AgentSkill
-from deepagents import create_deep_agent
 import uvicorn
 
 async def main():
-    # 1. create deepagent with loaded skills + tools
-    agent = create_deep_agent(
-        model=init_chat_model(config.model),
-        tools=load_all_tools(CONFIG_PATH, config.skills),
-        system_prompt=await build_system_prompt(CONFIG_PATH),
-    )
+    # 1. create LangGraph ReAct agent with provider-specific LLM
+    #    agent.py parses "provider:model" and loads ChatAnthropic/ChatOpenAI/etc.
+    agent = create_agent(config.model, all_tools, system_prompt)
 
-    # 2. build Agent Card explicitly from loaded skill metadata
-    #    a2a-python does NOT auto-generate from tool list
+    # 2. build Agent Card from loaded skill metadata
     agent_card = AgentCard(
         name=config.name,
-        description=config.description,
-        version=config.version,
         url=f"http://{MACHINE_IP}:{PORT}",
-        capabilities=AgentCapabilities(
-            streaming=True,
-            pushNotifications=True,
-        ),
-        skills=[
-            AgentSkill(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                tags=skill.tags,
-                examples=skill.examples,
-            )
-            for skill in loaded_skills
-        ],
-        defaultInputModes=["text/plain", "application/json"],
-        defaultOutputModes=["text/plain", "application/json"],
+        capabilities=AgentCapabilities(streaming=True, pushNotifications=True),
+        skills=[AgentSkill(id=s.metadata.id, name=s.metadata.name, ...)
+                for s in loaded_skills],
+        ...
     )
 
     # 3. wrap in A2A executor + handler
@@ -145,15 +126,14 @@ async def main():
         task_store=InMemoryTaskStore(),
     )
 
-    # 4. create A2A app — all routes auto-registered:
-    #    /.well-known/agent-card.json
-    #    /a2a (message/send, message/sendSubscribe, tasks/cancel)
-    app = A2AStarletteApplication(
-        agent_card=agent_card,
-        http_handler=handler,
-    )
+    # 4. create A2A app — routes auto-registered at root URL:
+    #    /.well-known/agent-card.json, message/send, message/sendSubscribe
+    app = A2AStarletteApplication(agent_card=agent_card, http_handler=handler)
 
-    uvicorn.run(app.build(), host="0.0.0.0", port=PORT)
+    # 5. register with platform, start heartbeat, run server
+    await register_with_platform(workspace_id, workspace_url, agent_card_dict)
+    heartbeat.start()
+    await uvicorn.Server(uvicorn.Config(app.build(), host="0.0.0.0", port=port)).serve()
 ```
 
 The executor bridges LangGraph's streaming to A2A's event model:
@@ -161,31 +141,29 @@ The executor bridges LangGraph's streaming to A2A's event model:
 ```python
 # workspace-template/a2a_executor.py
 
-from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.events import EventQueue
-from a2a.utils import new_agent_text_message
-
 class LangGraphA2AExecutor(AgentExecutor):
-    def __init__(self, agent):
-        self.agent = agent  # compiled LangGraph graph
+    async def execute(self, context: RequestContext, event_queue: EventQueue):
+        # Extract text from A2A message parts
+        text_parts = [p.text for p in context.message.parts if hasattr(p, "text") and p.text]
+        user_input = " ".join(text_parts).strip()
+        if not user_input:
+            await event_queue.enqueue_event(
+                new_agent_text_message("Error: message contained no text content.")
+            )
+            return
 
-    async def execute(self, context: RequestContext, queue: EventQueue):
-        user_input = " ".join(
-            part.text for part in context.message.parts
-            if hasattr(part, "text")
-        )
+        # Stream through LangGraph, collect final response
+        final_content = ""
         async for chunk in self.agent.astream(
-            {"messages": [{"role": "user", "content": user_input}]},
-            config={"thread_id": context.context_id}
+            {"messages": [("user", user_input)]},
+            config={"configurable": {"thread_id": context.context_id}},
         ):
             if "messages" in chunk:
-                msg = chunk["messages"][-1]
-                await queue.enqueue_event(
-                    new_agent_text_message(msg.content)
-                )
+                content = getattr(chunk["messages"][-1], "content", "")
+                if isinstance(content, str) and content.strip():
+                    final_content = content
 
-    async def cancel(self, context: RequestContext, queue: EventQueue):
-        await self.agent.ainterrupt(context.context_id)
+        await event_queue.enqueue_event(new_agent_text_message(final_content or "(no response)"))
 ```
 
 **Key distinction:** ACP (Agent Client Protocol) connects agents to editors/IDEs (Zed, Claude Code). A2A (Agent-to-Agent) connects workspaces to each other. Agent Molecule uses A2A for inter-workspace communication.
@@ -208,59 +186,33 @@ The built-in `delegate_to_workspace` tool implements configurable retry with bac
 ```python
 # workspace-template/tools/delegation.py
 
+PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
+WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "")
+DELEGATION_RETRY_ATTEMPTS = int(os.environ.get("DELEGATION_RETRY_ATTEMPTS", "3"))
+DELEGATION_RETRY_DELAY = float(os.environ.get("DELEGATION_RETRY_DELAY", "5.0"))
+DELEGATION_TIMEOUT = float(os.environ.get("DELEGATION_TIMEOUT", "120.0"))
+
 @tool
-async def delegate_to_workspace(
-    workspace_id: str,
-    task: str,
-    retry_attempts: int = 3,
-    retry_delay: float = 5.0,
-    fallback: str = None,        # fallback workspace_id
-    escalate_on_failure: bool = True,
-) -> dict:
-    """Delegate a task to a peer workspace."""
-    last_error = None
-    for attempt in range(retry_attempts):
-        try:
-            peers = await get_reachable_workspaces()
-            target = next((p for p in peers if p["id"] == workspace_id), None)
+async def delegate_to_workspace(workspace_id: str, task: str) -> dict:
+    """Delegate a task to a peer workspace via A2A protocol."""
+    # 1. Discover target URL via platform (enforces CanCommunicate)
+    discover_resp = await client.get(
+        f"{PLATFORM_URL}/registry/discover/{workspace_id}",
+        headers={"X-Workspace-ID": WORKSPACE_ID},
+    )
+    target_url = discover_resp.json()["url"]
 
-            if not target:
-                raise WorkspaceNotFoundError(workspace_id)
-            if target["status"] == "offline":
-                raise WorkspaceOfflineError(workspace_id)
+    # 2. Send A2A message/send with retry
+    for attempt in range(DELEGATION_RETRY_ATTEMPTS):
+        a2a_resp = await client.post(target_url, json={...})  # JSON-RPC 2.0
+        if a2a_resp.status_code == 200:
+            return {"success": True, "response": extract_text(a2a_resp)}
+        await asyncio.sleep(DELEGATION_RETRY_DELAY * (attempt + 1))
 
-            result = await send_a2a_task(target["url"], task)
-            if result["status"] == "completed":
-                return result["artifacts"]
-            if result["status"] == "failed":
-                last_error = result.get("error")
-                break  # don't retry explicit failures
-
-        except (ConnectionError, TimeoutError) as e:
-            last_error = str(e)
-            if attempt < retry_attempts - 1:
-                await asyncio.sleep(retry_delay * (attempt + 1))
-            continue
-
-    # try fallback workspace if configured
-    if fallback:
-        return await delegate_to_workspace(
-            fallback, task,
-            retry_attempts=1,
-            escalate_on_failure=escalate_on_failure,
-        )
-
-    # return failure to LLM for decision
-    if escalate_on_failure:
-        return {
-            "success": False,
-            "error": last_error,
-            "workspace_id": workspace_id,
-            "message": f"Delegation to {workspace_id} failed after "
-                      f"{retry_attempts} attempts."
-        }
-    raise DelegationFailedError(workspace_id, last_error)
+    return {"success": False, "error": last_error, "workspace_id": workspace_id}
 ```
+
+Note: The delegation tool sends A2A requests to the **root URL** of the target workspace (not `/a2a`), as the `a2a-sdk` serves all routes at root.
 
 ### Why the LLM Decides
 

@@ -461,7 +461,7 @@ Frontend Agent 收到拒绝，采取替代方案 ✅
           ↕ A2A JSON-RPC 2.0 (Direct, P2P)
 ┌─────────────────────────────────────────────────────────────┐
 │              Workspace Runtime (per instance)                │
-│         Python · Deep Agents · LangGraph · a2a-python        │
+│         Python · Deep Agents · LangGraph · a2a-sdk        │
 │                                                             │
 │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
 │  │ Agent   │ │  Skills  │ │ Heartbeat│ │  Memory  │         │
@@ -489,7 +489,7 @@ Frontend Agent 收到拒绝，采取替代方案 ✅
 | **Runtime** | Python | 3.11+ | Deep Agents / LangGraph 的原生语言 |
 | **Runtime** | Deep Agents | 0.4+ | Agent 封装（TODO 规划、子 Agent、文件系统记忆） |
 | **Runtime** | LangGraph | latest | Agent 循环、状态持久化、流式处理、Human-in-the-Loop |
-| **Runtime** | a2a-python | latest | A2A 服务端包装（JSON-RPC 路由 + Agent Card 自动发布） |
+| **Runtime** | a2a-sdk | latest | A2A 服务端包装（JSON-RPC 路由 + Agent Card 自动发布） |
 | **Observability** | Langfuse | 3.x (self-hosted) | 开源可自托管，LangGraph 原生集成 |
 | **Infra** | Docker Compose | 2.x | 本地开发全栈启动 |
 

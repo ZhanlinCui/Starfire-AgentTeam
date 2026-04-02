@@ -8,6 +8,9 @@ from langchain_core.tools import tool
 
 PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
 WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "")
+DELEGATION_RETRY_ATTEMPTS = int(os.environ.get("DELEGATION_RETRY_ATTEMPTS", "3"))
+DELEGATION_RETRY_DELAY = float(os.environ.get("DELEGATION_RETRY_DELAY", "5.0"))
+DELEGATION_TIMEOUT = float(os.environ.get("DELEGATION_TIMEOUT", "120.0"))
 
 
 @tool
@@ -24,7 +27,7 @@ async def delegate_to_workspace(
     Returns:
         A dict with the result or error information.
     """
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=DELEGATION_TIMEOUT) as client:
         # Discover the target workspace URL
         try:
             discover_resp = await client.get(
@@ -56,12 +59,12 @@ async def delegate_to_workspace(
         except Exception as e:
             return {"success": False, "error": f"Discovery error: {e}"}
 
-        # Send A2A message/send
+        # Send A2A message/send (A2A SDK serves at root URL)
         last_error = None
-        for attempt in range(3):
+        for attempt in range(DELEGATION_RETRY_ATTEMPTS):
             try:
                 a2a_resp = await client.post(
-                    f"{target_url}/a2a",
+                    target_url,
                     json={
                         "jsonrpc": "2.0",
                         "method": "message/send",
@@ -98,15 +101,15 @@ async def delegate_to_workspace(
 
             except (httpx.ConnectError, httpx.TimeoutException) as e:
                 last_error = str(e)
-                if attempt < 2:
-                    await asyncio.sleep(5.0 * (attempt + 1))
+                if attempt < DELEGATION_RETRY_ATTEMPTS - 1:
+                    await asyncio.sleep(DELEGATION_RETRY_DELAY * (attempt + 1))
                 continue
 
         return {
             "success": False,
             "error": last_error,
             "workspace_id": workspace_id,
-            "message": f"Delegation to {workspace_id} failed after 3 attempts.",
+            "message": f"Delegation to {workspace_id} failed after {DELEGATION_RETRY_ATTEMPTS} attempts.",
         }
 
 

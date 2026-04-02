@@ -31,6 +31,18 @@ All scoped endpoints use the `X-Workspace-ID` header to identify the calling wor
 | `POST` | `/workspaces/:id/expand` | Expand workspace into a team (provisions sub-workspaces from config) |
 | `POST` | `/workspaces/:id/collapse` | Collapse team back to single workspace (stops sub-workspaces) |
 | `POST` | `/workspaces/:id/retry` | Retry failed provisioning |
+| `POST` | `/workspaces/:id/a2a` | Proxy A2A JSON-RPC to workspace agent (for canvas chat) |
+
+### Config & Memory
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/workspaces/:id/config` | Get workspace config as JSON |
+| `PATCH` | `/workspaces/:id/config` | Update workspace config |
+| `GET` | `/workspaces/:id/memory` | List all memory entries |
+| `GET` | `/workspaces/:id/memory/:key` | Get a specific memory entry |
+| `POST` | `/workspaces/:id/memory` | Set a memory entry (body: `{ key, value, ttl_seconds? }`) |
+| `DELETE` | `/workspaces/:id/memory/:key` | Delete a memory entry |
 
 ### Agents
 
