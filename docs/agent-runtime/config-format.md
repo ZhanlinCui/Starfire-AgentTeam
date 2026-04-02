@@ -16,12 +16,16 @@ tier: 1
 model: anthropic:claude-sonnet-4-6
 
 # Prompt files loaded in order into the system prompt.
-# Supports any agent framework's file structure:
-#   OpenClaw: SOUL.md, BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md, TOOLS.md, USER.md
-#   Claude Code: CLAUDE.md
-#   Default (if omitted): system-prompt.md
+# Supports any agent framework's file structure.
+# Default (if omitted): system-prompt.md
 prompt_files:
   - system-prompt.md
+# OpenClaw example:
+#   prompt_files: [SOUL.md, BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md, TOOLS.md, USER.md, MEMORY.md]
+# Claude Code example:
+#   prompt_files: [CLAUDE.md]
+# OpenAI Codex example:
+#   prompt_files: [AGENTS.md]
 
 # Skills to load -- folder names under skills/
 skills:
