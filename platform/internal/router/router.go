@@ -3,12 +3,13 @@ package router
 import (
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/handlers"
+	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/ws"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(hub *ws.Hub, broadcaster *events.Broadcaster) *gin.Engine {
+func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provisioner, platformURL, configsDir string) *gin.Engine {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -24,12 +25,13 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster) *gin.Engine {
 	})
 
 	// Workspaces CRUD
-	wh := handlers.NewWorkspaceHandler(broadcaster)
+	wh := handlers.NewWorkspaceHandler(broadcaster, prov, platformURL, configsDir)
 	r.POST("/workspaces", wh.Create)
 	r.GET("/workspaces", wh.List)
 	r.GET("/workspaces/:id", wh.Get)
 	r.PATCH("/workspaces/:id", wh.Update)
 	r.DELETE("/workspaces/:id", wh.Delete)
+	r.POST("/workspaces/:id/retry", wh.Retry)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
 	// Registry

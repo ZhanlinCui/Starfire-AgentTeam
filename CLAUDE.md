@@ -110,6 +110,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | GET/PATCH | /workspaces/:id/config | workspace.go |
 | GET/POST | /workspaces/:id/memory | workspace.go |
 | DELETE | /workspaces/:id/memory/:key | workspace.go |
+| POST | /workspaces/:id/retry | workspace.go |
 | POST | /workspaces/:id/a2a | workspace.go |
 | POST | /registry/register | registry.go |
 | POST | /registry/heartbeat | registry.go |

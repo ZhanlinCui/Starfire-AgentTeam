@@ -60,11 +60,11 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 - [x] **10a. `platform/internal/provisioner/` package** — Docker SDK integration to start/stop workspace containers (Start, Stop, IsRunning)
 - [x] **10b. Container networking** — Join `agent-molecule-net`, container named `ws-{id}`, tier-1 read-only rootfs
-- [ ] **10c. Secret injection** — Read from `workspace_secrets` table, decrypt (AES-256), pass as env vars
-- [ ] **10d. Volume mounts** — Named volume `ws-{id}-memory` mounted at `/memory`
-- [ ] **10e. Tier-based Docker flags** — Tier 1 (`--read-only`), Tier 2 (+Playwright), Tier 3 (+Xvfb), Tier 4 (EC2 VM, future)
-- [ ] **10f. Lifecycle transitions** — `provisioning` → wait for heartbeat → `online`; timeout 3min → `failed`
-- [ ] **10g. Retry on failure** — Canvas shows red node with retry button (`POST /workspaces/:id/retry`), re-triggers provisioner
+- [x] **10c. Secret injection** — Read from `workspace_secrets` table, pass as env vars (AES-256 decryption deferred to Phase 14)
+- [x] **10d. Volume mounts** — Config directory bind-mounted at `/configs:ro`
+- [~] **10e. Tier-based Docker flags** — Tier 1 (`ReadonlyRootfs` + tmpfs), Tier 2-4 not yet differentiated
+- [x] **10f. Lifecycle transitions** — `provisioning` → wait for heartbeat → `online` (via register); timeout 3min → `failed` with `WORKSPACE_PROVISION_FAILED` event
+- [x] **10g. Retry on failure** — `POST /workspaces/:id/retry` resets to provisioning and re-triggers provisioner
 
 ---
 

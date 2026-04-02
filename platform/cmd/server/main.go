@@ -9,6 +9,7 @@ import (
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
+	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/registry"
 	"github.com/agent-molecule/platform/internal/router"
 	"github.com/agent-molecule/platform/internal/ws"
@@ -53,10 +54,21 @@ func main() {
 		}
 	})
 
-	// Router
-	r := router.Setup(hub, broadcaster)
+	// Provisioner (optional — gracefully degrades if Docker not available)
+	var prov *provisioner.Provisioner
+	if p, err := provisioner.New(); err != nil {
+		log.Printf("Provisioner disabled (Docker not available): %v", err)
+	} else {
+		prov = p
+		defer prov.Close()
+	}
 
 	port := envOr("PORT", "8080")
+	platformURL := fmt.Sprintf("http://localhost:%s", port)
+	configsDir := envOr("CONFIGS_DIR", "workspace-configs-templates")
+
+	// Router
+	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir)
 	log.Printf("Platform starting on :%s", port)
 	if err := r.Run(fmt.Sprintf(":%s", port)); err != nil {
 		log.Fatalf("Server failed: %v", err)

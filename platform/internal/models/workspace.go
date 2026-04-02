@@ -52,6 +52,7 @@ type UpdateCardPayload struct {
 type CreateWorkspacePayload struct {
 	Name     string  `json:"name" binding:"required"`
 	Role     string  `json:"role"`
+	Template string  `json:"template"` // workspace-configs-templates folder name
 	Tier     int     `json:"tier"`
 	Model    string  `json:"model"`
 	ParentID *string `json:"parent_id"`

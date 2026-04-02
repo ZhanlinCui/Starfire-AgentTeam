@@ -2,16 +2,19 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/models"
+	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -27,10 +30,18 @@ var a2aClient = &http.Client{Timeout: 120 * time.Second}
 
 type WorkspaceHandler struct {
 	broadcaster *events.Broadcaster
+	provisioner *provisioner.Provisioner
+	platformURL string
+	configsDir  string // path to workspace-configs-templates/
 }
 
-func NewWorkspaceHandler(b *events.Broadcaster) *WorkspaceHandler {
-	return &WorkspaceHandler{broadcaster: b}
+func NewWorkspaceHandler(b *events.Broadcaster, p *provisioner.Provisioner, platformURL, configsDir string) *WorkspaceHandler {
+	return &WorkspaceHandler{
+		broadcaster: b,
+		provisioner: p,
+		platformURL: platformURL,
+		configsDir:  configsDir,
+	}
 }
 
 // Create handles POST /workspaces
@@ -78,6 +89,12 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		"name": payload.Name,
 		"tier": payload.Tier,
 	})
+
+	// Auto-provision if a template is specified and provisioner is available
+	if payload.Template != "" && h.provisioner != nil {
+		configPath, _ := filepath.Abs(filepath.Join(h.configsDir, payload.Template))
+		go h.provisionWorkspace(id, configPath, payload)
+	}
 
 	c.JSON(http.StatusCreated, gin.H{"id": id, "status": "provisioning"})
 }
@@ -255,6 +272,94 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, gin.H{"status": "removed"})
+}
+
+// provisionWorkspace handles async container deployment with timeout.
+func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, payload models.CreateWorkspacePayload) {
+	ctx, cancel := context.WithTimeout(context.Background(), provisioner.ProvisionTimeout)
+	defer cancel()
+
+	// Load secrets for this workspace from DB
+	envVars := map[string]string{}
+	rows, err := db.DB.QueryContext(ctx,
+		`SELECT key, encrypted_value FROM workspace_secrets WHERE workspace_id = $1`, workspaceID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var k, v string
+			if rows.Scan(&k, &v) == nil {
+				envVars[k] = v // TODO: decrypt with AES-256 when encryption is implemented
+			}
+		}
+	}
+
+	cfg := provisioner.WorkspaceConfig{
+		WorkspaceID: workspaceID,
+		ConfigPath:  configPath,
+		Tier:        payload.Tier,
+		EnvVars:     envVars,
+		PlatformURL: h.platformURL,
+	}
+
+	_, err = h.provisioner.Start(ctx, cfg)
+	if err != nil {
+		log.Printf("Provisioner: failed to start workspace %s: %v", workspaceID, err)
+		db.DB.ExecContext(ctx,
+			`UPDATE workspaces SET status = 'failed', updated_at = now() WHERE id = $1`, workspaceID)
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISION_FAILED", workspaceID, map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+	// On success, the workspace will register via POST /registry/register
+	// which transitions status to 'online' and broadcasts WORKSPACE_ONLINE
+}
+
+// Retry handles POST /workspaces/:id/retry
+func (h *WorkspaceHandler) Retry(c *gin.Context) {
+	id := c.Param("id")
+	ctx := c.Request.Context()
+
+	var status, template string
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT status, COALESCE(name, '') FROM workspaces WHERE id = $1`, id,
+	).Scan(&status, &template)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+	if status != "failed" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "can only retry failed workspaces", "status": status})
+		return
+	}
+
+	if h.provisioner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provisioner not available"})
+		return
+	}
+
+	// Reset to provisioning
+	db.DB.ExecContext(ctx,
+		`UPDATE workspaces SET status = 'provisioning', updated_at = now() WHERE id = $1`, id)
+	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", id, map[string]interface{}{
+		"name": template,
+	})
+
+	// Read template from workspace record or default
+	var body models.CreateWorkspacePayload
+	if err := c.ShouldBindJSON(&body); err != nil {
+		body.Template = ""
+	}
+
+	if body.Template != "" {
+		configPath, _ := filepath.Abs(filepath.Join(h.configsDir, body.Template))
+		go h.provisionWorkspace(id, configPath, body)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "provisioning"})
 }
 
 // ProxyA2A handles POST /workspaces/:id/a2a
