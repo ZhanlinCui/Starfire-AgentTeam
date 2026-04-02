@@ -5,6 +5,7 @@ import (
 	"github.com/agent-molecule/platform/internal/handlers"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/ws"
+	"github.com/docker/docker/client"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -77,8 +78,12 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.DELETE("/workspaces/:id/secrets/:key", sech.Delete)
 	r.GET("/workspaces/:id/model", sech.GetModel)
 
-	// Terminal
-	th := handlers.NewTerminalHandler()
+	// Terminal — shares Docker client with provisioner
+	var dockerCli *client.Client
+	if prov != nil {
+		dockerCli = prov.DockerClient()
+	}
+	th := handlers.NewTerminalHandler(dockerCli)
 	r.GET("/workspaces/:id/terminal", th.HandleConnect)
 
 	// Bundles

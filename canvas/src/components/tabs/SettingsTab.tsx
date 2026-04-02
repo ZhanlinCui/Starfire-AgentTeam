@@ -29,7 +29,7 @@ export function SettingsTab({ workspaceId }: Props) {
   const [showAdd, setShowAdd] = useState(false);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [customSaving, setCustomSaving] = useState(false);
 
   const loadSecrets = useCallback(async () => {
     setLoading(true);
@@ -49,7 +49,6 @@ export function SettingsTab({ workspaceId }: Props) {
   }, [loadSecrets]);
 
   const handleSave = async (key: string, value: string) => {
-    setSaving(true);
     setError(null);
     try {
       await api.post(`/workspaces/${workspaceId}/secrets`, { key, value });
@@ -59,8 +58,6 @@ export function SettingsTab({ workspaceId }: Props) {
       loadSecrets();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -99,7 +96,6 @@ export function SettingsTab({ workspaceId }: Props) {
               isSet={configuredKeys.has(key)}
               onSave={(value) => handleSave(key, value)}
               onDelete={() => handleDelete(key)}
-              saving={saving}
             />
           ))}
         </div>
@@ -141,8 +137,13 @@ export function SettingsTab({ workspaceId }: Props) {
             />
             <div className="flex gap-2">
               <button
-                onClick={() => newKey && newValue && handleSave(newKey, newValue)}
-                disabled={!newKey || !newValue || saving}
+                onClick={async () => {
+                  if (!newKey || !newValue) return;
+                  setCustomSaving(true);
+                  await handleSave(newKey, newValue);
+                  setCustomSaving(false);
+                }}
+                disabled={!newKey || !newValue || customSaving}
                 className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-xs rounded text-white disabled:opacity-30"
               >
                 Save
@@ -178,17 +179,16 @@ function QuickSetRow({
   isSet,
   onSave,
   onDelete,
-  saving,
 }: {
   label: string;
   secretKey: string;
   isSet: boolean;
   onSave: (value: string) => void;
   onDelete: () => void;
-  saving: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
 
   return (
     <div className="bg-zinc-800 rounded px-3 py-2 border border-zinc-700">
@@ -227,7 +227,13 @@ function QuickSetRow({
             className="flex-1 bg-zinc-900 border border-zinc-600 rounded px-2 py-1 text-xs text-zinc-100 font-mono focus:outline-none focus:border-blue-500"
           />
           <button
-            onClick={() => { onSave(value); setEditing(false); setValue(""); }}
+            onClick={async () => {
+              setSaving(true);
+              onSave(value);
+              setEditing(false);
+              setValue("");
+              setSaving(false);
+            }}
             disabled={!value || saving}
             className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-xs rounded text-white disabled:opacity-30"
           >

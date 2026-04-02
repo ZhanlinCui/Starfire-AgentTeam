@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 interface Props {
   workspaceId: string;
@@ -10,21 +10,34 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL?.replace("/ws", "") || "ws://local
 
 export function TerminalTab({ workspaceId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<unknown>(null);
+  const termRef = useRef<{ dispose: () => void } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "error">("disconnected");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [connectKey, setConnectKey] = useState(0);
+
+  const cleanup = useCallback(() => {
+    wsRef.current?.close();
+    wsRef.current = null;
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    termRef.current?.dispose();
+    termRef.current = null;
+  }, []);
 
   useEffect(() => {
-    let terminal: { dispose: () => void } | null = null;
-    let socket: WebSocket | null = null;
+    if (!containerRef.current) return;
+
+    let cancelled = false;
 
     async function init() {
-      if (!containerRef.current) return;
+      const el = containerRef.current;
+      if (!el || cancelled) return;
 
-      // Dynamic import to avoid SSR issues
       const { Terminal } = await import("xterm");
       const { FitAddon } = await import("@xterm/addon-fit");
+      if (cancelled) return;
 
       const fitAddon = new FitAddon();
       const term = new Terminal({
@@ -40,21 +53,19 @@ export function TerminalTab({ workspaceId }: Props) {
       });
 
       term.loadAddon(fitAddon);
-      term.open(containerRef.current);
+      term.open(el);
       fitAddon.fit();
-
-      terminal = term;
       termRef.current = term;
 
-      // Connect WebSocket to platform terminal proxy
+      // Connect WebSocket
       setStatus("connecting");
       const wsUrl = `${WS_URL}/workspaces/${workspaceId}/terminal`;
-      socket = new WebSocket(wsUrl);
+      const socket = new WebSocket(wsUrl);
       wsRef.current = socket;
-
       socket.binaryType = "arraybuffer";
 
       socket.onopen = () => {
+        if (cancelled) return;
         setStatus("connected");
         setErrorMsg(null);
         term.writeln("\x1b[32mConnected to workspace shell\x1b[0m");
@@ -71,45 +82,42 @@ export function TerminalTab({ workspaceId }: Props) {
       };
 
       socket.onclose = () => {
+        if (cancelled) return;
         setStatus("disconnected");
         term.writeln("");
         term.writeln("\x1b[33mSession ended\x1b[0m");
       };
 
       socket.onerror = () => {
+        if (cancelled) return;
         setStatus("error");
         setErrorMsg("Failed to connect — is the workspace container running?");
       };
 
-      // Send keystrokes to container
       term.onData((data: string) => {
-        if (socket?.readyState === WebSocket.OPEN) {
+        if (socket.readyState === WebSocket.OPEN) {
           socket.send(data);
         }
       });
 
-      // Handle resize
       const observer = new ResizeObserver(() => fitAddon.fit());
-      observer.observe(containerRef.current);
-
-      return () => observer.disconnect();
+      observer.observe(el);
+      observerRef.current = observer;
     }
 
-    const cleanup = init();
+    init();
 
     return () => {
-      cleanup?.then?.((fn) => fn?.());
-      socket?.close();
-      terminal?.dispose();
+      cancelled = true;
+      cleanup();
     };
-  }, [workspaceId]);
+  }, [workspaceId, connectKey, cleanup]);
 
-  const reconnect = () => {
-    wsRef.current?.close();
-    setStatus("connecting");
-    // Re-mount by changing key
+  const reconnect = useCallback(() => {
+    cleanup();
     setErrorMsg(null);
-  };
+    setConnectKey((k) => k + 1);
+  }, [cleanup]);
 
   return (
     <div className="flex flex-col h-full">

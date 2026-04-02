@@ -4,10 +4,13 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"regexp"
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/gin-gonic/gin"
 )
+
+var uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 type SecretsHandler struct{}
 
@@ -19,6 +22,10 @@ func NewSecretsHandler() *SecretsHandler {
 // Returns keys only — never exposes values to the frontend.
 func (h *SecretsHandler) List(c *gin.Context) {
 	workspaceID := c.Param("id")
+	if !uuidRegex.MatchString(workspaceID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace ID"})
+		return
+	}
 	ctx := c.Request.Context()
 
 	rows, err := db.DB.QueryContext(ctx,
@@ -51,6 +58,10 @@ func (h *SecretsHandler) List(c *gin.Context) {
 // Set handles POST /workspaces/:id/secrets
 func (h *SecretsHandler) Set(c *gin.Context) {
 	workspaceID := c.Param("id")
+	if !uuidRegex.MatchString(workspaceID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace ID"})
+		return
+	}
 	ctx := c.Request.Context()
 
 	var body struct {
@@ -80,6 +91,10 @@ func (h *SecretsHandler) Set(c *gin.Context) {
 // Delete handles DELETE /workspaces/:id/secrets/:key
 func (h *SecretsHandler) Delete(c *gin.Context) {
 	workspaceID := c.Param("id")
+	if !uuidRegex.MatchString(workspaceID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace ID"})
+		return
+	}
 	key := c.Param("key")
 	ctx := c.Request.Context()
 
@@ -107,10 +122,10 @@ func (h *SecretsHandler) GetModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// Check if MODEL_PROVIDER secret exists
-	var model string
+	var modelBytes []byte
 	err := db.DB.QueryRowContext(ctx,
 		`SELECT encrypted_value FROM workspace_secrets WHERE workspace_id = $1 AND key = 'MODEL_PROVIDER'`,
-		workspaceID).Scan(&model)
+		workspaceID).Scan(&modelBytes)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusOK, gin.H{"model": "", "source": "default"})
 		return
@@ -120,5 +135,5 @@ func (h *SecretsHandler) GetModel(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"model": model, "source": "workspace_secrets"})
+	c.JSON(http.StatusOK, gin.H{"model": string(modelBytes), "source": "workspace_secrets"})
 }

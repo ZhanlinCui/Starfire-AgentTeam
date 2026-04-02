@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"context"
 	"io"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -12,25 +13,26 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+const terminalSessionTimeout = 30 * time.Minute
+
+var termUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		return origin == "" ||
+			strings.HasPrefix(origin, "http://localhost:") ||
+			strings.HasPrefix(origin, "https://localhost:")
+	},
 }
 
 type TerminalHandler struct {
 	docker *client.Client
 }
 
-func NewTerminalHandler() *TerminalHandler {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		log.Printf("Terminal handler: Docker not available: %v", err)
-		return &TerminalHandler{}
-	}
+func NewTerminalHandler(cli *client.Client) *TerminalHandler {
 	return &TerminalHandler{docker: cli}
 }
 
 // HandleConnect handles WS /workspaces/:id/terminal
-// Upgrades to WebSocket, creates a docker exec session, and bridges stdin/stdout.
 func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 	if h.docker == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Docker not available"})
@@ -39,14 +41,14 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 
 	workspaceID := c.Param("id")
 
-	// Find the container name
+	// Container name matches provisioner naming
 	containerName := "ws-" + workspaceID
 	if len(workspaceID) > 12 {
 		containerName = "ws-" + workspaceID[:12]
 	}
 
-	// Verify container is running
-	ctx := context.Background()
+	// Verify container is running using request context
+	ctx := c.Request.Context()
 	info, err := h.docker.ContainerInspect(ctx, containerName)
 	if err != nil || !info.State.Running {
 		c.JSON(http.StatusNotFound, gin.H{"error": "container not running"})
@@ -54,12 +56,17 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 	}
 
 	// Upgrade to WebSocket
-	conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := termUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("Terminal WebSocket upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
+
+	// Set session timeout — auto-close after 30 minutes
+	deadline := time.Now().Add(terminalSessionTimeout)
+	conn.SetReadDeadline(deadline)
+	conn.SetWriteDeadline(deadline)
 
 	// Create exec instance
 	execCfg := container.ExecOptions{
@@ -87,7 +94,9 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 	defer resp.Close()
 
 	// Bridge: container stdout → WebSocket
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		buf := make([]byte, 4096)
 		for {
 			n, err := resp.Reader.Read(buf)
@@ -115,5 +124,9 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 		if _, err := resp.Conn.Write(msg); err != nil {
 			break
 		}
+		// Reset read deadline on activity
+		conn.SetReadDeadline(time.Now().Add(terminalSessionTimeout))
 	}
+
+	<-done
 }

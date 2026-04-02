@@ -156,6 +156,11 @@ func (p *Provisioner) IsRunning(ctx context.Context, workspaceID string) (bool, 
 	return info.State.Running, nil
 }
 
+// DockerClient returns the underlying Docker client for sharing with other handlers.
+func (p *Provisioner) DockerClient() *client.Client {
+	return p.cli
+}
+
 // Close cleans up the Docker client.
 func (p *Provisioner) Close() error {
 	return p.cli.Close()
