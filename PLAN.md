@@ -47,7 +47,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **9b. `GET /registry/:id/peers`** — discovery endpoint (`handlers/discovery.go`)
 - [x] **9c. `POST /registry/check-access`** — endpoint exists
 - [x] **9d. `GET /registry/discover/:id`** — resolve workspace URL with scoped access (`handlers/discovery.go`)
-- [ ] **9e. Canvas drag-to-nest** — drag a node into another to set `parent_id` (per `docs/frontend/canvas.md` nesting mechanic)
+- [x] **9e. Canvas drag-to-nest** — drag a node onto another to set `parent_id`, green ring drop target highlight, un-nest on drop to canvas background, circular hierarchy prevention
 - [ ] **9f. Delegation tool testing** — `workspace-template/tools/delegation.py` exists but needs e2e test: Agent A delegates to Agent B via A2A, platform enforces access
 - [ ] **9g. Delegation failure handling** — 3x retry + exponential backoff + optional fallback workspace (PRD F3.7, `docs/agent-runtime/config-format.md` delegation config)
 - [ ] **9h. Workspace forwarding** — `forwarded_to` column for version replacement, team expansion routing, reorganization (per `docs/api-protocol/registry-and-heartbeat.md`)
@@ -58,8 +58,8 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Platform can deploy workspace containers on demand (per `docs/architecture/provisioner.md`).
 
-- [ ] **10a. `platform/internal/provisioner/` package** — Docker SDK integration to start/stop workspace containers
-- [ ] **10b. Container networking** — Join `agent-molecule-net`, address as `http://ws-{id}:8000`
+- [x] **10a. `platform/internal/provisioner/` package** — Docker SDK integration to start/stop workspace containers (Start, Stop, IsRunning)
+- [x] **10b. Container networking** — Join `agent-molecule-net`, container named `ws-{id}`, tier-1 read-only rootfs
 - [ ] **10c. Secret injection** — Read from `workspace_secrets` table, decrypt (AES-256), pass as env vars
 - [ ] **10d. Volume mounts** — Named volume `ws-{id}-memory` mounted at `/memory`
 - [ ] **10e. Tier-based Docker flags** — Tier 1 (`--read-only`), Tier 2 (+Playwright), Tier 3 (+Xvfb), Tier 4 (EC2 VM, future)

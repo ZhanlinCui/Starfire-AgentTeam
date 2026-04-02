@@ -16,6 +16,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
   const tierLabel = TIER_LABELS[data.tier] || `T${data.tier}`;
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
   const selectNode = useCanvasStore((s) => s.selectNode);
+  const isDragTarget = useCanvasStore((s) => s.dragOverNodeId === id);
   const isSelected = selectedNodeId === id;
 
   const skills = getSkillNames(data.agentCard as Record<string, unknown> | null);
@@ -27,7 +28,9 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         selectNode(isSelected ? null : id);
       }}
       className={`rounded-lg border bg-zinc-900 shadow-lg min-w-[180px] px-3 py-2 cursor-pointer transition-all ${
-        isSelected
+        isDragTarget
+          ? "border-green-500 ring-2 ring-green-500/40 shadow-green-500/20 scale-105"
+          : isSelected
           ? "border-blue-500 ring-1 ring-blue-500/50 shadow-blue-500/20"
           : "border-zinc-700 hover:border-zinc-500"
       }`}

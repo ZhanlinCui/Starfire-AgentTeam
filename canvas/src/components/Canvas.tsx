@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
+  useReactFlow,
   type OnNodeDrag,
   type Node,
   BackgroundVariant,
@@ -22,18 +24,62 @@ const nodeTypes = {
 };
 
 export function Canvas() {
+  return (
+    <ReactFlowProvider>
+      <CanvasInner />
+    </ReactFlowProvider>
+  );
+}
+
+function CanvasInner() {
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const onNodesChange = useCanvasStore((s) => s.onNodesChange);
   const savePosition = useCanvasStore((s) => s.savePosition);
   const selectNode = useCanvasStore((s) => s.selectNode);
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
+  const setDragOverNode = useCanvasStore((s) => s.setDragOverNode);
+  const nestNode = useCanvasStore((s) => s.nestNode);
+  const isDescendant = useCanvasStore((s) => s.isDescendant);
+  const dragStartParentRef = useRef<string | null>(null);
+  const { getIntersectingNodes } = useReactFlow();
+
+  const onNodeDragStart: OnNodeDrag<Node<WorkspaceNodeData>> = useCallback(
+    (_event, node) => {
+      dragStartParentRef.current = (node.data as WorkspaceNodeData).parentId;
+    },
+    []
+  );
+
+  const onNodeDrag: OnNodeDrag<Node<WorkspaceNodeData>> = useCallback(
+    (_event, node) => {
+      const intersecting = getIntersectingNodes(node);
+      const target = intersecting.find(
+        (n) => n.id !== node.id && !isDescendant(node.id, n.id)
+      );
+      setDragOverNode(target?.id ?? null);
+    },
+    [getIntersectingNodes, isDescendant, setDragOverNode]
+  );
 
   const onNodeDragStop: OnNodeDrag<Node<WorkspaceNodeData>> = useCallback(
     (_event, node) => {
+      const { dragOverNodeId } = useCanvasStore.getState();
+      setDragOverNode(null);
+
+      if (dragOverNodeId) {
+        nestNode(node.id, dragOverNodeId);
+      } else {
+        // Dropped on empty canvas — un-nest if previously nested
+        const currentParentId = (node.data as WorkspaceNodeData).parentId;
+        if (currentParentId) {
+          nestNode(node.id, null);
+        }
+      }
+
       savePosition(node.id, node.position.x, node.position.y);
     },
-    [savePosition]
+    [savePosition, setDragOverNode, nestNode]
   );
 
   const onPaneClick = useCallback(() => {
@@ -46,6 +92,8 @@ export function Canvas() {
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}

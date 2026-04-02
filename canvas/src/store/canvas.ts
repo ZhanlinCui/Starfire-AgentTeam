@@ -29,6 +29,7 @@ interface CanvasState {
   edges: Edge[];
   selectedNodeId: string | null;
   panelTab: PanelTab;
+  dragOverNodeId: string | null;
   hydrate: (workspaces: WorkspaceData[]) => void;
   applyEvent: (msg: WSMessage) => void;
   onNodesChange: (changes: NodeChange<Node<WorkspaceNodeData>>[]) => void;
@@ -38,6 +39,9 @@ interface CanvasState {
   getSelectedNode: () => Node<WorkspaceNodeData> | null;
   updateNodeData: (id: string, data: Partial<WorkspaceNodeData>) => void;
   removeNode: (id: string) => void;
+  setDragOverNode: (id: string | null) => void;
+  nestNode: (draggedId: string, targetId: string | null) => Promise<void>;
+  isDescendant: (ancestorId: string, nodeId: string) => boolean;
 }
 
 function buildNodesAndEdges(workspaces: WorkspaceData[]) {
@@ -80,9 +84,67 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   edges: [],
   selectedNodeId: null,
   panelTab: "details",
+  dragOverNodeId: null,
 
   selectNode: (id) => set({ selectedNodeId: id }),
   setPanelTab: (tab) => set({ panelTab: tab }),
+  setDragOverNode: (id) => set({ dragOverNodeId: id }),
+
+  isDescendant: (ancestorId, nodeId) => {
+    const { nodes } = get();
+    let current = nodes.find((n) => n.id === nodeId);
+    while (current) {
+      if (current.data.parentId === ancestorId) return true;
+      current = nodes.find((n) => n.id === current!.data.parentId);
+    }
+    return false;
+  },
+
+  nestNode: async (draggedId, targetId) => {
+    const { nodes, edges } = get();
+    const currentParentId = nodes.find((n) => n.id === draggedId)?.data.parentId ?? null;
+
+    // No change needed
+    if (currentParentId === targetId) return;
+
+    // Optimistic update: move edges and parentId
+    const newEdges = edges.filter(
+      (e) => !(e.target === draggedId && e.source === currentParentId)
+    );
+    if (targetId) {
+      newEdges.push({
+        id: `edge-${targetId}-${draggedId}`,
+        source: targetId,
+        target: draggedId,
+        animated: true,
+        style: { stroke: "#525252" },
+      });
+    }
+
+    set({
+      nodes: nodes.map((n) =>
+        n.id === draggedId
+          ? { ...n, data: { ...n.data, parentId: targetId } }
+          : n
+      ),
+      edges: newEdges,
+    });
+
+    // Persist to API
+    try {
+      await api.patch(`/workspaces/${draggedId}`, { parent_id: targetId });
+    } catch {
+      // Revert on failure
+      set({
+        nodes: get().nodes.map((n) =>
+          n.id === draggedId
+            ? { ...n, data: { ...n.data, parentId: currentParentId } }
+            : n
+        ),
+        edges,
+      });
+    }
+  },
 
   getSelectedNode: () => {
     const { nodes, selectedNodeId } = get();
