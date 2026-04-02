@@ -64,7 +64,10 @@ export function ChatTab({ workspaceId, data }: Props) {
 
     try {
       // Proxy A2A message/send through the platform to avoid CORS/network issues
-      const res = await api.post<{ result: Record<string, unknown> }>(
+      const res = await api.post<{
+        result?: Record<string, unknown>;
+        error?: { code: number; message: string };
+      }>(
         `/workspaces/${workspaceId}/a2a`,
         {
           method: "message/send",
@@ -77,11 +80,24 @@ export function ChatTab({ workspaceId, data }: Props) {
         }
       );
 
-      const agentText = extractAgentText(res.result);
-      setMessages((prev) => [
-        ...prev,
-        createMessage("agent", agentText || "(empty response)"),
-      ]);
+      // Handle JSON-RPC error response
+      if (res.error) {
+        setMessages((prev) => [
+          ...prev,
+          createMessage("system", `Agent error: ${res.error!.message}`),
+        ]);
+      } else if (res.result) {
+        const agentText = extractAgentText(res.result);
+        setMessages((prev) => [
+          ...prev,
+          createMessage("agent", agentText || "(empty response)"),
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          createMessage("system", "No response from agent"),
+        ]);
+      }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : "Unknown error";
       setMessages((prev) => [

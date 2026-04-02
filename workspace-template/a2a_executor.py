@@ -38,15 +38,28 @@ class LangGraphA2AExecutor(AgentExecutor):
 
         # Stream through LangGraph agent
         final_content = ""
-        async for chunk in self.agent.astream(
-            {"messages": [("user", user_input)]},
-            config={"configurable": {"thread_id": context.context_id}},
-        ):
-            if "messages" in chunk:
-                last_msg = chunk["messages"][-1]
-                content = getattr(last_msg, "content", str(last_msg))
-                if isinstance(content, str) and content.strip():
-                    final_content = content
+        try:
+            async for chunk in self.agent.astream(
+                {"messages": [("user", user_input)]},
+                config={"configurable": {"thread_id": context.context_id}},
+            ):
+                if "messages" in chunk:
+                    last_msg = chunk["messages"][-1]
+                    content = getattr(last_msg, "content", "")
+                    # Anthropic may return list of content blocks
+                    if isinstance(content, list):
+                        content = " ".join(
+                            block.get("text", "") if isinstance(block, dict) else str(block)
+                            for block in content
+                        ).strip()
+                    if isinstance(content, str) and content.strip():
+                        final_content = content
+        except Exception as e:
+            logger.error("A2A execute error: %s", e)
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"Agent error: {e}")
+            )
+            return
 
         if final_content:
             await event_queue.enqueue_event(
