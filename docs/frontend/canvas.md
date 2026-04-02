@@ -34,26 +34,17 @@ Edges between workspaces are rendered **automatically from the hierarchy** (pare
 
 ### Nesting Mechanic
 
-React Flow doesn't support native drag-into-group for setting parent/child — this is custom. Each workspace node acts as a drop zone. When dragging a node, valid parent workspaces highlight as drop targets. On drop, immediate `PATCH /workspaces/:id` with `parent_id` — no confirmation dialog. Nesting should feel like dragging files into folders.
+React Flow doesn't support native drag-into-group for setting parent/child — this is custom. The implementation uses React Flow's `getIntersectingNodes()` during drag to detect overlap with other nodes.
 
-```typescript
-// canvas/src/store/canvas.ts
+**How it works:**
+1. `onNodeDrag` — checks which nodes the dragged node overlaps with, finds the first valid drop target (not self, not a descendant of dragged node)
+2. Valid drop targets get a **green ring highlight** (`border-green-500 ring-2 scale-105`) via `dragOverNodeId` in the Zustand store
+3. `onNodeDragStop` — if over a target, calls `nestNode(draggedId, targetId)` which does an optimistic edge update + `PATCH /workspaces/:id` with `parent_id`
+4. If dropped on empty canvas background, un-nests the node (sets `parent_id` to null)
 
-const onNodeDrop = async (draggedId: string, targetId: string) => {
-  // prevent dropping onto itself or own descendant
-  if (draggedId === targetId) return
-  if (isDescendant(draggedId, targetId)) return
+Circular hierarchy prevention: `isDescendant(ancestorId, nodeId)` walks the parent chain to ensure you can't drop a node onto its own descendant.
 
-  await api.patch(`/workspaces/${draggedId}`, { parent_id: targetId })
-  // platform broadcasts WORKSPACE_MOVED → canvas updates via WebSocket
-}
-
-const onNodeDropOnCanvas = async (draggedId: string) => {
-  await api.patch(`/workspaces/${draggedId}`, { parent_id: null })
-}
-```
-
-The platform validates the move — rejects circular hierarchies or invalid targets with 400. Canvas shows a toast and snaps the node back on rejection.
+The Canvas component is wrapped in `ReactFlowProvider` to enable the `useReactFlow()` hook for `getIntersectingNodes()`.
 
 ## Live Updates via WebSocket
 
@@ -82,19 +73,25 @@ See [WebSocket Events](../api-protocol/websocket-events.md) for the full JSON pa
 
 ## Side Panel
 
-Clicking a workspace node opens a **420px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. It contains five tabs:
+Clicking a workspace node opens a **480px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. It contains seven tabs:
 
 | Tab | Component | Description |
 |-----|-----------|-------------|
-| **Details** | `DetailsTab` | Inline editing of name/role/tier, peer list from `/registry/:id/peers`, delete with confirmation |
-| **Chat** | `ChatTab` | Send A2A `message/send` to the workspace agent, discover agent URL via `/registry/discover/:id` |
+| **Details** | `DetailsTab` | Inline editing of name/role/tier, editable Agent Card (JSON), Restart button for offline/failed, peer list, delete with confirmation |
+| **Chat** | `ChatTab` | Send A2A `message/send` via platform proxy (`POST /workspaces/:id/a2a`), handles JSON-RPC errors |
+| **Settings** | `SettingsTab` | Configure LLM provider + API keys per workspace via `/workspaces/:id/secrets`, quick-set rows for common keys |
+| **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
 | **Config** | `ConfigTab` | JSON editor for workspace config, load via `GET /workspaces/:id/config`, save changes |
 | **Memory** | `MemoryTab` | Browse key/value memory entries from `GET /workspaces/:id/memory`, add new entries with optional TTL |
 | **Events** | `EventsTab` | Workspace-scoped event log from `GET /events/:workspaceId`, color-coded by event type |
 
 Tab state is managed in the Zustand store via `panelTab` and `setPanelTab`. The panel closes when the user clicks the close button or clicks the canvas background.
 
-The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, and delete removes it via `removeNode()`.
+The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, and Restart triggers `POST /workspaces/:id/restart`.
+
+The **Settings tab** stores API keys in the `workspace_secrets` table — values are never exposed to the browser (only key names are returned by `GET /workspaces/:id/secrets`).
+
+The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. Sessions have a 30-minute idle timeout.
 
 ## Creating Workspaces
 

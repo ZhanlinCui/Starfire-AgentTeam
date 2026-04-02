@@ -30,8 +30,8 @@ All scoped endpoints use the `X-Workspace-ID` header to identify the calling wor
 | `DELETE` | `/workspaces/:id` | Remove workspace |
 | `POST` | `/workspaces/:id/expand` | Expand workspace into a team (provisions sub-workspaces from config) |
 | `POST` | `/workspaces/:id/collapse` | Collapse team back to single workspace (stops sub-workspaces) |
-| `POST` | `/workspaces/:id/retry` | Retry failed provisioning |
-| `POST` | `/workspaces/:id/a2a` | Proxy A2A JSON-RPC to workspace agent (for canvas chat) |
+| `POST` | `/workspaces/:id/restart` | Restart offline/failed workspace (stops old container, re-provisions) |
+| `POST` | `/workspaces/:id/a2a` | Proxy A2A JSON-RPC to workspace agent (injects `messageId`, wraps envelope) |
 
 ### Config & Memory
 
@@ -43,6 +43,25 @@ All scoped endpoints use the `X-Workspace-ID` header to identify the calling wor
 | `GET` | `/workspaces/:id/memory/:key` | Get a specific memory entry |
 | `POST` | `/workspaces/:id/memory` | Set a memory entry (body: `{ key, value, ttl_seconds? }`) |
 | `DELETE` | `/workspaces/:id/memory/:key` | Delete a memory entry |
+
+### Secrets (API Keys & Env Vars)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/workspaces/:id/secrets` | List secret keys only (values never exposed to browser) |
+| `POST` | `/workspaces/:id/secrets` | Set a secret (body: `{ key, value }`) — upsert |
+| `DELETE` | `/workspaces/:id/secrets/:key` | Delete a secret |
+| `GET` | `/workspaces/:id/model` | Get current model override from secrets |
+
+Secrets are stored in `workspace_secrets` table as plaintext bytes for MVP (AES-256 encryption planned for Phase 14). The provisioner reads secrets at container deploy time and injects them as environment variables. Common keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MODEL_PROVIDER`.
+
+### Terminal
+
+| Protocol | Path | Description |
+|----------|------|-------------|
+| `WS` | `/workspaces/:id/terminal` | WebSocket shell session into workspace container |
+
+Upgrades to WebSocket, creates a Docker exec `/bin/sh` session, bridges stdin/stdout. Sessions auto-close after 30 minutes of inactivity. WebSocket origins restricted to localhost.
 
 ### Agents
 
