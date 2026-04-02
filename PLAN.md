@@ -72,10 +72,10 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Assign, replace, and move agents between workspaces (PRD F4, `docs/api-protocol/platform-api.md`).
 
-- [ ] **11a. `POST /workspaces/:id/agent`** — Assign agent (emits `AGENT_ASSIGNED`)
-- [ ] **11b. `PATCH /workspaces/:id/agent`** — Replace model (emits `AGENT_REPLACED`, graceful handoff writes state to memory)
-- [ ] **11c. `DELETE /workspaces/:id/agent`** — Remove agent (emits `AGENT_REMOVED`)
-- [ ] **11d. `POST /workspaces/:id/agent/move`** — Move agent to different workspace (emits `AGENT_MOVED` on both source and target)
+- [x] **11a. `POST /workspaces/:id/agent`** — Assign agent (emits `AGENT_ASSIGNED`, prevents duplicate active agents)
+- [x] **11b. `PATCH /workspaces/:id/agent`** — Replace model (emits `AGENT_REPLACED` with old_model, deactivates previous)
+- [x] **11c. `DELETE /workspaces/:id/agent`** — Remove agent (emits `AGENT_REMOVED`)
+- [x] **11d. `POST /workspaces/:id/agent/move`** — Move agent to different workspace (emits `AGENT_MOVED` on both source and target)
 - [ ] **11e. Canvas agent management UI** — Assign/replace/remove from DetailsTab or context menu
 
 ---

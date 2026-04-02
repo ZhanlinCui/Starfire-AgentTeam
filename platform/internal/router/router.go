@@ -34,6 +34,13 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/retry", wh.Retry)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
+	// Agents
+	ah := handlers.NewAgentHandler(broadcaster)
+	r.POST("/workspaces/:id/agent", ah.Assign)
+	r.PATCH("/workspaces/:id/agent", ah.Replace)
+	r.DELETE("/workspaces/:id/agent", ah.Remove)
+	r.POST("/workspaces/:id/agent/move", ah.Move)
+
 	// Registry
 	rh := handlers.NewRegistryHandler(broadcaster)
 	r.POST("/registry/register", rh.Register)
