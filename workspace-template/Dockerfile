@@ -14,6 +14,10 @@ COPY tools/ ./tools/
 # Config is mounted at runtime
 VOLUME /configs
 
+# Workspace directory for coding agents (mounted at runtime)
+RUN mkdir -p /workspace
+VOLUME /workspace
+
 EXPOSE 8000
 
 CMD ["python", "main.py"]

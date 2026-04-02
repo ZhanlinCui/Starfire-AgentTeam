@@ -89,9 +89,11 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	}
 
 	// Host config with volume mounts
+	volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
 	hostCfg := &container.HostConfig{
 		Binds: []string{
 			fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),
+			fmt.Sprintf("%s:/workspace", volumeName),
 		},
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 	}
@@ -99,9 +101,12 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	// Tier-based flags
 	if cfg.Tier == 1 {
 		hostCfg.ReadonlyRootfs = true
-		// /tmp and /memory remain writable via tmpfs
 		hostCfg.Tmpfs = map[string]string{
 			"/tmp": "size=64m",
+		}
+		// Tier 1 doesn't get a writable workspace — remove the bind
+		hostCfg.Binds = []string{
+			fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),
 		}
 	}
 
