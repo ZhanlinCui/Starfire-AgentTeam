@@ -5,12 +5,16 @@ import { StatusDot } from "./StatusDot";
 import { DetailsTab } from "./tabs/DetailsTab";
 import { ChatTab } from "./tabs/ChatTab";
 import { ConfigTab } from "./tabs/ConfigTab";
+import { SettingsTab } from "./tabs/SettingsTab";
+import { TerminalTab } from "./tabs/TerminalTab";
 import { MemoryTab } from "./tabs/MemoryTab";
 import { EventsTab } from "./tabs/EventsTab";
 
 const TABS: { id: PanelTab; label: string }[] = [
   { id: "details", label: "Details" },
   { id: "chat", label: "Chat" },
+  { id: "settings", label: "Settings" },
+  { id: "terminal", label: "Terminal" },
   { id: "config", label: "Config" },
   { id: "memory", label: "Memory" },
   { id: "events", label: "Events" },
@@ -28,7 +32,7 @@ export function SidePanel() {
   if (!selectedNodeId || !node) return null;
 
   return (
-    <div className="fixed top-0 right-0 h-full w-[420px] bg-zinc-900 border-l border-zinc-700 flex flex-col z-50 shadow-2xl">
+    <div className="fixed top-0 right-0 h-full w-[480px] bg-zinc-900 border-l border-zinc-700 flex flex-col z-50 shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
         <div className="flex items-center gap-2 min-w-0">
@@ -50,13 +54,13 @@ export function SidePanel() {
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-zinc-700">
+      {/* Tabs — scrollable for many tabs */}
+      <div className="flex border-b border-zinc-700 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setPanelTab(tab.id)}
-            className={`flex-1 py-2 text-xs font-medium transition-colors ${
+            className={`shrink-0 px-3 py-2 text-xs font-medium transition-colors ${
               panelTab === tab.id
                 ? "text-zinc-100 border-b-2 border-blue-500"
                 : "text-zinc-500 hover:text-zinc-300"
@@ -71,6 +75,8 @@ export function SidePanel() {
       <div className="flex-1 overflow-y-auto">
         {panelTab === "details" && <DetailsTab workspaceId={selectedNodeId} data={node.data} />}
         {panelTab === "chat" && <ChatTab workspaceId={selectedNodeId} data={node.data} />}
+        {panelTab === "settings" && <SettingsTab workspaceId={selectedNodeId} />}
+        {panelTab === "terminal" && <TerminalTab workspaceId={selectedNodeId} />}
         {panelTab === "config" && <ConfigTab workspaceId={selectedNodeId} />}
         {panelTab === "memory" && <MemoryTab workspaceId={selectedNodeId} />}
         {panelTab === "events" && <EventsTab workspaceId={selectedNodeId} />}
@@ -78,4 +84,3 @@ export function SidePanel() {
     </div>
   );
 }
-

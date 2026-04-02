@@ -70,6 +70,17 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/memory", memh.Set)
 	r.DELETE("/workspaces/:id/memory/:key", memh.Delete)
 
+	// Secrets
+	sech := handlers.NewSecretsHandler()
+	r.GET("/workspaces/:id/secrets", sech.List)
+	r.POST("/workspaces/:id/secrets", sech.Set)
+	r.DELETE("/workspaces/:id/secrets/:key", sech.Delete)
+	r.GET("/workspaces/:id/model", sech.GetModel)
+
+	// Terminal
+	th := handlers.NewTerminalHandler()
+	r.GET("/workspaces/:id/terminal", th.HandleConnect)
+
 	// Bundles
 	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir)
 	r.GET("/bundles/export/:id", bh.Export)

@@ -112,6 +112,10 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | DELETE | /workspaces/:id/memory/:key | workspace.go |
 | POST/PATCH/DELETE | /workspaces/:id/agent | agent.go |
 | POST | /workspaces/:id/agent/move | agent.go |
+| GET/POST | /workspaces/:id/secrets | secrets.go |
+| DELETE | /workspaces/:id/secrets/:key | secrets.go |
+| GET | /workspaces/:id/model | secrets.go |
+| WS | /workspaces/:id/terminal | terminal.go |
 | POST | /workspaces/:id/retry | workspace.go |
 | POST | /workspaces/:id/a2a | workspace.go |
 | POST | /registry/register | registry.go |
