@@ -5,6 +5,17 @@ tier: 2
 
 model: anthropic:claude-sonnet-4-6
 
+# Prompt files loaded in order into the system prompt.
+# Supports any agent framework's file structure:
+#   OpenClaw: SOUL.md, BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md, TOOLS.md, USER.md
+#   Claude Code: CLAUDE.md
+#   Default: system-prompt.md
+prompt_files:
+  - SOUL.md
+  - BOOTSTRAP.md
+  - TOOLS.md
+  - AGENTS.md
+
 skills:
   - code-generation
   - code-review

@@ -32,6 +32,7 @@ class WorkspaceConfig:
     model: str = "anthropic:claude-sonnet-4-6"
     skills: list[str] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
+    prompt_files: list[str] = field(default_factory=list)  # ordered list of prompt files to load
     a2a: A2AConfig = field(default_factory=A2AConfig)
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
     sub_workspaces: list[dict] = field(default_factory=list)
@@ -63,6 +64,7 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
         model=model,
         skills=raw.get("skills", []),
         tools=raw.get("tools", []),
+        prompt_files=raw.get("prompt_files", []),
         a2a=A2AConfig(
             port=a2a_raw.get("port", 8000),
             streaming=a2a_raw.get("streaming", True),

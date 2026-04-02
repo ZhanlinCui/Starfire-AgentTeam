@@ -15,6 +15,14 @@ tier: 1
 # AI model -- any LangChain-compatible provider string
 model: anthropic:claude-sonnet-4-6
 
+# Prompt files loaded in order into the system prompt.
+# Supports any agent framework's file structure:
+#   OpenClaw: SOUL.md, BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md, TOOLS.md, USER.md
+#   Claude Code: CLAUDE.md
+#   Default (if omitted): system-prompt.md
+prompt_files:
+  - system-prompt.md
+
 # Skills to load -- folder names under skills/
 skills:
   - generate-seo-page
@@ -83,6 +91,7 @@ env:
 | `version` | Yes | Semantic version |
 | `tier` | Yes | 1-4, determines deployment method |
 | `model` | Yes | LangChain-compatible provider string (e.g. `anthropic:claude-sonnet-4-6`). Overridden by `MODEL_PROVIDER` env var if set. |
+| `prompt_files` | No | Ordered list of markdown files to load as system prompt. Defaults to `["system-prompt.md"]` if omitted. Supports any agent framework's file structure (OpenClaw, Claude Code, etc.) |
 | `skills` | Yes | List of skill folder names to load from `skills/` |
 | `tools` | No | Built-in tools from workspace-template |
 | `memory` | No | Memory backend config (defaults to filesystem) |

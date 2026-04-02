@@ -28,14 +28,35 @@ def build_system_prompt(
     workspace_id: str,
     loaded_skills: list[LoadedSkill],
     peers: list[dict],
+    prompt_files: list[str] | None = None,
 ) -> str:
-    """Build the complete system prompt."""
+    """Build the complete system prompt.
+
+    Loads prompt files in order from config_path. If prompt_files is specified
+    in config.yaml, those files are loaded in order. Otherwise falls back to
+    system-prompt.md for backwards compatibility.
+
+    This allows different agent frameworks to use their own file structures:
+    - OpenClaw: SOUL.md, BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md, TOOLS.md, USER.md
+    - Claude Code: CLAUDE.md
+    - Default: system-prompt.md
+    """
     parts = []
 
-    # Load the base system prompt
-    prompt_file = Path(config_path) / "system-prompt.md"
-    if prompt_file.exists():
-        parts.append(prompt_file.read_text().strip())
+    # Load prompt files in order
+    files_to_load = prompt_files or []
+    if not files_to_load:
+        # Backwards compatible: fall back to system-prompt.md
+        files_to_load = ["system-prompt.md"]
+
+    for filename in files_to_load:
+        file_path = Path(config_path) / filename
+        if file_path.exists():
+            content = file_path.read_text().strip()
+            if content:
+                parts.append(content)
+        else:
+            print(f"Warning: prompt file not found: {file_path}")
 
     # Add skill instructions
     if loaded_skills:

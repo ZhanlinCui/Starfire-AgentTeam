@@ -56,7 +56,10 @@ async def main():
 
     # 4. Fetch peer capabilities and build system prompt
     peers = await get_peer_capabilities(platform_url, workspace_id)
-    system_prompt = build_system_prompt(config_path, workspace_id, loaded_skills, peers)
+    system_prompt = build_system_prompt(
+        config_path, workspace_id, loaded_skills, peers,
+        prompt_files=config.prompt_files,
+    )
 
     # 5. Create the agent
     agent = create_agent(config.model, all_tools, system_prompt)
