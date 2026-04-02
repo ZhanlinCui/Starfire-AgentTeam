@@ -10,6 +10,7 @@ import {
   useReactFlow,
   type OnNodeDrag,
   type Node,
+  type Edge,
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -21,6 +22,14 @@ import { CreateWorkspaceButton } from "./CreateWorkspaceDialog";
 
 const nodeTypes = {
   workspaceNode: WorkspaceNode,
+};
+
+const defaultEdgeOptions: Partial<Edge> = {
+  animated: true,
+  style: {
+    stroke: "#3f3f46",
+    strokeWidth: 1.5,
+  },
 };
 
 export function Canvas() {
@@ -70,7 +79,6 @@ function CanvasInner() {
       if (dragOverNodeId) {
         nestNode(node.id, dragOverNodeId);
       } else {
-        // Dropped on empty canvas — un-nest if previously nested
         const currentParentId = (node.data as WorkspaceNodeData).parentId;
         if (currentParentId) {
           nestNode(node.id, null);
@@ -87,7 +95,7 @@ function CanvasInner() {
   }, [selectNode]);
 
   return (
-    <div className="w-screen h-screen">
+    <div className="w-screen h-screen bg-zinc-950">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -97,37 +105,44 @@ function CanvasInner() {
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
         fitView
         minZoom={0.1}
         maxZoom={2}
-        defaultEdgeOptions={{ animated: true }}
+        proOptions={{ hideAttribution: true }}
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={20}
+          gap={24}
           size={1}
           color="#27272a"
         />
-        <Controls className="!bg-zinc-800 !border-zinc-700 !text-zinc-300" />
+        <Controls
+          className="!bg-zinc-900/90 !border-zinc-700/50 !rounded-lg !shadow-xl !shadow-black/20 [&>button]:!bg-zinc-800 [&>button]:!border-zinc-700/50 [&>button]:!text-zinc-400 [&>button:hover]:!bg-zinc-700 [&>button:hover]:!text-zinc-200"
+          showInteractive={false}
+        />
         <MiniMap
-          className="!bg-zinc-900 !border-zinc-700"
+          className="!bg-zinc-900/90 !border-zinc-700/50 !rounded-lg !shadow-xl !shadow-black/20"
+          maskColor="rgba(0, 0, 0, 0.7)"
           nodeColor={(node) => {
             const status = (node.data as Record<string, unknown>)?.status;
             switch (status) {
               case "online":
-                return "#22c55e";
+                return "#34d399";
               case "offline":
-                return "#71717a";
-              case "degraded":
-                return "#eab308";
-              case "failed":
-                return "#ef4444";
-              case "provisioning":
-                return "#3b82f6";
-              default:
                 return "#52525b";
+              case "degraded":
+                return "#fbbf24";
+              case "failed":
+                return "#f87171";
+              case "provisioning":
+                return "#38bdf8";
+              default:
+                return "#3f3f46";
             }
           }}
+          nodeStrokeWidth={0}
+          nodeBorderRadius={4}
         />
       </ReactFlow>
 

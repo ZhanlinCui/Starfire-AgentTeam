@@ -32,35 +32,39 @@ export function SidePanel() {
   if (!selectedNodeId || !node) return null;
 
   return (
-    <div className="fixed top-0 right-0 h-full w-[480px] bg-zinc-900 border-l border-zinc-700 flex flex-col z-50 shadow-2xl">
+    <div className="fixed top-0 right-0 h-full w-[480px] bg-zinc-900/95 backdrop-blur-md border-l border-zinc-800/80 flex flex-col z-50 shadow-2xl shadow-black/40">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800/60">
+        <div className="flex items-center gap-2.5 min-w-0">
           <StatusDot status={node.data.status} size="md" />
-          <h2 className="text-sm font-semibold text-zinc-100 truncate">
-            {node.data.name}
-          </h2>
-          {node.data.role && (
-            <span className="text-xs text-zinc-500 truncate">
-              — {node.data.role}
-            </span>
-          )}
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-zinc-100 truncate leading-tight">
+              {node.data.name}
+            </h2>
+            {node.data.role && (
+              <span className="text-[11px] text-zinc-500 truncate block">
+                {node.data.role}
+              </span>
+            )}
+          </div>
         </div>
         <button
           onClick={() => selectNode(null)}
-          className="text-zinc-500 hover:text-zinc-300 text-lg leading-none px-1"
+          className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
         >
-          ✕
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
         </button>
       </div>
 
-      {/* Tabs — scrollable for many tabs */}
-      <div className="flex border-b border-zinc-700 overflow-x-auto">
+      {/* Tabs */}
+      <div className="flex border-b border-zinc-800/60 overflow-x-auto bg-zinc-900/50">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setPanelTab(tab.id)}
-            className={`shrink-0 px-3 py-2 text-xs font-medium transition-colors ${
+            className={`shrink-0 px-3.5 py-2.5 text-[11px] font-medium tracking-wide transition-colors ${
               panelTab === tab.id
                 ? "text-zinc-100 border-b-2 border-blue-500"
                 : "text-zinc-500 hover:text-zinc-300"
