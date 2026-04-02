@@ -367,6 +367,7 @@ func (h *WorkspaceHandler) Retry(c *gin.Context) {
 // avoiding CORS and Docker network issues.
 func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	workspaceID := c.Param("id")
+	log.Printf("ProxyA2A: called for workspace %s", workspaceID)
 	ctx := c.Request.Context()
 
 	// Resolve workspace URL (cache first, then DB)
@@ -401,27 +402,42 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 		return
 	}
 
-	// Build the JSON-RPC envelope if the client sent just method+params
+	// Normalize the request into a valid A2A JSON-RPC 2.0 message
 	var payload map[string]interface{}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
 		return
 	}
+
+	// Wrap in JSON-RPC envelope if missing
 	if _, hasJSONRPC := payload["jsonrpc"]; !hasJSONRPC {
-		rpcID := uuid.New().String()
-		envelope := map[string]interface{}{
+		payload = map[string]interface{}{
 			"jsonrpc": "2.0",
-			"id":      rpcID,
+			"id":      uuid.New().String(),
 			"method":  payload["method"],
 			"params":  payload["params"],
 		}
-		var marshalErr error
-		body, marshalErr = json.Marshal(envelope)
-		if marshalErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build JSON-RPC envelope"})
-			return
-		}
 	}
+
+	// Ensure params.message.messageId exists (required by a2a-sdk)
+	if params, ok := payload["params"].(map[string]interface{}); ok {
+		if msg, ok := params["message"].(map[string]interface{}); ok {
+			if _, hasID := msg["messageId"]; !hasID {
+				msg["messageId"] = uuid.New().String()
+			}
+		} else {
+			log.Printf("ProxyA2A: params.message type assertion failed, type=%T", params["message"])
+		}
+	} else {
+		log.Printf("ProxyA2A: params type assertion failed, type=%T", payload["params"])
+	}
+
+	marshaledBody, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to marshal request"})
+		return
+	}
+	body = marshaledBody
 
 	// Forward to the agent
 	req, err := http.NewRequestWithContext(ctx, "POST", agentURL, bytes.NewReader(body))
