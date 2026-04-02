@@ -93,9 +93,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   isDescendant: (ancestorId, nodeId) => {
     const { nodes } = get();
     let current = nodes.find((n) => n.id === nodeId);
-    while (current) {
+    while (current?.data.parentId) {
       if (current.data.parentId === ancestorId) return true;
-      current = nodes.find((n) => n.id === current!.data.parentId);
+      current = nodes.find((n) => n.id === current?.data.parentId);
     }
     return false;
   },

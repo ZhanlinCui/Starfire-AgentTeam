@@ -97,19 +97,27 @@ func Import(
 
 // writeBundleConfig writes a bundle's config, prompt, and skill files to a temp directory.
 func writeBundleConfig(b *Bundle) (string, error) {
-	dir, err := os.MkdirTemp("", fmt.Sprintf("ws-bundle-%s-*", b.ID[:8]))
+	idPrefix := b.ID
+	if len(idPrefix) > 8 {
+		idPrefix = idPrefix[:8]
+	}
+	dir, err := os.MkdirTemp("", fmt.Sprintf("ws-bundle-%s-*", idPrefix))
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
 	// Write system-prompt.md
 	if b.SystemPrompt != "" {
-		os.WriteFile(filepath.Join(dir, "system-prompt.md"), []byte(b.SystemPrompt), 0644)
+		if err := os.WriteFile(filepath.Join(dir, "system-prompt.md"), []byte(b.SystemPrompt), 0644); err != nil {
+			return "", fmt.Errorf("failed to write system-prompt.md: %w", err)
+		}
 	}
 
 	// Write config.yaml from prompts if present
 	if configYaml, ok := b.Prompts["config.yaml"]; ok {
-		os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(configYaml), 0644)
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(configYaml), 0644); err != nil {
+			return "", fmt.Errorf("failed to write config.yaml: %w", err)
+		}
 	}
 
 	// Write skills

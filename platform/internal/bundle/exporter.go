@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/agent-molecule/platform/internal/db"
 )
@@ -33,7 +34,9 @@ func Export(ctx context.Context, workspaceID, configsDir string) (*Bundle, error
 
 	// Parse agent card
 	var card interface{}
-	json.Unmarshal(agentCard, &card)
+	if err := json.Unmarshal(agentCard, &card); err != nil {
+		card = nil
+	}
 
 	b := &Bundle{
 		Schema:      "1.0",
@@ -137,19 +140,33 @@ func (b *Bundle) loadFromConfigDir(dir string) {
 }
 
 // findConfigDir tries to match a workspace name to a config directory.
+// It checks for a directory whose config.yaml "name" field matches the workspace name,
+// falling back to the first directory with a config.yaml if no name match is found.
 func findConfigDir(configsDir, name string) string {
 	entries, err := os.ReadDir(configsDir)
 	if err != nil {
 		return ""
 	}
+
+	var fallback string
 	for _, e := range entries {
-		if e.IsDir() {
-			if _, err := os.Stat(filepath.Join(configsDir, e.Name(), "config.yaml")); err == nil {
-				return filepath.Join(configsDir, e.Name())
-			}
+		if !e.IsDir() {
+			continue
+		}
+		configPath := filepath.Join(configsDir, e.Name(), "config.yaml")
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			continue
+		}
+		// Check if the config name matches the workspace name
+		if strings.Contains(string(data), "name: "+name) {
+			return filepath.Join(configsDir, e.Name())
+		}
+		if fallback == "" {
+			fallback = filepath.Join(configsDir, e.Name())
 		}
 	}
-	return ""
+	return fallback
 }
 
 // extractDescription pulls the first non-empty line after YAML frontmatter.

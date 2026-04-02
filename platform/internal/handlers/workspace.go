@@ -367,7 +367,6 @@ func (h *WorkspaceHandler) Retry(c *gin.Context) {
 // avoiding CORS and Docker network issues.
 func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	workspaceID := c.Param("id")
-	log.Printf("ProxyA2A: called for workspace %s", workspaceID)
 	ctx := c.Request.Context()
 
 	// Resolve workspace URL (cache first, then DB)
@@ -425,11 +424,7 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 			if _, hasID := msg["messageId"]; !hasID {
 				msg["messageId"] = uuid.New().String()
 			}
-		} else {
-			log.Printf("ProxyA2A: params.message type assertion failed, type=%T", params["message"])
 		}
-	} else {
-		log.Printf("ProxyA2A: params type assertion failed, type=%T", payload["params"])
 	}
 
 	marshaledBody, marshalErr := json.Marshal(payload)

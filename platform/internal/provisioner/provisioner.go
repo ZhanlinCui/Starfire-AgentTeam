@@ -52,7 +52,11 @@ func New() (*Provisioner, error) {
 
 // containerName returns the Docker container name for a workspace.
 func containerName(workspaceID string) string {
-	return fmt.Sprintf("ws-%s", workspaceID[:12])
+	id := workspaceID
+	if len(id) > 12 {
+		id = id[:12]
+	}
+	return fmt.Sprintf("ws-%s", id)
 }
 
 // internalURL returns the Docker-internal URL for a workspace container.

@@ -173,6 +173,11 @@ func (h *AgentHandler) Move(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "target workspace not found"})
 		return
 	}
+	if err != nil {
+		log.Printf("Move agent target lookup error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "target lookup failed"})
+		return
+	}
 
 	// Check target doesn't already have an agent
 	var targetAgentCount int
