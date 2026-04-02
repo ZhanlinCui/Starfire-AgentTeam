@@ -70,6 +70,11 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/memory", memh.Set)
 	r.DELETE("/workspaces/:id/memory/:key", memh.Delete)
 
+	// Bundles
+	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir)
+	r.GET("/bundles/export/:id", bh.Export)
+	r.POST("/bundles/import", bh.Import)
+
 	// WebSocket
 	sh := handlers.NewSocketHandler(hub)
 	r.GET("/ws", sh.HandleConnect)

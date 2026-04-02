@@ -84,9 +84,9 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Workspaces are portable — export as `.bundle.json`, import anywhere (per `docs/agent-runtime/bundle-system.md`).
 
-- [ ] **12a. `platform/internal/bundle/exporter.go`** — Serialize running workspace → bundle JSON (config, prompts, skills, sub-workspaces recursively)
-- [ ] **12b. `platform/internal/bundle/importer.go`** — Parse bundle JSON → create workspace records → trigger provisioner for each
-- [ ] **12c. API endpoints** — `GET /bundles/export/:id`, `POST /bundles/import`
+- [x] **12a. `platform/internal/bundle/exporter.go`** — Serialize running workspace → bundle JSON (config, prompts, skills, sub-workspaces recursively)
+- [x] **12b. `platform/internal/bundle/importer.go`** — Parse bundle JSON → create workspace records → trigger provisioner, recursive sub-workspaces
+- [x] **12c. API endpoints** — `GET /bundles/export/:id`, `POST /bundles/import`
 - [ ] **12d. `bundle-compile.sh`** — Script to compile `workspace-configs-templates/` folders into `.bundle.json` artifacts
 - [ ] **12e. Canvas BundleDropZone** — Drag `.bundle.json` onto canvas to import
 - [ ] **12f. Canvas right-click export** — Right-click node → "Export as bundle" → downloads file
