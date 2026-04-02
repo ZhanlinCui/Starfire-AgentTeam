@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
@@ -314,15 +316,17 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 	// which transitions status to 'online' and broadcasts WORKSPACE_ONLINE
 }
 
-// Retry handles POST /workspaces/:id/retry
-func (h *WorkspaceHandler) Retry(c *gin.Context) {
+// Restart handles POST /workspaces/:id/restart
+// Works for offline, failed, or degraded workspaces. Stops any existing container, then re-provisions.
+func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	id := c.Param("id")
 	ctx := c.Request.Context()
 
-	var status, template string
+	var status, wsName string
+	var tier int
 	err := db.DB.QueryRowContext(ctx,
-		`SELECT status, COALESCE(name, '') FROM workspaces WHERE id = $1`, id,
-	).Scan(&status, &template)
+		`SELECT status, name, tier FROM workspaces WHERE id = $1`, id,
+	).Scan(&status, &wsName, &tier)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 		return
@@ -331,8 +335,8 @@ func (h *WorkspaceHandler) Retry(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
 		return
 	}
-	if status != "failed" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "can only retry failed workspaces", "status": status})
+	if status == "online" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace is already online"})
 		return
 	}
 
@@ -341,25 +345,52 @@ func (h *WorkspaceHandler) Retry(c *gin.Context) {
 		return
 	}
 
+	// Stop existing container if any
+	h.provisioner.Stop(ctx, id)
+
 	// Reset to provisioning
 	db.DB.ExecContext(ctx,
-		`UPDATE workspaces SET status = 'provisioning', updated_at = now() WHERE id = $1`, id)
+		`UPDATE workspaces SET status = 'provisioning', url = '', updated_at = now() WHERE id = $1`, id)
 	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", id, map[string]interface{}{
-		"name": template,
+		"name": wsName,
+		"tier": tier,
 	})
 
-	// Read template from workspace record or default
-	var body models.CreateWorkspacePayload
-	if err := c.ShouldBindJSON(&body); err != nil {
-		body.Template = ""
+	// Read template from request body or try to find matching config
+	var body struct {
+		Template string `json:"template"`
+	}
+	c.ShouldBindJSON(&body)
+
+	template := body.Template
+	if template == "" {
+		// Try to find a config dir matching the workspace name
+		template = findTemplateByName(h.configsDir, wsName)
 	}
 
-	if body.Template != "" {
-		configPath, _ := filepath.Abs(filepath.Join(h.configsDir, body.Template))
-		go h.provisionWorkspace(id, configPath, body)
+	if template != "" {
+		configPath, _ := filepath.Abs(filepath.Join(h.configsDir, template))
+		payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
+		go h.provisionWorkspace(id, configPath, payload)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "provisioning"})
+	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "template": template})
+}
+
+// findTemplateByName looks for a workspace-configs-templates directory matching a name.
+func findTemplateByName(configsDir, name string) string {
+	entries, err := os.ReadDir(configsDir)
+	if err != nil {
+		return ""
+	}
+	// Normalize name: "SEO Agent" → look for "seo-agent"
+	normalized := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+	for _, e := range entries {
+		if e.IsDir() && e.Name() == normalized {
+			return e.Name()
+		}
+	}
+	return ""
 }
 
 // ProxyA2A handles POST /workspaces/:id/a2a

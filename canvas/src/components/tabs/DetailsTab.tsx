@@ -29,6 +29,8 @@ export function DetailsTab({ workspaceId, data }: Props) {
   const [peersError, setPeersError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const removeNode = useCanvasStore((s) => s.removeNode);
   const selectNode = useCanvasStore((s) => s.selectNode);
@@ -77,6 +79,21 @@ export function DetailsTab({ workspaceId, data }: Props) {
       setDeleteError(e instanceof Error ? e.message : "Failed to delete");
     }
   };
+
+  const handleRestart = async () => {
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      await api.post(`/workspaces/${workspaceId}/restart`, {});
+      updateNodeData(workspaceId, { status: "provisioning" });
+    } catch (e) {
+      setRestartError(e instanceof Error ? e.message : "Failed to restart");
+    } finally {
+      setRestarting(false);
+    }
+  };
+
+  const isRestartable = data.status === "offline" || data.status === "failed" || data.status === "degraded";
 
   const agentCard = data.agentCard;
   const skills = getSkills(agentCard);
@@ -146,6 +163,22 @@ export function DetailsTab({ workspaceId, data }: Props) {
             <Row label="Active Tasks" value={String(data.activeTasks)} />
             {data.status === "degraded" && (
               <Row label="Error Rate" value={`${(data.lastErrorRate * 100).toFixed(0)}%`} />
+            )}
+            {isRestartable && (
+              <div className="pt-2">
+                {restartError && (
+                  <div className="mb-2 px-3 py-1.5 bg-red-900/30 border border-red-800 rounded text-xs text-red-400">
+                    {restartError}
+                  </div>
+                )}
+                <button
+                  onClick={handleRestart}
+                  disabled={restarting}
+                  className="px-3 py-1 bg-green-700 hover:bg-green-600 text-xs rounded text-white disabled:opacity-50"
+                >
+                  {restarting ? "Restarting..." : data.status === "failed" ? "Retry" : "Restart"}
+                </button>
+              </div>
             )}
             <button
               onClick={() => setEditing(true)}

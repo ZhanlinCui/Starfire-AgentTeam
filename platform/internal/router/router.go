@@ -32,7 +32,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/workspaces/:id", wh.Get)
 	r.PATCH("/workspaces/:id", wh.Update)
 	r.DELETE("/workspaces/:id", wh.Delete)
-	r.POST("/workspaces/:id/retry", wh.Retry)
+	r.POST("/workspaces/:id/restart", wh.Restart)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
 	// Agents
