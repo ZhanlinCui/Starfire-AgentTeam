@@ -90,6 +90,7 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 
 	// Host config with volume mounts
 	volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
+	log.Printf("Provisioner: workspace volume %s (created by Docker if new)", volumeName)
 	hostCfg := &container.HostConfig{
 		Binds: []string{
 			fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),

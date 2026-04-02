@@ -368,11 +368,23 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		template = findTemplateByName(h.configsDir, wsName)
 	}
 
-	if template != "" {
-		configPath, _ := filepath.Abs(filepath.Join(h.configsDir, template))
-		payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
-		go h.provisionWorkspace(id, configPath, payload)
+	if template == "" {
+		// No template found — revert to offline, can't provision without config
+		db.DB.ExecContext(ctx,
+			`UPDATE workspaces SET status = 'failed', updated_at = now() WHERE id = $1`, id)
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISION_FAILED", id, map[string]interface{}{
+			"error": "no matching template found for workspace",
+		})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "no template found — provide a template name or create a matching config directory",
+			"name":  wsName,
+		})
+		return
 	}
+
+	configPath, _ := filepath.Abs(filepath.Join(h.configsDir, template))
+	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
+	go h.provisionWorkspace(id, configPath, payload)
 
 	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "template": template})
 }

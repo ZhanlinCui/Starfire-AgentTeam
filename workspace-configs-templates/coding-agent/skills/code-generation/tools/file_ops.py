@@ -14,7 +14,10 @@ def read_file(path: str) -> dict:
     Args:
         path: Relative path from workspace root, or absolute path.
     """
-    full_path = _resolve(path)
+    try:
+        full_path = _resolve(path)
+    except ValueError as e:
+        return {"error": str(e)}
     if not os.path.exists(full_path):
         return {"error": f"File not found: {path}"}
 
@@ -34,7 +37,10 @@ def write_file(path: str, content: str) -> dict:
         path: Relative path from workspace root, or absolute path.
         content: The full file content to write.
     """
-    full_path = _resolve(path)
+    try:
+        full_path = _resolve(path)
+    except ValueError as e:
+        return {"error": str(e)}
 
     try:
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -53,7 +59,10 @@ def list_files(path: str = ".", pattern: str = "*") -> dict:
         path: Directory path relative to workspace root.
         pattern: Glob pattern to filter files (e.g. "*.py", "**/*.tsx").
     """
-    full_path = _resolve(path)
+    try:
+        full_path = _resolve(path)
+    except ValueError as e:
+        return {"error": str(e)}
     if not os.path.isdir(full_path):
         return {"error": f"Not a directory: {path}"}
 
@@ -75,7 +84,10 @@ def search_code(pattern: str, path: str = ".", file_pattern: str = "") -> dict:
     """
     import re
 
-    full_path = _resolve(path)
+    try:
+        full_path = _resolve(path)
+    except ValueError as e:
+        return {"error": str(e)}
     results = []
 
     try:
@@ -103,7 +115,8 @@ def search_code(pattern: str, path: str = ".", file_pattern: str = "") -> dict:
 
 
 def _resolve(path: str) -> str:
-    """Resolve a path relative to workspace root."""
-    if os.path.isabs(path):
-        return path
-    return os.path.join(WORKSPACE_DIR, path)
+    """Resolve a path relative to workspace root. Prevents path traversal."""
+    full = os.path.normpath(os.path.join(WORKSPACE_DIR, path))
+    if not full.startswith(os.path.normpath(WORKSPACE_DIR)):
+        raise ValueError(f"Path traversal blocked: {path}")
+    return full
