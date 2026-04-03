@@ -76,7 +76,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **11b. `PATCH /workspaces/:id/agent`** — Replace model (emits `AGENT_REPLACED` with old_model, deactivates previous)
 - [x] **11c. `DELETE /workspaces/:id/agent`** — Remove agent (emits `AGENT_REMOVED`)
 - [x] **11d. `POST /workspaces/:id/agent/move`** — Move agent to different workspace (emits `AGENT_MOVED` on both source and target)
-- [ ] **11e. Canvas agent management UI** — Assign/replace/remove from DetailsTab or context menu
+- [x] **11e. Canvas agent management UI** — AgentManager in DetailsTab: assign/replace/remove model, shows current model
 
 ---
 
@@ -164,8 +164,8 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **17i. Peer navigation** — DetailsTab shows peers from `/registry/:id/peers`, click to navigate
 - [x] **17j. Inline workspace editing** — DetailsTab edit mode for name/role/tier with save to API
 - [x] **17k. Workspace deletion** — DetailsTab danger zone with confirmation
-- [ ] **17l. Template palette** — Left sidebar with available workspace templates (from `GET /templates`, depends on 17r)
-- [ ] **17m. Right-click context menu** — Export bundle, duplicate, expand to team, delete (required by Phases 6–7)
+- [x] **17l. Template palette** — Left sidebar with available workspace templates, click to deploy (from `GET /templates`)
+- [x] **17m. Right-click context menu** — Export bundle, duplicate, restart, delete, open chat/terminal/details
 - [ ] **17n. Skill drag-and-drop** — Drag skill from palette onto a node to add it
 - [ ] **17o. Canvas viewport persistence** — Save pan/zoom to `canvas_viewport` table (PRD F1.8)
 - [ ] **17p. Connection breakage visualization** — Visual indicator when A2A communication between workspaces fails (PRD F1.13)
@@ -173,7 +173,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 ### Platform endpoints needed for canvas features
 
-- [ ] **17r. `GET /templates`** — Template listing endpoint (Template palette depends on this)
+- [x] **17r. `GET /templates`** — Scans workspace-configs-templates/, returns name/description/tier/model/skills per template
 - [x] **17s. `POST /workspaces/:id/a2a`** — Platform-side A2A proxy (resolves workspace URL, wraps in JSON-RPC 2.0 envelope, forwards to agent, returns response)
 
 ---

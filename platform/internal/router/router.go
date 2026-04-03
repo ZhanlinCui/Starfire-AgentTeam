@@ -86,6 +86,10 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	th := handlers.NewTerminalHandler(dockerCli)
 	r.GET("/workspaces/:id/terminal", th.HandleConnect)
 
+	// Templates
+	tmplh := handlers.NewTemplatesHandler(configsDir)
+	r.GET("/templates", tmplh.List)
+
 	// Bundles
 	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir)
 	r.GET("/bundles/export/:id", bh.Export)

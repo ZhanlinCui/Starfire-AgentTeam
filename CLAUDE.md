@@ -124,6 +124,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | GET | /registry/discover/:id | discovery.go |
 | GET | /registry/:id/peers | discovery.go |
 | POST | /registry/check-access | discovery.go |
+| GET | /templates | templates.go |
 | GET | /bundles/export/:id | bundle.go |
 | POST | /bundles/import | bundle.go |
 | GET | /events[/:workspaceId] | events.go |

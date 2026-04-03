@@ -23,6 +23,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
   const tierCfg = TIER_CONFIG[data.tier] || { label: `T${data.tier}`, color: "text-zinc-500 bg-zinc-800" };
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
   const selectNode = useCanvasStore((s) => s.selectNode);
+  const openContextMenu = useCanvasStore((s) => s.openContextMenu);
   const isDragTarget = useCanvasStore((s) => s.dragOverNodeId === id);
   const isSelected = selectedNodeId === id;
   const isOnline = data.status === "online";
@@ -34,6 +35,11 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
       onClick={(e) => {
         e.stopPropagation();
         selectNode(isSelected ? null : id);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openContextMenu({ x: e.clientX, y: e.clientY, nodeId: id, nodeData: data as unknown as import("@/store/canvas").WorkspaceNodeData });
       }}
       className={`
         group relative rounded-xl min-w-[200px] max-w-[260px]

@@ -19,6 +19,8 @@ import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { WorkspaceNode } from "./WorkspaceNode";
 import { SidePanel } from "./SidePanel";
 import { CreateWorkspaceButton } from "./CreateWorkspaceDialog";
+import { ContextMenu } from "./ContextMenu";
+import { TemplatePalette } from "./TemplatePalette";
 
 const nodeTypes = {
   workspaceNode: WorkspaceNode,
@@ -146,7 +148,9 @@ function CanvasInner() {
         />
       </ReactFlow>
 
+      <TemplatePalette />
       <SidePanel />
+      <ContextMenu />
       {!selectedNodeId && <CreateWorkspaceButton />}
     </div>
   );

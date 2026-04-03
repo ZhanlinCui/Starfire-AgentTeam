@@ -24,12 +24,20 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
 
 export type PanelTab = "details" | "chat" | "config" | "settings" | "terminal" | "memory" | "events";
 
+export interface ContextMenuState {
+  x: number;
+  y: number;
+  nodeId: string;
+  nodeData: WorkspaceNodeData;
+}
+
 interface CanvasState {
   nodes: Node<WorkspaceNodeData>[];
   edges: Edge[];
   selectedNodeId: string | null;
   panelTab: PanelTab;
   dragOverNodeId: string | null;
+  contextMenu: ContextMenuState | null;
   hydrate: (workspaces: WorkspaceData[]) => void;
   applyEvent: (msg: WSMessage) => void;
   onNodesChange: (changes: NodeChange<Node<WorkspaceNodeData>>[]) => void;
@@ -42,6 +50,8 @@ interface CanvasState {
   setDragOverNode: (id: string | null) => void;
   nestNode: (draggedId: string, targetId: string | null) => Promise<void>;
   isDescendant: (ancestorId: string, nodeId: string) => boolean;
+  openContextMenu: (menu: ContextMenuState) => void;
+  closeContextMenu: () => void;
 }
 
 function buildNodesAndEdges(workspaces: WorkspaceData[]) {
@@ -85,8 +95,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   selectedNodeId: null,
   panelTab: "details",
   dragOverNodeId: null,
+  contextMenu: null,
 
   selectNode: (id) => set({ selectedNodeId: id }),
+  openContextMenu: (menu) => set({ contextMenu: menu }),
+  closeContextMenu: () => set({ contextMenu: null }),
   setPanelTab: (tab) => set({ panelTab: tab }),
   setDragOverNode: (id) => set({ dragOverNodeId: id }),
 
