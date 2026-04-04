@@ -87,7 +87,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **12a. `platform/internal/bundle/exporter.go`** — Serialize running workspace → bundle JSON (config, prompts, skills, sub-workspaces recursively)
 - [x] **12b. `platform/internal/bundle/importer.go`** — Parse bundle JSON → create workspace records → trigger provisioner, recursive sub-workspaces
 - [x] **12c. API endpoints** — `GET /bundles/export/:id`, `POST /bundles/import`
-- [ ] **12d. `bundle-compile.sh`** — Script to compile `workspace-configs-templates/` folders into `.bundle.json` artifacts
+- [x] **12d. `bundle-compile.sh`** — Script to compile workspace-configs-templates/ into .bundle.json (tested: 4 templates compiled)
 - [ ] **12e. Canvas BundleDropZone** — Drag `.bundle.json` onto canvas to import
 - [ ] **12f. Canvas right-click export** — Right-click node → "Export as bundle" → downloads file
 - [ ] **12g. Canvas duplicate node** — Right-click → "Duplicate" (export + re-import with new IDs)
@@ -167,7 +167,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **17l. Template palette** — Left sidebar with available workspace templates, click to deploy (from `GET /templates`)
 - [x] **17m. Right-click context menu** — Export bundle, duplicate, restart, delete, open chat/terminal/details
 - [ ] **17n. Skill drag-and-drop** — Drag skill from palette onto a node to add it
-- [ ] **17o. Canvas viewport persistence** — Save pan/zoom to `canvas_viewport` table (PRD F1.8)
+- [x] **17o. Canvas viewport persistence** — Save pan/zoom via `PUT /canvas/viewport` (debounced 1s), restore on page load
 - [ ] **17p. Connection breakage visualization** — Visual indicator when A2A communication between workspaces fails (PRD F1.13)
 - [ ] **17q. ClawHub skill installation** — `npx clawhub@latest install <skill-name>` integration for skill marketplace (PRD F4.4)
 

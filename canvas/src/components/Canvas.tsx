@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useMemo } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -96,6 +96,28 @@ function CanvasInner() {
     selectNode(null);
   }, [selectNode]);
 
+  const saveViewport = useCanvasStore((s) => s.saveViewport);
+  const viewport = useCanvasStore((s) => s.viewport);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const onMoveEnd = useCallback(
+    (_event: unknown, vp: { x: number; y: number; zoom: number }) => {
+      // Debounce viewport saves to avoid spamming the API
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveViewport(vp.x, vp.y, vp.zoom);
+      }, 1000);
+    },
+    [saveViewport]
+  );
+
+  const defaultViewport = useMemo(
+    () => ({ x: viewport.x, y: viewport.y, zoom: viewport.zoom }),
+    // Only use the initial viewport — don't re-render on every save
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   return (
     <div className="w-screen h-screen bg-zinc-950">
       <ReactFlow
@@ -106,9 +128,11 @@ function CanvasInner() {
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
+        onMoveEnd={onMoveEnd}
         nodeTypes={nodeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
-        fitView
+        defaultViewport={defaultViewport}
+        fitView={viewport.x === 0 && viewport.y === 0 && viewport.zoom === 1}
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}

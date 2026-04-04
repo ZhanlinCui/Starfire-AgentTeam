@@ -52,6 +52,9 @@ interface CanvasState {
   isDescendant: (ancestorId: string, nodeId: string) => boolean;
   openContextMenu: (menu: ContextMenuState) => void;
   closeContextMenu: () => void;
+  viewport: { x: number; y: number; zoom: number };
+  setViewport: (v: { x: number; y: number; zoom: number }) => void;
+  saveViewport: (x: number, y: number, zoom: number) => void;
 }
 
 function buildNodesAndEdges(workspaces: WorkspaceData[]) {
@@ -97,9 +100,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   dragOverNodeId: null,
   contextMenu: null,
 
+  viewport: { x: 0, y: 0, zoom: 1 },
+
   selectNode: (id) => set({ selectedNodeId: id }),
   openContextMenu: (menu) => set({ contextMenu: menu }),
   closeContextMenu: () => set({ contextMenu: null }),
+  setViewport: (v) => set({ viewport: v }),
+  saveViewport: async (x, y, zoom) => {
+    set({ viewport: { x, y, zoom } });
+    try {
+      await api.put(`/canvas/viewport`, { x, y, zoom });
+    } catch {
+      // Non-critical — viewport save failure doesn't block user
+    }
+  },
   setPanelTab: (tab) => set({ panelTab: tab }),
   setDragOverNode: (id) => set({ dragOverNodeId: id }),
 

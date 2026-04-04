@@ -9,18 +9,20 @@ import type { WorkspaceData } from "@/store/socket";
 
 export default function Home() {
   useEffect(() => {
-    // Connect WebSocket first to avoid missing events
     connectSocket();
 
-    // Then hydrate from HTTP
-    api
-      .get<WorkspaceData[]>("/workspaces")
-      .then((workspaces) => {
-        useCanvasStore.getState().hydrate(workspaces);
-      })
-      .catch((err) => {
-        console.error("Initial hydration failed:", err);
-      });
+    // Hydrate workspaces and restore viewport in parallel
+    Promise.all([
+      api.get<WorkspaceData[]>("/workspaces"),
+      api.get<{ x: number; y: number; zoom: number }>("/canvas/viewport").catch(() => null),
+    ]).then(([workspaces, viewport]) => {
+      useCanvasStore.getState().hydrate(workspaces);
+      if (viewport) {
+        useCanvasStore.getState().setViewport(viewport);
+      }
+    }).catch((err) => {
+      console.error("Initial hydration failed:", err);
+    });
 
     return () => {
       disconnectSocket();

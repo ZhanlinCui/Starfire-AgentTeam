@@ -15,7 +15,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001"},
-		AllowMethods:     []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "X-Workspace-ID"},
 		AllowCredentials: true,
 	}))
@@ -85,6 +85,11 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	}
 	th := handlers.NewTerminalHandler(dockerCli)
 	r.GET("/workspaces/:id/terminal", th.HandleConnect)
+
+	// Canvas Viewport
+	vh := handlers.NewViewportHandler()
+	r.GET("/canvas/viewport", vh.Get)
+	r.PUT("/canvas/viewport", vh.Save)
 
 	// Templates
 	tmplh := handlers.NewTemplatesHandler(configsDir)
