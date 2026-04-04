@@ -7,6 +7,7 @@ import { ChatTab } from "./tabs/ChatTab";
 import { ConfigTab } from "./tabs/ConfigTab";
 import { SettingsTab } from "./tabs/SettingsTab";
 import { TerminalTab } from "./tabs/TerminalTab";
+import { FilesTab } from "./tabs/FilesTab";
 import { MemoryTab } from "./tabs/MemoryTab";
 import { EventsTab } from "./tabs/EventsTab";
 
@@ -15,6 +16,7 @@ const TABS: { id: PanelTab; label: string; icon: string }[] = [
   { id: "chat", label: "Chat", icon: "◈" },
   { id: "settings", label: "Settings", icon: "⚙" },
   { id: "terminal", label: "Terminal", icon: "▸" },
+  { id: "files", label: "Files", icon: "⊞" },
   { id: "config", label: "Config", icon: "{}" },
   { id: "memory", label: "Memory", icon: "◇" },
   { id: "events", label: "Events", icon: "◊" },
@@ -93,6 +95,7 @@ export function SidePanel() {
         {panelTab === "chat" && <ChatTab workspaceId={selectedNodeId} data={node.data} />}
         {panelTab === "settings" && <SettingsTab workspaceId={selectedNodeId} />}
         {panelTab === "terminal" && <TerminalTab workspaceId={selectedNodeId} />}
+        {panelTab === "files" && <FilesTab workspaceId={selectedNodeId} />}
         {panelTab === "config" && <ConfigTab workspaceId={selectedNodeId} />}
         {panelTab === "memory" && <MemoryTab workspaceId={selectedNodeId} />}
         {panelTab === "events" && <EventsTab workspaceId={selectedNodeId} />}

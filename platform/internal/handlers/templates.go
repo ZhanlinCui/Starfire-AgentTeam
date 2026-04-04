@@ -215,6 +215,156 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 	})
 }
 
+// ListFiles handles GET /workspaces/:id/files
+// Returns the file tree of a workspace's config directory.
+func (h *TemplatesHandler) ListFiles(c *gin.Context) {
+	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	var wsName string
+	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+
+	dirName := normalizeName(wsName)
+	configDir := filepath.Join(h.configsDir, dirName)
+
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
+	type fileEntry struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+		Dir  bool   `json:"dir"`
+	}
+
+	var files []fileEntry
+	filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || path == configDir {
+			return nil
+		}
+		rel, _ := filepath.Rel(configDir, path)
+		if strings.HasPrefix(rel, ".") {
+			return nil
+		}
+		files = append(files, fileEntry{
+			Path: rel,
+			Size: info.Size(),
+			Dir:  info.IsDir(),
+		})
+		return nil
+	})
+
+	if files == nil {
+		files = []fileEntry{}
+	}
+	c.JSON(http.StatusOK, files)
+}
+
+// ReadFile handles GET /workspaces/:id/files/*path
+func (h *TemplatesHandler) ReadFile(c *gin.Context) {
+	workspaceID := c.Param("id")
+	filePath := c.Param("path")
+	if strings.HasPrefix(filePath, "/") {
+		filePath = filePath[1:]
+	}
+
+	if err := validateRelPath(filePath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	var wsName string
+	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+
+	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"path":    filePath,
+		"content": string(data),
+		"size":    len(data),
+	})
+}
+
+// WriteFile handles PUT /workspaces/:id/files/*path
+func (h *TemplatesHandler) WriteFile(c *gin.Context) {
+	workspaceID := c.Param("id")
+	filePath := c.Param("path")
+	if strings.HasPrefix(filePath, "/") {
+		filePath = filePath[1:]
+	}
+
+	if err := validateRelPath(filePath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	var wsName string
+	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+
+	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
+	os.MkdirAll(filepath.Dir(fullPath), 0755)
+	if err := os.WriteFile(fullPath, []byte(body.Content), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "saved", "path": filePath})
+}
+
+// DeleteFile handles DELETE /workspaces/:id/files/*path
+func (h *TemplatesHandler) DeleteFile(c *gin.Context) {
+	workspaceID := c.Param("id")
+	filePath := c.Param("path")
+	if strings.HasPrefix(filePath, "/") {
+		filePath = filePath[1:]
+	}
+
+	if err := validateRelPath(filePath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	var wsName string
+	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+
+	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
+	if err := os.Remove(fullPath); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath})
+}
+
 // List handles GET /templates
 func (h *TemplatesHandler) List(c *gin.Context) {
 	entries, err := os.ReadDir(h.configsDir)

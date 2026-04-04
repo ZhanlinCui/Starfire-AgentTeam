@@ -22,7 +22,7 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   parentId: string | null;
 }
 
-export type PanelTab = "details" | "chat" | "config" | "settings" | "terminal" | "memory" | "events";
+export type PanelTab = "details" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "events";
 
 export interface ContextMenuState {
   x: number;

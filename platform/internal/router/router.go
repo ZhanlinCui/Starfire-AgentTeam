@@ -101,6 +101,10 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/templates", tmplh.List)
 	r.POST("/templates/import", tmplh.Import)
 	r.PUT("/workspaces/:id/files", tmplh.ReplaceFiles)
+	r.GET("/workspaces/:id/files", tmplh.ListFiles)
+	r.GET("/workspaces/:id/files/*path", tmplh.ReadFile)
+	r.PUT("/workspaces/:id/files/*path", tmplh.WriteFile)
+	r.DELETE("/workspaces/:id/files/*path", tmplh.DeleteFile)
 
 	// Bundles
 	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir)
