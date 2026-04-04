@@ -65,7 +65,7 @@ func main() {
 
 	port := envOr("PORT", "8080")
 	platformURL := fmt.Sprintf("http://localhost:%s", port)
-	configsDir := envOr("CONFIGS_DIR", "workspace-configs-templates")
+	configsDir := envOr("CONFIGS_DIR", findConfigsDir())
 
 	// Router
 	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir)
@@ -80,6 +80,21 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func findConfigsDir() string {
+	candidates := []string{
+		"workspace-configs-templates",
+		"../workspace-configs-templates",
+		"../../workspace-configs-templates",
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			abs, _ := filepath.Abs(c)
+			return abs
+		}
+	}
+	return "workspace-configs-templates"
 }
 
 func findMigrationsDir() string {
