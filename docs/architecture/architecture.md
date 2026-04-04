@@ -37,6 +37,22 @@ The platform consists of four distinct systems:
 +-----------------------------------------------------------+
 ```
 
+### Plugins
+
+Shared skill/rule collections mounted into every workspace container at `/plugins/`:
+
+```
+plugins/
+├── ecc/                    # Everything Claude Code
+│   ├── rules/              # Always-on guidelines
+│   ├── skills/             # Shared skills (coding-standards, tdd-workflow, etc.)
+│   └── AGENTS.md           # Prompt fragment
+└── superpowers/            # obra/superpowers
+    └── skills/             # Shared skills (debugging, verification, etc.)
+```
+
+Plugins inject rules and skills into all agents automatically. Workspace-specific skills take priority over plugin skills (deduplicated by ID).
+
 ### Data Flow Summary
 
 - **Canvas <-> Platform:** HTTP REST + WebSocket for real-time events

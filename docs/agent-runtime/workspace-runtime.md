@@ -53,10 +53,13 @@ Container starts
 config.py loads WORKSPACE_CONFIG_PATH
       |
       v
-skills/loader.py dynamically loads skill files from config
+plugins.py scans /plugins/ for shared skills, rules, prompt fragments
       |
       v
-agent.py creates deepagent with loaded model + skills + tools
+skills/loader.py loads workspace skills + plugin skills (deduplicated by ID)
+      |
+      v
+agent.py creates LangGraph ReAct agent with model + all tools
       |
       v
 main.py wraps agent in A2A server (a2a-sdk)
