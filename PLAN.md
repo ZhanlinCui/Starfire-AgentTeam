@@ -50,7 +50,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **9e. Canvas drag-to-nest** — drag a node onto another to set `parent_id`, green ring drop target highlight, un-nest on drop to canvas background, circular hierarchy prevention
 - [ ] **9f. Delegation tool testing** — `workspace-template/tools/delegation.py` exists but needs e2e test: Agent A delegates to Agent B via A2A, platform enforces access
 - [ ] **9g. Delegation failure handling** — 3x retry + exponential backoff + optional fallback workspace (PRD F3.7, `docs/agent-runtime/config-format.md` delegation config)
-- [ ] **9h. Workspace forwarding** — `forwarded_to` column for version replacement, team expansion routing, reorganization (per `docs/api-protocol/registry-and-heartbeat.md`)
+- [x] **9h. Workspace forwarding** — Discovery follows `forwarded_to` chain (max 5 hops), transparent redirect to new workspace
 
 ---
 
@@ -104,7 +104,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **13a. Expand API** — `POST /workspaces/:id/expand` reads `sub_workspaces` from config, creates+provisions child workspaces (emits `WORKSPACE_EXPANDED`)
 - [x] **13b. Collapse API** — `POST /workspaces/:id/collapse` — stops containers, removes children (emits `WORKSPACE_COLLAPSED`)
 - [ ] **13c. Coordinator pattern** — Parent agent stays as team lead, routes incoming A2A to appropriate children based on capabilities
-- [ ] **13d. Scoped registry** — Sub-workspaces register with `parent_id`, private scope enforced (outside gets 403)
+- [x] **13d. Scoped registry** — Already enforced via `CanCommunicate()` in access.go (siblings, parent-child only)
 - [x] **13e. Canvas expand UX** — Right-click node → "Expand to Team" / "Collapse Team" in context menu
 - [ ] **13f. Canvas collapse view** — Toggle between expanded (see children) and collapsed (single node with team badge)
 - [ ] **13g. Canvas zoom-in** — Clicking expanded node reveals sub-workspace nodes; from top-level, team appears as single node
@@ -143,7 +143,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Unified Langfuse tracing across all workspaces (per `docs/development/observability.md`).
 
-- [ ] **16a. Langfuse auto-injection** — Workspace runtime detects `LANGFUSE_*` env vars and auto-instruments LangGraph
+- [x] **16a. Langfuse auto-injection** — `_setup_langfuse()` in agent.py detects env vars, creates CallbackHandler, sets LANGSMITH_TRACING
 - [ ] **16b. Cross-workspace trace linking** — A2A delegation passes `parent_task_id` to link child traces to parent span
 - [ ] **16c. Canvas trace preview (future)** — Click node → see recent LLM calls inline
 

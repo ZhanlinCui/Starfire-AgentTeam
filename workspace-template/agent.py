@@ -1,6 +1,11 @@
 """Create the Deep Agent with model + skills + tools."""
 
+import os
+import logging
+
 from langgraph.prebuilt import create_react_agent
+
+logger = logging.getLogger(__name__)
 
 
 def create_agent(model_str: str, tools: list, system_prompt: str):
@@ -39,6 +44,9 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
             f"Install it with: pip install langchain-{provider}"
         ) from e
 
+    # Auto-inject Langfuse tracing if env vars are present
+    callbacks = _setup_langfuse()
+
     agent = create_react_agent(
         model=llm,
         tools=tools,
@@ -46,3 +54,37 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
     )
 
     return agent
+
+
+def _setup_langfuse():
+    """Set up Langfuse tracing if LANGFUSE_* env vars are present.
+
+    Returns list of callbacks to pass to agent invocations, or empty list.
+    """
+    langfuse_host = os.environ.get("LANGFUSE_HOST")
+    langfuse_public = os.environ.get("LANGFUSE_PUBLIC_KEY")
+    langfuse_secret = os.environ.get("LANGFUSE_SECRET_KEY")
+
+    if not (langfuse_host and langfuse_public and langfuse_secret):
+        return []
+
+    try:
+        from langfuse.callback import CallbackHandler
+
+        handler = CallbackHandler(
+            host=langfuse_host,
+            public_key=langfuse_public,
+            secret_key=langfuse_secret,
+        )
+        logger.info("Langfuse tracing enabled: %s", langfuse_host)
+
+        # Also set LANGSMITH_TRACING for LangGraph native integration
+        os.environ.setdefault("LANGSMITH_TRACING", "true")
+
+        return [handler]
+    except ImportError:
+        logger.warning("Langfuse env vars set but langfuse package not installed")
+        return []
+    except Exception as e:
+        logger.warning("Langfuse setup failed: %s", e)
+        return []

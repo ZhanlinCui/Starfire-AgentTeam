@@ -41,7 +41,10 @@ class LangGraphA2AExecutor(AgentExecutor):
         try:
             async for chunk in self.agent.astream(
                 {"messages": [("user", user_input)]},
-                config={"configurable": {"thread_id": context.context_id}},
+                config={
+                    "configurable": {"thread_id": context.context_id},
+                    "run_name": f"a2a-{context.context_id[:8]}",
+                },
             ):
                 if "messages" in chunk:
                     last_msg = chunk["messages"][-1]

@@ -37,8 +37,10 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 
 	var url sql.NullString
 	var status string
-	err := db.DB.QueryRowContext(ctx, `SELECT url, status FROM workspaces WHERE id = $1`, targetID).
-		Scan(&url, &status)
+	var forwardedTo sql.NullString
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT url, status, forwarded_to FROM workspaces WHERE id = $1`, targetID,
+	).Scan(&url, &status, &forwardedTo)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 		return
@@ -48,13 +50,29 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 		return
 	}
 
+	// Follow forwarding chain (max 5 hops to prevent loops)
+	resolvedID := targetID
+	for i := 0; i < 5 && forwardedTo.Valid && forwardedTo.String != ""; i++ {
+		resolvedID = forwardedTo.String
+		err = db.DB.QueryRowContext(ctx,
+			`SELECT url, status, forwarded_to FROM workspaces WHERE id = $1`, resolvedID,
+		).Scan(&url, &status, &forwardedTo)
+		if err != nil {
+			break
+		}
+	}
+
 	if !url.Valid || url.String == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace has no URL", "status": status})
 		return
 	}
 
-	db.CacheURL(ctx, targetID, url.String)
-	c.JSON(http.StatusOK, gin.H{"id": targetID, "url": url.String, "status": status})
+	db.CacheURL(ctx, resolvedID, url.String)
+	c.JSON(http.StatusOK, gin.H{
+		"id":     resolvedID,
+		"url":    url.String,
+		"status": status,
+	})
 }
 
 // Peers handles GET /registry/:id/peers
