@@ -194,9 +194,9 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Runtime features documented in docs but not yet tracked.
 
-- [ ] **19a. Hot-reload** — File watcher for skills/config changes → rebuild Agent Card → broadcast `AGENT_CARD_UPDATED` (per `docs/agent-runtime/config-format.md`)
-- [ ] **19b. WebSocket subscription** — Workspace subscribes to platform WebSocket with `X-Workspace-ID` for peer events (per `docs/agent-runtime/workspace-runtime.md`)
-- [ ] **19c. System prompt rebuild on peer events** — Rebuild prompt when peers go online/offline/expand/collapse (per `docs/agent-runtime/system-prompt-structure.md`)
+- [x] **19a. Hot-reload** — `watcher.py` polls config directory for file hash changes (3s interval, 2s debounce), triggers reload callback + Agent Card update
+- [x] **19b. WebSocket subscription** — `events.py` connects to platform `/ws` with `X-Workspace-ID` header, exponential backoff reconnect
+- [x] **19c. System prompt rebuild on peer events** — `PlatformEventSubscriber` triggers on WORKSPACE_ONLINE/OFFLINE/EXPANDED/COLLAPSED/REMOVED and AGENT_CARD_UPDATED
 
 ---
 
