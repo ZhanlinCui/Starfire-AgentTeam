@@ -198,34 +198,45 @@ export function ChatTab({ workspaceId, data }: Props) {
 }
 
 function extractAgentText(task: Record<string, unknown>): string {
-  // A2A task result has artifacts[] or status.message
+  // A2A SDK response formats vary — try multiple extraction paths
   try {
+    // Path 1: result.artifacts[].parts[] (completed task)
     const artifacts = task.artifacts as Array<Record<string, unknown>> | undefined;
     if (artifacts && artifacts.length > 0) {
-      const parts = artifacts[0].parts as Array<Record<string, unknown>> | undefined;
-      if (parts) {
-        return parts
-          .filter((p) => p.type === "text")
-          .map((p) => String(p.text || ""))
-          .join("\n");
-      }
+      const texts = extractTextsFromParts(artifacts[0].parts);
+      if (texts) return texts;
     }
 
-    // Fallback: check status.message
+    // Path 2: result.status.message.parts[] (in-progress or completed)
     const status = task.status as Record<string, unknown> | undefined;
     if (status?.message) {
       const msg = status.message as Record<string, unknown>;
-      const parts = msg.parts as Array<Record<string, unknown>> | undefined;
-      if (parts) {
-        return parts
-          .filter((p) => p.type === "text")
-          .map((p) => String(p.text || ""))
-          .join("\n");
-      }
+      const texts = extractTextsFromParts(msg.parts);
+      if (texts) return texts;
     }
 
-    return JSON.stringify(task, null, 2);
+    // Path 3: Direct message at top level (some SDK versions)
+    if (task.message) {
+      const msg = task.message as Record<string, unknown>;
+      const texts = extractTextsFromParts(msg.parts);
+      if (texts) return texts;
+    }
+
+    // Path 4: If it's just a string result
+    if (typeof task === "string") return task;
+
+    // Fallback: show a clean error, not raw JSON
+    return "(Could not extract response text)";
   } catch {
-    return JSON.stringify(task, null, 2);
+    return "(Failed to parse response)";
   }
+}
+
+function extractTextsFromParts(parts: unknown): string | null {
+  if (!Array.isArray(parts)) return null;
+  const texts = parts
+    .filter((p: Record<string, unknown>) => p.type === "text" || p.kind === "text")
+    .map((p: Record<string, unknown>) => String(p.text || ""))
+    .filter(Boolean);
+  return texts.length > 0 ? texts.join("\n") : null;
 }
