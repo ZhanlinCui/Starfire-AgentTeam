@@ -202,8 +202,8 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 ## Phase 14: Production Hardening — TODO
 
-- [ ] **20a. Full Docker Compose** — `docker compose up` boots everything (platform, canvas, postgres, redis, langfuse)
-- [ ] **20b. Health checks** — All services have Docker healthchecks
+- [x] **20a. Full Docker Compose** — `docker compose up` boots postgres, redis, langfuse+clickhouse, platform, canvas on shared network
+- [x] **20b. Health checks** — All 6 services have Docker healthchecks (pg_isready, redis-cli ping, wget /health)
 - [ ] **20c. Secrets encryption** — AES-256 at-rest encryption for `workspace_secrets` (PRD F8.5)
 - [ ] **20d. Rate limiting** — Protect platform API endpoints
 - [ ] **20e. Graceful shutdown** — Platform drains WebSocket connections, stops liveness monitor cleanly
