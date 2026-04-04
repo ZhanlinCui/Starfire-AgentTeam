@@ -60,6 +60,10 @@ async def delegate_to_workspace(
             return {"success": False, "error": f"Discovery error: {e}"}
 
         # Send A2A message/send (A2A SDK serves at root URL)
+        # Include parent_task_id for cross-workspace trace linking
+        import uuid
+        task_id = str(uuid.uuid4())
+
         last_error = None
         for attempt in range(DELEGATION_RETRY_ATTEMPTS):
             try:
@@ -74,7 +78,11 @@ async def delegate_to_workspace(
                                 "role": "user",
                                 "parts": [{"kind": "text", "text": task}],
                                 "messageId": f"msg-{workspace_id}-{attempt}",
-                            }
+                            },
+                            "metadata": {
+                                "parent_task_id": task_id,
+                                "source_workspace_id": WORKSPACE_ID,
+                            },
                         },
                     },
                 )

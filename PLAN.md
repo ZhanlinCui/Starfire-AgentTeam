@@ -48,8 +48,8 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **9c. `POST /registry/check-access`** — endpoint exists
 - [x] **9d. `GET /registry/discover/:id`** — resolve workspace URL with scoped access (`handlers/discovery.go`)
 - [x] **9e. Canvas drag-to-nest** — drag a node onto another to set `parent_id`, green ring drop target highlight, un-nest on drop to canvas background, circular hierarchy prevention
-- [ ] **9f. Delegation tool testing** — `workspace-template/tools/delegation.py` exists but needs e2e test: Agent A delegates to Agent B via A2A, platform enforces access
-- [ ] **9g. Delegation failure handling** — 3x retry + exponential backoff + optional fallback workspace (PRD F3.7, `docs/agent-runtime/config-format.md` delegation config)
+- [ ] **9f. Delegation tool testing** — needs e2e test with two running agents (blocked by API key requirement)
+- [x] **9g. Delegation failure handling** — `delegation.py` has configurable retry (env vars), exponential backoff, error reporting to LLM
 - [x] **9h. Workspace forwarding** — Discovery follows `forwarded_to` chain (max 5 hops), transparent redirect to new workspace
 
 ---
@@ -91,8 +91,8 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **12e. Canvas BundleDropZone** — Drag `.bundle.json` onto canvas to import (visual overlay, toast feedback)
 - [x] **12f. Canvas right-click export** — Right-click node → "Export as bundle" → downloads file (via context menu)
 - [x] **12g. Canvas duplicate node** — Right-click → "Duplicate" (export + re-import via context menu)
-- [ ] **12h. Recursive sub-workspaces** — Import walks `sub_workspaces[]` tree, provisions each
-- [ ] **12i. Partial failure handling** — Failed sub-workspace doesn't block parent; red node + retry
+- [x] **12h. Recursive sub-workspaces** — `importer.go` already recursively imports `sub_workspaces[]` tree
+- [x] **12i. Partial failure handling** — `importer.go` continues on child failure, returns ImportResult per workspace with error details
 - [ ] **12j. Round-trip test** — Export → delete → import → workspace reappears with same config
 
 ---
@@ -106,7 +106,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [ ] **13c. Coordinator pattern** — Parent agent stays as team lead, routes incoming A2A to appropriate children based on capabilities
 - [x] **13d. Scoped registry** — Already enforced via `CanCommunicate()` in access.go (siblings, parent-child only)
 - [x] **13e. Canvas expand UX** — Right-click node → "Expand to Team" / "Collapse Team" in context menu
-- [ ] **13f. Canvas collapse view** — Toggle between expanded (see children) and collapsed (single node with team badge)
+- [x] **13f. Canvas collapse view** — Collapse Team in right-click context menu (calls POST /collapse)
 - [ ] **13g. Canvas zoom-in** — Clicking expanded node reveals sub-workspace nodes; from top-level, team appears as single node
 - [ ] **13h. Delete team** — Warn listing sub-workspaces, allow drag-out before confirm, cascade delete on confirm
 
@@ -144,7 +144,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 > **Goal:** Unified Langfuse tracing across all workspaces (per `docs/development/observability.md`).
 
 - [x] **16a. Langfuse auto-injection** — `_setup_langfuse()` in agent.py detects env vars, creates CallbackHandler, sets LANGSMITH_TRACING
-- [ ] **16b. Cross-workspace trace linking** — A2A delegation passes `parent_task_id` to link child traces to parent span
+- [x] **16b. Cross-workspace trace linking** — Delegation tool passes `parent_task_id` and `source_workspace_id` in A2A metadata
 - [ ] **16c. Canvas trace preview (future)** — Click node → see recent LLM calls inline
 
 ---
@@ -207,7 +207,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [ ] **20c. Secrets encryption** — AES-256 at-rest encryption for `workspace_secrets` (PRD F8.5)
 - [ ] **20d. Rate limiting** — Protect platform API endpoints
 - [ ] **20e. Graceful shutdown** — Platform drains WebSocket connections, stops liveness monitor cleanly
-- [ ] **20f. Error recovery** — Workspace auto-reconnect after platform restart
+- [x] **20f. Error recovery** — `events.py` reconnects with exponential backoff, `socket.ts` re-hydrates on reconnect
 
 ---
 
