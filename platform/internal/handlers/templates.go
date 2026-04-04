@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/agent-molecule/platform/internal/db"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
@@ -152,6 +153,100 @@ func (h *TemplatesHandler) Import(c *gin.Context) {
 		"status": "imported",
 		"id":     dirName,
 		"name":   body.Name,
+	})
+}
+
+// ReplaceFiles handles PUT /workspaces/:id/files
+// Replaces the workspace's config files with uploaded content, then restarts.
+func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
+	workspaceID := c.Param("id")
+
+	var body struct {
+		Files map[string]string `json:"files" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Find or create config directory for this workspace
+	// Use workspace name from DB to find matching template dir
+	ctx := c.Request.Context()
+	var wsName string
+	err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+
+	// Normalize name for directory
+	dirName := ""
+	for _, r := range wsName {
+		if r == ' ' {
+			dirName += "-"
+		} else if r >= 'A' && r <= 'Z' {
+			dirName += string(r + 32)
+		} else {
+			dirName += string(r)
+		}
+	}
+
+	destDir := filepath.Join(h.configsDir, dirName)
+
+	// Clear existing files (except keeping the directory)
+	if info, err := os.Stat(destDir); err == nil && info.IsDir() {
+		os.RemoveAll(destDir)
+	}
+
+	// Write new files
+	for relPath, content := range body.Files {
+		fullPath := filepath.Join(destDir, relPath)
+		os.MkdirAll(filepath.Dir(fullPath), 0755)
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file: " + relPath})
+			return
+		}
+	}
+
+	// Auto-generate config.yaml if not provided
+	if _, exists := body.Files["config.yaml"]; !exists {
+		promptFiles := []string{}
+		skills := []string{}
+		for path := range body.Files {
+			if filepath.Dir(path) == "." && filepath.Ext(path) == ".md" {
+				promptFiles = append(promptFiles, path)
+			}
+			if filepath.Base(path) == "SKILL.md" && filepath.Dir(filepath.Dir(path)) == "skills" {
+				skills = append(skills, filepath.Base(filepath.Dir(path)))
+			}
+		}
+
+		cfg := "name: " + wsName + "\ndescription: Replaced agent files\nversion: 1.0.0\ntier: 1\nmodel: anthropic:claude-haiku-4-5-20251001\n\nprompt_files:\n"
+		if len(promptFiles) > 0 {
+			for _, f := range promptFiles {
+				cfg += "  - " + f + "\n"
+			}
+		} else {
+			cfg += "  - system-prompt.md\n"
+		}
+		cfg += "\nskills:\n"
+		if len(skills) > 0 {
+			for _, s := range skills {
+				cfg += "  - " + s + "\n"
+			}
+		} else {
+			cfg += "  []\n"
+		}
+		cfg += "\ntools: []\n\na2a:\n  port: 8000\n  streaming: true\n  push_notifications: true\n"
+		cfg += "\nenv:\n  required:\n    - ANTHROPIC_API_KEY\n  optional: []\n"
+		os.WriteFile(filepath.Join(destDir, "config.yaml"), []byte(cfg), 0644)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "replaced",
+		"workspace": workspaceID,
+		"files":     len(body.Files),
+		"config_dir": dirName,
 	})
 }
 
