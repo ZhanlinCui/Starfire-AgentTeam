@@ -71,7 +71,7 @@ def load_plugins(plugins_dir: str | None = None) -> LoadedPlugins:
                 if f.lower() in ("readme.md", "changelog.md", "license.md", "contributing.md"):
                     continue
                 content = Path(os.path.join(plugin_path, f)).read_text().strip()
-                if content and len(content) > 50:  # skip trivially small files
+                if content:
                     plugin.prompt_fragments.append(content)
                     logger.info("Plugin %s: loaded prompt fragment %s", entry, f)
 

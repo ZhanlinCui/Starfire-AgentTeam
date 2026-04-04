@@ -51,16 +51,20 @@ async def main():
     if plugins.plugin_names:
         print(f"Plugins: {', '.join(plugins.plugin_names)}")
 
-    # 3. Load skills — workspace skills + plugin skills
+    # 3. Load skills — workspace skills + plugin skills (deduplicated by ID)
     loaded_skills = load_skills(config_path, config.skills)
-    # Also load skills from plugins
+    seen_skill_ids = {s.metadata.id for s in loaded_skills}
+
     for plugin_skills_dir in plugins.skill_dirs:
         plugin_skill_names = [
             d for d in os.listdir(plugin_skills_dir)
             if os.path.isdir(os.path.join(plugin_skills_dir, d))
         ]
-        plugin_skills = load_skills(plugin_skills_dir, plugin_skill_names)
-        loaded_skills.extend(plugin_skills)
+        for skill in load_skills(plugin_skills_dir, plugin_skill_names):
+            if skill.metadata.id not in seen_skill_ids:
+                loaded_skills.append(skill)
+                seen_skill_ids.add(skill.metadata.id)
+
     print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
 
     # 4. Gather tools from skills + built-in delegation tool
