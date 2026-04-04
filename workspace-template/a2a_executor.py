@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class LangGraphA2AExecutor(AgentExecutor):
-    """Bridges LangGraph streaming to A2A event model."""
+    """Bridges LangGraph agent to A2A event model."""
 
     def __init__(self, agent):
         self.agent = agent  # Compiled LangGraph graph
@@ -36,41 +36,47 @@ class LangGraphA2AExecutor(AgentExecutor):
 
         logger.info("A2A execute: user_input=%s", user_input[:200])
 
-        # Stream through LangGraph agent
-        final_content = ""
         try:
-            async for chunk in self.agent.astream(
+            # Use ainvoke (not astream) for reliable response across all models
+            result = await self.agent.ainvoke(
                 {"messages": [("user", user_input)]},
                 config={
                     "configurable": {"thread_id": context.context_id},
                     "run_name": f"a2a-{context.context_id[:8]}",
                 },
-            ):
-                if "messages" in chunk:
-                    last_msg = chunk["messages"][-1]
-                    content = getattr(last_msg, "content", "")
-                    # Anthropic may return list of content blocks
-                    if isinstance(content, list):
-                        content = " ".join(
-                            block.get("text", "") if isinstance(block, dict) else str(block)
-                            for block in content
-                        ).strip()
-                    if isinstance(content, str) and content.strip():
+            )
+
+            # Extract the last AI message from the result
+            messages = result.get("messages", [])
+            final_content = ""
+            for msg in reversed(messages):
+                content = getattr(msg, "content", "")
+                if isinstance(content, list):
+                    # Anthropic content blocks
+                    content = " ".join(
+                        block.get("text", "") if isinstance(block, dict) else str(block)
+                        for block in content
+                    ).strip()
+                if isinstance(content, str) and content.strip():
+                    # Skip human messages
+                    msg_type = getattr(msg, "type", "")
+                    if msg_type != "human":
                         final_content = content
+                        break
+
+            if final_content:
+                await event_queue.enqueue_event(
+                    new_agent_text_message(final_content)
+                )
+            else:
+                await event_queue.enqueue_event(
+                    new_agent_text_message("(no response generated)")
+                )
+
         except Exception as e:
             logger.error("A2A execute error: %s", e)
             await event_queue.enqueue_event(
                 new_agent_text_message(f"Agent error: {e}")
-            )
-            return
-
-        if final_content:
-            await event_queue.enqueue_event(
-                new_agent_text_message(final_content)
-            )
-        else:
-            await event_queue.enqueue_event(
-                new_agent_text_message("(no response generated)")
             )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue):
