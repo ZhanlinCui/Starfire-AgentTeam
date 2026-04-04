@@ -35,6 +35,11 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/restart", wh.Restart)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
+	// Team Expansion
+	teamh := handlers.NewTeamHandler(broadcaster, prov, platformURL, configsDir)
+	r.POST("/workspaces/:id/expand", teamh.Expand)
+	r.POST("/workspaces/:id/collapse", teamh.Collapse)
+
 	// Agents
 	ah := handlers.NewAgentHandler(broadcaster)
 	r.POST("/workspaces/:id/agent", ah.Assign)

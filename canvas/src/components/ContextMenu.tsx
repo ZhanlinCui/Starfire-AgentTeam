@@ -112,10 +112,34 @@ export function ContextMenu() {
     closeContextMenu();
   }, [contextMenu, selectNode, setPanelTab, closeContextMenu]);
 
+  const handleExpand = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      await api.post(`/workspaces/${contextMenu.nodeId}/expand`, {});
+    } catch (e) {
+      console.error("Expand failed:", e);
+    }
+    closeContextMenu();
+  }, [contextMenu, closeContextMenu]);
+
+  const handleCollapse = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      await api.post(`/workspaces/${contextMenu.nodeId}/collapse`, {});
+    } catch (e) {
+      console.error("Collapse failed:", e);
+    }
+    closeContextMenu();
+  }, [contextMenu, closeContextMenu]);
+
   if (!contextMenu) return null;
 
   const isOfflineOrFailed = contextMenu.nodeData.status === "offline" || contextMenu.nodeData.status === "failed";
   const isOnline = contextMenu.nodeData.status === "online";
+
+  // Check if workspace has children (is a team)
+  const store = useCanvasStore.getState();
+  const hasChildren = store.nodes.some((n) => n.data.parentId === contextMenu.nodeId);
 
   const items: MenuItem[] = [
     { label: "Details", icon: "i", action: handleViewDetails },
@@ -124,6 +148,9 @@ export function ContextMenu() {
     { label: "", icon: "", action: () => {}, divider: true },
     { label: "Export Bundle", icon: "📦", action: handleExportBundle },
     { label: "Duplicate", icon: "⧉", action: handleDuplicate },
+    ...(hasChildren
+      ? [{ label: "Collapse Team", icon: "◁", action: handleCollapse }]
+      : [{ label: "Expand to Team", icon: "▷", action: handleExpand }]),
     { label: "", icon: "", action: () => {}, divider: true },
     { label: "Restart", icon: "↻", action: handleRestart, disabled: !isOfflineOrFailed },
     { label: "Delete", icon: "✕", action: handleDelete, danger: true },

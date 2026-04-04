@@ -88,9 +88,9 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **12b. `platform/internal/bundle/importer.go`** — Parse bundle JSON → create workspace records → trigger provisioner, recursive sub-workspaces
 - [x] **12c. API endpoints** — `GET /bundles/export/:id`, `POST /bundles/import`
 - [x] **12d. `bundle-compile.sh`** — Script to compile workspace-configs-templates/ into .bundle.json (tested: 4 templates compiled)
-- [ ] **12e. Canvas BundleDropZone** — Drag `.bundle.json` onto canvas to import
-- [ ] **12f. Canvas right-click export** — Right-click node → "Export as bundle" → downloads file
-- [ ] **12g. Canvas duplicate node** — Right-click → "Duplicate" (export + re-import with new IDs)
+- [x] **12e. Canvas BundleDropZone** — Drag `.bundle.json` onto canvas to import (visual overlay, toast feedback)
+- [x] **12f. Canvas right-click export** — Right-click node → "Export as bundle" → downloads file (via context menu)
+- [x] **12g. Canvas duplicate node** — Right-click → "Duplicate" (export + re-import via context menu)
 - [ ] **12h. Recursive sub-workspaces** — Import walks `sub_workspaces[]` tree, provisions each
 - [ ] **12i. Partial failure handling** — Failed sub-workspace doesn't block parent; red node + retry
 - [ ] **12j. Round-trip test** — Export → delete → import → workspace reappears with same config
@@ -101,11 +101,11 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Any workspace node can "expand" into a sub-team while keeping its single A2A interface (per `docs/agent-runtime/team-expansion.md`).
 
-- [ ] **13a. Expand API** — `POST /workspaces/:id/expand` reads team definition from `sub_workspaces` in config, creates child workspaces (emits `WORKSPACE_EXPANDED`)
-- [ ] **13b. Collapse API** — `POST /workspaces/:id/collapse` — subs write handoff docs to memory, get stopped/removed (emits `WORKSPACE_COLLAPSED`)
+- [x] **13a. Expand API** — `POST /workspaces/:id/expand` reads `sub_workspaces` from config, creates+provisions child workspaces (emits `WORKSPACE_EXPANDED`)
+- [x] **13b. Collapse API** — `POST /workspaces/:id/collapse` — stops containers, removes children (emits `WORKSPACE_COLLAPSED`)
 - [ ] **13c. Coordinator pattern** — Parent agent stays as team lead, routes incoming A2A to appropriate children based on capabilities
 - [ ] **13d. Scoped registry** — Sub-workspaces register with `parent_id`, private scope enforced (outside gets 403)
-- [ ] **13e. Canvas expand UX** — Right-click node → "Expand to team" → children appear inside a group box
+- [x] **13e. Canvas expand UX** — Right-click node → "Expand to Team" / "Collapse Team" in context menu
 - [ ] **13f. Canvas collapse view** — Toggle between expanded (see children) and collapsed (single node with team badge)
 - [ ] **13g. Canvas zoom-in** — Clicking expanded node reveals sub-workspace nodes; from top-level, team appears as single node
 - [ ] **13h. Delete team** — Warn listing sub-workspaces, allow drag-out before confirm, cascade delete on confirm
