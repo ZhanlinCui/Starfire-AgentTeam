@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-molecule/platform/internal/db"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
@@ -40,17 +41,37 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 	}
 
 	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
 
-	// Container name matches provisioner naming
-	containerName := "ws-" + workspaceID
+	// Try multiple container name patterns:
+	// 1. Provisioner naming: ws-{id[:12]}
+	// 2. Workspace name from DB (normalized to lowercase-hyphen)
+	candidates := []string{}
 	if len(workspaceID) > 12 {
-		containerName = "ws-" + workspaceID[:12]
+		candidates = append(candidates, "ws-"+workspaceID[:12])
+	}
+	candidates = append(candidates, "ws-"+workspaceID)
+
+	// Look up workspace name for manual container naming
+	var wsName string
+	if _, err := h.docker.Ping(ctx); err == nil {
+		db.DB.QueryRowContext(ctx, `SELECT LOWER(REPLACE(name, ' ', '-')) FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName)
+		if wsName != "" {
+			candidates = append(candidates, wsName)
+		}
 	}
 
-	// Verify container is running using request context
-	ctx := c.Request.Context()
-	info, err := h.docker.ContainerInspect(ctx, containerName)
-	if err != nil || !info.State.Running {
+	// Find the first running container that matches
+	var containerName string
+	for _, name := range candidates {
+		info, err := h.docker.ContainerInspect(ctx, name)
+		if err == nil && info.State.Running {
+			containerName = name
+			break
+		}
+	}
+
+	if containerName == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "container not running"})
 		return
 	}
