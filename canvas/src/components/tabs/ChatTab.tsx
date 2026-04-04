@@ -200,14 +200,19 @@ export function ChatTab({ workspaceId, data }: Props) {
 function extractAgentText(task: Record<string, unknown>): string {
   // A2A SDK response formats vary — try multiple extraction paths
   try {
-    // Path 1: result.artifacts[].parts[] (completed task)
+    // Path 1: result.parts[] directly (a2a-sdk v0.3+ message format)
+    // { kind: "message", parts: [{ kind: "text", text: "..." }] }
+    const directTexts = extractTextsFromParts(task.parts);
+    if (directTexts) return directTexts;
+
+    // Path 2: result.artifacts[].parts[] (completed task with artifacts)
     const artifacts = task.artifacts as Array<Record<string, unknown>> | undefined;
     if (artifacts && artifacts.length > 0) {
       const texts = extractTextsFromParts(artifacts[0].parts);
       if (texts) return texts;
     }
 
-    // Path 2: result.status.message.parts[] (in-progress or completed)
+    // Path 3: result.status.message.parts[]
     const status = task.status as Record<string, unknown> | undefined;
     if (status?.message) {
       const msg = status.message as Record<string, unknown>;
@@ -215,17 +220,9 @@ function extractAgentText(task: Record<string, unknown>): string {
       if (texts) return texts;
     }
 
-    // Path 3: Direct message at top level (some SDK versions)
-    if (task.message) {
-      const msg = task.message as Record<string, unknown>;
-      const texts = extractTextsFromParts(msg.parts);
-      if (texts) return texts;
-    }
-
     // Path 4: If it's just a string result
     if (typeof task === "string") return task;
 
-    // Fallback: show a clean error, not raw JSON
     return "(Could not extract response text)";
   } catch {
     return "(Failed to parse response)";
