@@ -311,41 +311,43 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 function ReplaceAgentButton({ workspaceId, onReplaced }: { workspaceId: string; onReplaced: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<Record<string, string> | null>(null);
   const [result, setResult] = useState<{ status: string; message: string } | null>(null);
 
-  const handleFiles = async (fileList: FileList) => {
+  const handleFilesSelected = async (fileList: FileList) => {
+    const files: Record<string, string> = {};
+    for (const file of Array.from(fileList)) {
+      const path = file.webkitRelativePath || file.name;
+      const parts = path.split("/");
+      const relPath = parts.length > 1 ? parts.slice(1).join("/") : parts[0];
+      if (file.size > 1_000_000) continue;
+      try {
+        files[relPath] = await file.text();
+      } catch {
+        // Skip binary files
+      }
+    }
+    if (Object.keys(files).length === 0) {
+      setResult({ status: "error", message: "No files found" });
+      return;
+    }
+    setPendingFiles(files);
+    setConfirming(true);
+  };
+
+  const handleConfirmReplace = async () => {
+    if (!pendingFiles) return;
     setUploading(true);
+    setConfirming(false);
     setResult(null);
     try {
-      const files: Record<string, string> = {};
-
-      for (const file of Array.from(fileList)) {
-        const path = file.webkitRelativePath || file.name;
-        const parts = path.split("/");
-        const relPath = parts.length > 1 ? parts.slice(1).join("/") : parts[0];
-        if (file.size > 1_000_000) continue;
-        try {
-          files[relPath] = await file.text();
-        } catch {
-          // Skip binary files
-        }
-      }
-
-      if (Object.keys(files).length === 0) {
-        setResult({ status: "error", message: "No files found" });
-        return;
-      }
-
-      // Upload files to replace workspace config
-      await api.put(`/workspaces/${workspaceId}/files`, { files });
-
-      // Restart to pick up new files
+      await api.put(`/workspaces/${workspaceId}/files`, { files: pendingFiles });
       await api.post(`/workspaces/${workspaceId}/restart`, {});
       onReplaced();
-
       setResult({
         status: "success",
-        message: `Replaced with ${Object.keys(files).length} files. Restarting...`,
+        message: `Replaced with ${Object.keys(pendingFiles).length} files. Restarting...`,
       });
     } catch (e) {
       setResult({
@@ -354,6 +356,7 @@ function ReplaceAgentButton({ workspaceId, onReplaced }: { workspaceId: string; 
       });
     } finally {
       setUploading(false);
+      setPendingFiles(null);
     }
   };
 
@@ -370,15 +373,39 @@ function ReplaceAgentButton({ workspaceId, onReplaced }: { workspaceId: string; 
         webkitdirectory=""
         multiple
         className="hidden"
-        onChange={(e) => e.target.files && handleFiles(e.target.files)}
+        onChange={(e) => e.target.files && handleFilesSelected(e.target.files)}
       />
-      <button
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
-        className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-[11px] text-blue-300 font-medium transition-colors disabled:opacity-50"
-      >
-        {uploading ? "Uploading..." : "Replace with Agent Folder"}
-      </button>
+
+      {confirming && pendingFiles ? (
+        <div className="bg-amber-950/20 border border-amber-800/40 rounded-lg p-3 space-y-2">
+          <p className="text-xs text-amber-300">
+            Replace all agent files with {Object.keys(pendingFiles).length} files from the selected folder?
+            This will delete existing config, prompts, and skills.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleConfirmReplace}
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-xs rounded text-white"
+            >
+              Confirm Replace
+            </button>
+            <button
+              onClick={() => { setConfirming(false); setPendingFiles(null); }}
+              className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-xs rounded text-zinc-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-[11px] text-blue-300 font-medium transition-colors disabled:opacity-50"
+        >
+          {uploading ? "Replacing..." : "Replace with Agent Folder"}
+        </button>
+      )}
       {result && (
         <div className={`px-3 py-1.5 rounded text-xs ${
           result.status === "success"

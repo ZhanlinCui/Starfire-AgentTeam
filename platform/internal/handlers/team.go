@@ -206,17 +206,7 @@ func nilStr(s string) interface{} {
 }
 
 func findTemplateDirByName(configsDir, name string) string {
-	// Try normalized name first (e.g., "SEO Agent" → "seo-agent")
-	normalized := ""
-	for _, r := range name {
-		if r == ' ' {
-			normalized += "-"
-		} else if r >= 'A' && r <= 'Z' {
-			normalized += string(r + 32)
-		} else {
-			normalized += string(r)
-		}
-	}
+	normalized := normalizeName(name)
 
 	candidate := filepath.Join(configsDir, normalized)
 	if _, err := os.Stat(filepath.Join(candidate, "config.yaml")); err == nil {
