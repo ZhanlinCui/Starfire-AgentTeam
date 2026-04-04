@@ -63,3 +63,31 @@ body {
 ::selection {
   background: rgba(59, 130, 246, 0.3);
 }
+
+/* Panel slide animation */
+@keyframes slide-in-from-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-in {
+  animation-fill-mode: both;
+}
+
+.slide-in-from-right {
+  animation-name: slide-in-from-right;
+}
+
+.duration-200 {
+  animation-duration: 200ms;
+}
+
+/* Subtle node entrance */
+@keyframes node-appear {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.react-flow__node {
+  animation: node-appear 0.3s ease-out;
+}

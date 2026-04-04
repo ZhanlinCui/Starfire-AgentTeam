@@ -3,12 +3,12 @@
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 
-const STATUS_CONFIG: Record<string, { dot: string; glow: string; label: string }> = {
-  online: { dot: "bg-emerald-400", glow: "shadow-emerald-400/50", label: "Online" },
-  offline: { dot: "bg-zinc-500", glow: "", label: "Offline" },
-  degraded: { dot: "bg-amber-400", glow: "shadow-amber-400/50", label: "Degraded" },
-  failed: { dot: "bg-red-400", glow: "shadow-red-400/50", label: "Failed" },
-  provisioning: { dot: "bg-sky-400 animate-pulse", glow: "shadow-sky-400/50", label: "Starting" },
+const STATUS_CONFIG: Record<string, { dot: string; glow: string; label: string; bar: string }> = {
+  online: { dot: "bg-emerald-400", glow: "shadow-emerald-400/50", label: "Online", bar: "from-emerald-500/20 to-transparent" },
+  offline: { dot: "bg-zinc-500", glow: "", label: "Offline", bar: "from-zinc-600/10 to-transparent" },
+  degraded: { dot: "bg-amber-400", glow: "shadow-amber-400/50", label: "Degraded", bar: "from-amber-500/20 to-transparent" },
+  failed: { dot: "bg-red-400", glow: "shadow-red-400/50", label: "Failed", bar: "from-red-500/20 to-transparent" },
+  provisioning: { dot: "bg-sky-400 animate-pulse", glow: "shadow-sky-400/50", label: "Starting", bar: "from-sky-500/20 to-transparent" },
 };
 
 const TIER_CONFIG: Record<number, { label: string; color: string }> = {
@@ -28,6 +28,11 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
   const isSelected = selectedNodeId === id;
   const isOnline = data.status === "online";
 
+  // Count children for team badge
+  const childCount = useCanvasStore((s) =>
+    s.nodes.filter((n) => n.data.parentId === id).length
+  );
+
   const skills = getSkillNames(data.agentCard as Record<string, unknown> | null);
 
   return (
@@ -42,8 +47,8 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         openContextMenu({ x: e.clientX, y: e.clientY, nodeId: id, nodeData: data as unknown as import("@/store/canvas").WorkspaceNodeData });
       }}
       className={`
-        group relative rounded-xl min-w-[200px] max-w-[260px]
-        px-3.5 py-2.5 cursor-pointer
+        group relative rounded-xl min-w-[210px] max-w-[280px]
+        cursor-pointer overflow-hidden
         transition-all duration-200 ease-out
         ${isDragTarget
           ? "bg-emerald-950/40 border-2 border-emerald-400/60 ring-2 ring-emerald-400/20 scale-[1.03]"
@@ -54,84 +59,106 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         backdrop-blur-sm
       `}
     >
+      {/* Status gradient bar at top */}
+      <div className={`absolute inset-x-0 top-0 h-8 bg-gradient-to-b ${statusCfg.bar} pointer-events-none`} />
+
       <Handle
         type="target"
         position={Position.Top}
-        className="!w-2 !h-2 !bg-zinc-600 !border-zinc-500 !-top-1 hover:!bg-blue-400 transition-colors"
+        className="!w-2.5 !h-1 !rounded-full !bg-zinc-600/80 !border-0 !-top-0.5 hover:!bg-blue-400 hover:!h-1.5 transition-all"
       />
 
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2 mb-1.5">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={`w-2 h-2 rounded-full shrink-0 ${statusCfg.dot} ${statusCfg.glow} shadow-sm`} />
-          <span className="text-[13px] font-semibold text-zinc-100 truncate leading-tight">
-            {data.name}
-          </span>
+      <div className="relative px-3.5 py-2.5">
+        {/* Header row */}
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className={`w-2 h-2 rounded-full shrink-0 ${statusCfg.dot} ${statusCfg.glow} shadow-sm`} />
+            <span className="text-[13px] font-semibold text-zinc-100 truncate leading-tight">
+              {data.name}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Team badge */}
+            {childCount > 0 && (
+              <span className="text-[8px] font-mono text-violet-300 bg-violet-900/40 border border-violet-700/30 px-1.5 py-0.5 rounded-md">
+                {childCount} sub
+              </span>
+            )}
+            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-md ${tierCfg.color}`}>
+              {tierCfg.label}
+            </span>
+          </div>
         </div>
-        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-md shrink-0 ${tierCfg.color}`}>
-          {tierCfg.label}
-        </span>
-      </div>
 
-      {/* Role */}
-      {data.role && (
-        <div className="text-[10px] text-zinc-400 mb-1.5 leading-tight">{data.role}</div>
-      )}
+        {/* Role */}
+        {data.role && (
+          <div className="text-[10px] text-zinc-400 mb-1.5 leading-tight">{data.role}</div>
+        )}
 
-      {/* Skills */}
-      {skills.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-1.5">
-          {skills.slice(0, 3).map((skill) => (
-            <span
-              key={skill}
-              className={`text-[9px] px-1.5 py-0.5 rounded-md border ${
-                isOnline
-                  ? "text-emerald-300/80 bg-emerald-950/30 border-emerald-800/30"
-                  : "text-zinc-400 bg-zinc-800/60 border-zinc-700/40"
-              }`}
-            >
-              {skill}
-            </span>
-          ))}
-          {skills.length > 3 && (
-            <span className="text-[9px] text-zinc-500 self-center">
-              +{skills.length - 3}
-            </span>
+        {/* Skills */}
+        {skills.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            {skills.slice(0, 4).map((skill) => (
+              <span
+                key={skill}
+                className={`text-[8px] px-1.5 py-0.5 rounded-md border ${
+                  isOnline
+                    ? "text-emerald-300/80 bg-emerald-950/30 border-emerald-800/30"
+                    : "text-zinc-400 bg-zinc-800/60 border-zinc-700/40"
+                }`}
+              >
+                {skill}
+              </span>
+            ))}
+            {skills.length > 4 && (
+              <span className="text-[8px] text-zinc-500 self-center">
+                +{skills.length - 4}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Bottom row: status / active tasks */}
+        <div className="flex items-center justify-between mt-0.5">
+          {/* Status for non-online */}
+          {data.status !== "online" && (
+            <div className={`text-[8px] uppercase tracking-widest font-medium ${
+              data.status === "failed" ? "text-red-400" :
+              data.status === "degraded" ? "text-amber-400" :
+              data.status === "provisioning" ? "text-sky-400" :
+              "text-zinc-500"
+            }`}>
+              {statusCfg.label}
+            </div>
+          )}
+          {data.status === "online" && <div />}
+
+          {/* Active tasks */}
+          {data.activeTasks > 0 && (
+            <div className="flex items-center gap-1">
+              <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-[8px] text-amber-300/80 tabular-nums">
+                {data.activeTasks} task{data.activeTasks > 1 ? "s" : ""}
+              </span>
+            </div>
           )}
         </div>
-      )}
 
-      {/* Active tasks badge */}
-      {data.activeTasks > 0 && (
-        <div className="flex items-center gap-1 mt-0.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-[9px] text-amber-300/80">
-            {data.activeTasks} active
-          </span>
-        </div>
-      )}
-
-      {/* Degraded warning */}
-      {data.status === "degraded" && data.lastSampleError && (
-        <div
-          className="text-[9px] text-amber-300/70 truncate mt-1 bg-amber-950/20 px-1.5 py-0.5 rounded"
-          title={data.lastSampleError}
-        >
-          {data.lastSampleError}
-        </div>
-      )}
-
-      {/* Status label for non-online */}
-      {data.status !== "online" && data.status !== "provisioning" && (
-        <div className="text-[9px] text-zinc-500 mt-1 uppercase tracking-wider">
-          {statusCfg.label}
-        </div>
-      )}
+        {/* Degraded error preview */}
+        {data.status === "degraded" && data.lastSampleError && (
+          <div
+            className="text-[8px] text-amber-300/60 truncate mt-1 bg-amber-950/20 px-1.5 py-0.5 rounded border border-amber-800/20"
+            title={data.lastSampleError}
+          >
+            {data.lastSampleError}
+          </div>
+        )}
+      </div>
 
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!w-2 !h-2 !bg-zinc-600 !border-zinc-500 !-bottom-1 hover:!bg-blue-400 transition-colors"
+        className="!w-2.5 !h-1 !rounded-full !bg-zinc-600/80 !border-0 !-bottom-0.5 hover:!bg-blue-400 hover:!h-1.5 transition-all"
       />
     </div>
   );

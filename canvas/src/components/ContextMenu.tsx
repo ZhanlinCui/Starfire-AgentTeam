@@ -159,13 +159,18 @@ export function ContextMenu() {
   return (
     <div
       ref={ref}
-      className="fixed z-[60] min-w-[180px] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/60 rounded-xl shadow-2xl shadow-black/50 py-1.5 overflow-hidden"
+      className="fixed z-[60] min-w-[200px] bg-zinc-950/95 backdrop-blur-xl border border-zinc-800/60 rounded-xl shadow-2xl shadow-black/60 py-1 overflow-hidden"
       style={{ left: contextMenu.x, top: contextMenu.y }}
     >
       {/* Header */}
-      <div className="px-3 py-1.5 border-b border-zinc-800/60 mb-1">
-        <div className="text-[11px] font-semibold text-zinc-300 truncate">{contextMenu.nodeData.name}</div>
-        <div className="text-[9px] text-zinc-500">{contextMenu.nodeData.status}</div>
+      <div className="px-3.5 py-2 border-b border-zinc-800/40 mb-0.5">
+        <div className="text-[11px] font-semibold text-zinc-200 truncate">{contextMenu.nodeData.name}</div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <div className={`w-1.5 h-1.5 rounded-full ${
+            isOnline ? "bg-emerald-400" : isOfflineOrFailed ? "bg-red-400" : "bg-zinc-500"
+          }`} />
+          <span className="text-[9px] text-zinc-500">{contextMenu.nodeData.status}</span>
+        </div>
       </div>
 
       {items.map((item, i) => {
@@ -177,13 +182,13 @@ export function ContextMenu() {
             key={i}
             onClick={item.action}
             disabled={item.disabled}
-            className={`w-full px-3 py-1.5 flex items-center gap-2.5 text-left text-[12px] transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+            className={`w-full px-3.5 py-1.5 flex items-center gap-2.5 text-left text-[11px] transition-colors disabled:opacity-25 disabled:cursor-not-allowed ${
               item.danger
                 ? "text-red-400 hover:bg-red-950/40 hover:text-red-300"
-                : "text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100"
+                : "text-zinc-300 hover:bg-zinc-800/40 hover:text-zinc-100"
             }`}
           >
-            <span className="w-4 text-center text-[11px] shrink-0 opacity-60">{item.icon}</span>
+            <span className="w-4 text-center text-[10px] shrink-0 opacity-50">{item.icon}</span>
             {item.label}
           </button>
         );

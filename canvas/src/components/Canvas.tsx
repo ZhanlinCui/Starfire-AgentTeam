@@ -22,6 +22,7 @@ import { CreateWorkspaceButton } from "./CreateWorkspaceDialog";
 import { ContextMenu } from "./ContextMenu";
 import { TemplatePalette } from "./TemplatePalette";
 import { BundleDropZone } from "./BundleDropZone";
+import { Toolbar } from "./Toolbar";
 
 const nodeTypes = {
   workspaceNode: WorkspaceNode,
@@ -173,6 +174,7 @@ function CanvasInner() {
         />
       </ReactFlow>
 
+      <Toolbar />
       <BundleDropZone />
       <TemplatePalette />
       <SidePanel />
