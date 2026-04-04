@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 
 interface Template {
@@ -19,6 +19,73 @@ const TIER_LABELS: Record<number, { label: string; color: string }> = {
   3: { label: "T3", color: "text-violet-400 bg-violet-950/40" },
   4: { label: "T4", color: "text-amber-400 bg-amber-950/40" },
 };
+
+function ImportAgentButton({ onImported }: { onImported: () => void }) {
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFiles = async (fileList: FileList) => {
+    setImporting(true);
+    try {
+      const files: Record<string, string> = {};
+      let agentName = "";
+
+      for (const file of Array.from(fileList)) {
+        // webkitRelativePath gives us "folder/file.md"
+        const path = file.webkitRelativePath || file.name;
+        // Strip the top-level folder name
+        const parts = path.split("/");
+        if (!agentName && parts.length > 1) {
+          agentName = parts[0];
+        }
+        const relPath = parts.length > 1 ? parts.slice(1).join("/") : parts[0];
+
+        // Only import text files
+        if (file.size > 1_000_000) continue; // skip files > 1MB
+        try {
+          const content = await file.text();
+          files[relPath] = content;
+        } catch {
+          // Skip binary files
+        }
+      }
+
+      if (Object.keys(files).length === 0) {
+        alert("No files found in the selected folder");
+        return;
+      }
+
+      const name = agentName || "Imported Agent";
+      await api.post("/templates/import", { name, files });
+      onImported();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        // @ts-expect-error webkitdirectory is non-standard but widely supported
+        webkitdirectory=""
+        multiple
+        className="hidden"
+        onChange={(e) => e.target.files && handleFiles(e.target.files)}
+      />
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={importing}
+        className="w-full px-3 py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded-lg text-[11px] text-blue-300 font-medium transition-colors disabled:opacity-50"
+      >
+        {importing ? "Importing..." : "Import Agent Folder"}
+      </button>
+    </div>
+  );
+}
 
 export function TemplatePalette() {
   const [open, setOpen] = useState(false);
@@ -155,10 +222,11 @@ export function TemplatePalette() {
             })}
           </div>
 
-          <div className="px-4 py-3 border-t border-zinc-800/60">
+          <div className="px-4 py-3 border-t border-zinc-800/60 space-y-2">
+            <ImportAgentButton onImported={loadTemplates} />
             <button
               onClick={loadTemplates}
-              className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors block"
             >
               Refresh templates
             </button>

@@ -27,6 +27,134 @@ type templateSummary struct {
 	SkillCount  int      `json:"skill_count"`
 }
 
+// Import handles POST /templates/import
+// Accepts a JSON body with the template name and files content.
+func (h *TemplatesHandler) Import(c *gin.Context) {
+	var body struct {
+		Name  string            `json:"name" binding:"required"`
+		Files map[string]string `json:"files" binding:"required"` // path → content
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Normalize name for directory
+	dirName := ""
+	for _, r := range body.Name {
+		if r == ' ' {
+			dirName += "-"
+		} else if r >= 'A' && r <= 'Z' {
+			dirName += string(r + 32)
+		} else {
+			dirName += string(r)
+		}
+	}
+
+	destDir := filepath.Join(h.configsDir, dirName)
+	if _, err := os.Stat(destDir); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "template already exists", "id": dirName})
+		return
+	}
+
+	// Write files
+	for relPath, content := range body.Files {
+		fullPath := filepath.Join(destDir, relPath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create directory"})
+			return
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file"})
+			return
+		}
+	}
+
+	// Auto-generate config.yaml if not provided
+	if _, exists := body.Files["config.yaml"]; !exists {
+		promptFiles := []string{}
+		skills := []string{}
+		for path := range body.Files {
+			// Root .md files are prompt files
+			if filepath.Dir(path) == "." && filepath.Ext(path) == ".md" {
+				promptFiles = append(promptFiles, path)
+			}
+			// skills/*/SKILL.md
+			parts := filepath.SplitList(path)
+			if len(parts) == 0 {
+				dir := filepath.Dir(path)
+				parent := filepath.Dir(dir)
+				if filepath.Base(parent) == "skills" || parent == "skills" {
+					skillName := filepath.Base(dir)
+					found := false
+					for _, s := range skills {
+						if s == skillName {
+							found = true
+							break
+						}
+					}
+					if !found {
+						skills = append(skills, skillName)
+					}
+				}
+			}
+		}
+
+		// Detect skills from directory structure
+		for path := range body.Files {
+			if filepath.Base(path) == "SKILL.md" {
+				dir := filepath.Dir(path)
+				if filepath.Dir(dir) == "skills" {
+					skillName := filepath.Base(dir)
+					found := false
+					for _, s := range skills {
+						if s == skillName {
+							found = true
+							break
+						}
+					}
+					if !found {
+						skills = append(skills, skillName)
+					}
+				}
+			}
+		}
+
+		configYaml := "name: " + body.Name + "\n"
+		configYaml += "description: Imported agent\n"
+		configYaml += "version: 1.0.0\n"
+		configYaml += "tier: 1\n"
+		configYaml += "model: anthropic:claude-haiku-4-5-20251001\n"
+		configYaml += "\nprompt_files:\n"
+		if len(promptFiles) > 0 {
+			for _, f := range promptFiles {
+				configYaml += "  - " + f + "\n"
+			}
+		} else {
+			configYaml += "  - system-prompt.md\n"
+		}
+		configYaml += "\nskills:\n"
+		if len(skills) > 0 {
+			for _, s := range skills {
+				configYaml += "  - " + s + "\n"
+			}
+		} else {
+			configYaml += "  []\n"
+		}
+		configYaml += "\ntools: []\n"
+		configYaml += "\na2a:\n  port: 8000\n  streaming: true\n  push_notifications: true\n"
+		configYaml += "\nenv:\n  required:\n    - ANTHROPIC_API_KEY\n  optional: []\n"
+
+		os.WriteFile(filepath.Join(destDir, "config.yaml"), []byte(configYaml), 0644)
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"status": "imported",
+		"id":     dirName,
+		"name":   body.Name,
+	})
+}
+
 // List handles GET /templates
 func (h *TemplatesHandler) List(c *gin.Context) {
 	entries, err := os.ReadDir(h.configsDir)

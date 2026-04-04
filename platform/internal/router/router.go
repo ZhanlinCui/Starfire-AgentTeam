@@ -99,6 +99,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	// Templates
 	tmplh := handlers.NewTemplatesHandler(configsDir)
 	r.GET("/templates", tmplh.List)
+	r.POST("/templates/import", tmplh.Import)
 
 	// Bundles
 	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir)
