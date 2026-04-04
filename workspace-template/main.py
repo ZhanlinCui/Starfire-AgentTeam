@@ -19,6 +19,7 @@ from a2a_executor import LangGraphA2AExecutor
 from agent import create_agent
 from config import load_config
 from heartbeat import HeartbeatLoop
+from plugins import load_plugins
 from prompt import build_system_prompt, get_peer_capabilities
 from skills.loader import load_skills
 from tools.delegation import delegate_to_workspace
@@ -45,20 +46,35 @@ async def main():
     config = load_config(config_path)
     port = config.a2a.port
 
-    # 2. Load skills
+    # 2. Load plugins (ECC, Superpowers, etc.)
+    plugins = load_plugins()
+    if plugins.plugin_names:
+        print(f"Plugins: {', '.join(plugins.plugin_names)}")
+
+    # 3. Load skills — workspace skills + plugin skills
     loaded_skills = load_skills(config_path, config.skills)
+    # Also load skills from plugins
+    for plugin_skills_dir in plugins.skill_dirs:
+        plugin_skill_names = [
+            d for d in os.listdir(plugin_skills_dir)
+            if os.path.isdir(os.path.join(plugin_skills_dir, d))
+        ]
+        plugin_skills = load_skills(plugin_skills_dir, plugin_skill_names)
+        loaded_skills.extend(plugin_skills)
     print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
 
-    # 3. Gather tools from skills + built-in delegation tool
+    # 4. Gather tools from skills + built-in delegation tool
     all_tools = [delegate_to_workspace]
     for skill in loaded_skills:
         all_tools.extend(skill.tools)
 
-    # 4. Fetch peer capabilities and build system prompt
+    # 5. Fetch peer capabilities and build system prompt
     peers = await get_peer_capabilities(platform_url, workspace_id)
     system_prompt = build_system_prompt(
         config_path, workspace_id, loaded_skills, peers,
         prompt_files=config.prompt_files,
+        plugin_rules=plugins.rules,
+        plugin_prompts=plugins.prompt_fragments,
     )
 
     # 5. Create the agent

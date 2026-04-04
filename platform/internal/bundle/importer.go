@@ -76,6 +76,7 @@ func Import(
 			Tier:        b.Tier,
 			EnvVars:     map[string]string{},
 			PlatformURL: platformURL,
+			// PluginsPath set by caller if available
 		}
 		go func() {
 			provCtx, cancel := context.WithTimeout(context.Background(), provisioner.ProvisionTimeout)

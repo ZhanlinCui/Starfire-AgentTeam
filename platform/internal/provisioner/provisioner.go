@@ -31,6 +31,7 @@ const (
 type WorkspaceConfig struct {
 	WorkspaceID string
 	ConfigPath  string // Host path to workspace config directory
+	PluginsPath string // Host path to plugins directory (mounted at /plugins)
 	Tier        int
 	EnvVars     map[string]string // Additional env vars (API keys, etc.)
 	PlatformURL string
@@ -74,6 +75,7 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		fmt.Sprintf("WORKSPACE_CONFIG_PATH=/configs"),
 		fmt.Sprintf("PLATFORM_URL=%s", cfg.PlatformURL),
 		fmt.Sprintf("TIER=%d", cfg.Tier),
+		"PLUGINS_DIR=/plugins",
 	}
 	for k, v := range cfg.EnvVars {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
@@ -91,11 +93,16 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	// Host config with volume mounts
 	volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
 	log.Printf("Provisioner: workspace volume %s (created by Docker if new)", volumeName)
+	binds := []string{
+		fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),
+		fmt.Sprintf("%s:/workspace", volumeName),
+	}
+	if cfg.PluginsPath != "" {
+		binds = append(binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
+	}
+
 	hostCfg := &container.HostConfig{
-		Binds: []string{
-			fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),
-			fmt.Sprintf("%s:/workspace", volumeName),
-		},
+		Binds: binds,
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 	}
 
@@ -105,10 +112,12 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		hostCfg.Tmpfs = map[string]string{
 			"/tmp": "size=64m",
 		}
-		// Tier 1 doesn't get a writable workspace — remove the bind
-		hostCfg.Binds = []string{
-			fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),
+		// Tier 1 doesn't get a writable workspace
+		tier1Binds := []string{fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath)}
+		if cfg.PluginsPath != "" {
+			tier1Binds = append(tier1Binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
 		}
+		hostCfg.Binds = tier1Binds
 	}
 
 	// Network config — join agent-molecule-net with container name as alias

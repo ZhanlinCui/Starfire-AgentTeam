@@ -295,9 +295,11 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 		}
 	}
 
+	pluginsPath, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
 	cfg := provisioner.WorkspaceConfig{
 		WorkspaceID: workspaceID,
 		ConfigPath:  configPath,
+		PluginsPath: pluginsPath,
 		Tier:        payload.Tier,
 		EnvVars:     envVars,
 		PlatformURL: h.platformURL,

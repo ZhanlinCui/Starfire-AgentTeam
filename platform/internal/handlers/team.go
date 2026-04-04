@@ -117,10 +117,12 @@ func (h *TeamHandler) Expand(c *gin.Context) {
 		if h.provisioner != nil && sub.Config != "" {
 			configPath, _ := filepath.Abs(filepath.Join(h.configsDir, sub.Config))
 			if _, err := os.Stat(configPath); err == nil {
-				go func(wID, cPath string, t int) {
+				pluginsPath, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
+				go func(wID, cPath, pPath string, t int) {
 					cfg := provisioner.WorkspaceConfig{
 						WorkspaceID: wID,
 						ConfigPath:  cPath,
+						PluginsPath: pPath,
 						Tier:        t,
 						EnvVars:     map[string]string{},
 						PlatformURL: h.platformURL,
@@ -128,7 +130,7 @@ func (h *TeamHandler) Expand(c *gin.Context) {
 					if _, err := h.provisioner.Start(ctx, cfg); err != nil {
 						log.Printf("Expand: provision failed for %s: %v", wID, err)
 					}
-				}(childID, configPath, tier)
+				}(childID, configPath, pluginsPath, tier)
 			}
 		}
 

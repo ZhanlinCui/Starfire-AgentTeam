@@ -29,6 +29,8 @@ def build_system_prompt(
     loaded_skills: list[LoadedSkill],
     peers: list[dict],
     prompt_files: list[str] | None = None,
+    plugin_rules: list[str] | None = None,
+    plugin_prompts: list[str] | None = None,
 ) -> str:
     """Build the complete system prompt.
 
@@ -57,6 +59,20 @@ def build_system_prompt(
                 parts.append(content)
         else:
             print(f"Warning: prompt file not found: {file_path}")
+
+    # Inject plugin rules (always-on guidelines from ECC, Superpowers, etc.)
+    if plugin_rules:
+        parts.append("\n## Platform Rules\n")
+        for rule in plugin_rules:
+            parts.append(rule)
+            parts.append("")
+
+    # Inject plugin prompt fragments
+    if plugin_prompts:
+        parts.append("\n## Platform Guidelines\n")
+        for fragment in plugin_prompts:
+            parts.append(fragment)
+            parts.append("")
 
     # Add skill instructions
     if loaded_skills:

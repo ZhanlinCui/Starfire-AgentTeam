@@ -15,8 +15,9 @@ COPY tools/ ./tools/
 VOLUME /configs
 
 # Workspace directory for coding agents (mounted at runtime)
-RUN mkdir -p /workspace
+RUN mkdir -p /workspace /plugins
 VOLUME /workspace
+VOLUME /plugins
 
 EXPOSE 8000
 
