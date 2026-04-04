@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
 
 interface Props {
@@ -33,24 +33,6 @@ function getIcon(path: string, isDir: boolean): string {
   return FILE_ICONS[ext] || "📄";
 }
 
-function getLang(path: string): string {
-  const ext = path.split(".").pop() || "";
-  const map: Record<string, string> = {
-    py: "python",
-    ts: "typescript",
-    tsx: "typescript",
-    js: "javascript",
-    json: "json",
-    yaml: "yaml",
-    yml: "yaml",
-    md: "markdown",
-    html: "html",
-    css: "css",
-    sh: "shell",
-  };
-  return map[ext] || "text";
-}
-
 export function FilesTab({ workspaceId }: Props) {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +45,13 @@ export function FilesTab({ workspaceId }: Props) {
   const [success, setSuccess] = useState<string | null>(null);
   const [showNewFile, setShowNewFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    return () => clearTimeout(successTimerRef.current);
+  }, []);
 
   const loadFiles = useCallback(async () => {
     setLoading(true);
@@ -104,7 +93,8 @@ export function FilesTab({ workspaceId }: Props) {
       await api.put(`/workspaces/${workspaceId}/files/${selectedFile}`, { content: editContent });
       setFileContent(editContent);
       setSuccess("Saved");
-      setTimeout(() => setSuccess(null), 2000);
+      clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => setSuccess(null), 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
@@ -112,11 +102,16 @@ export function FilesTab({ workspaceId }: Props) {
     }
   };
 
-  const deleteFile = async (path: string) => {
+  const requestDeleteFile = (path: string) => {
+    setConfirmDelete(path);
+  };
+
+  const confirmDeleteFile = async () => {
+    if (!confirmDelete) return;
     setError(null);
     try {
-      await api.del(`/workspaces/${workspaceId}/files/${path}`);
-      if (selectedFile === path) {
+      await api.del(`/workspaces/${workspaceId}/files/${confirmDelete}`);
+      if (selectedFile === confirmDelete) {
         setSelectedFile(null);
         setFileContent("");
         setEditContent("");
@@ -124,6 +119,8 @@ export function FilesTab({ workspaceId }: Props) {
       loadFiles();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete");
+    } finally {
+      setConfirmDelete(null);
     }
   };
 
@@ -143,8 +140,7 @@ export function FilesTab({ workspaceId }: Props) {
 
   const isDirty = editContent !== fileContent;
 
-  // Build tree structure
-  const tree = buildTree(files);
+  const tree = useMemo(() => buildTree(files), [files]);
 
   if (loading) {
     return <div className="p-4 text-xs text-zinc-500">Loading files...</div>;
@@ -168,6 +164,20 @@ export function FilesTab({ workspaceId }: Props) {
       {error && (
         <div className="mx-3 mt-2 px-3 py-1.5 bg-red-900/30 border border-red-800 rounded text-xs text-red-400">
           {error}
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="mx-3 mt-2 px-3 py-2 bg-amber-950/30 border border-amber-800/40 rounded space-y-1.5">
+          <p className="text-xs text-amber-300">Delete <span className="font-mono">{confirmDelete}</span>?</p>
+          <div className="flex gap-2">
+            <button onClick={confirmDeleteFile} className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-[10px] rounded text-white">
+              Delete
+            </button>
+            <button onClick={() => setConfirmDelete(null)} className="px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-[10px] rounded text-zinc-300">
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -197,7 +207,7 @@ export function FilesTab({ workspaceId }: Props) {
               nodes={tree}
               selectedPath={selectedFile}
               onSelect={openFile}
-              onDelete={deleteFile}
+              onDelete={requestDeleteFile}
             />
           )}
         </div>
@@ -230,23 +240,27 @@ export function FilesTab({ workspaceId }: Props) {
                 <div className="p-4 text-xs text-zinc-500">Loading...</div>
               ) : (
                 <textarea
+                  ref={editorRef}
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
                   onKeyDown={(e) => {
-                    // Ctrl/Cmd+S to save
                     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
                       e.preventDefault();
                       saveFile();
                     }
-                    // Tab inserts spaces
                     if (e.key === "Tab") {
                       e.preventDefault();
-                      const start = e.currentTarget.selectionStart;
-                      const end = e.currentTarget.selectionEnd;
+                      const el = editorRef.current;
+                      if (!el) return;
+                      const start = el.selectionStart;
+                      const end = el.selectionEnd;
                       const val = editContent;
-                      setEditContent(val.substring(0, start) + "  " + val.substring(end));
+                      const updated = val.substring(0, start) + "  " + val.substring(end);
+                      setEditContent(updated);
                       requestAnimationFrame(() => {
-                        e.currentTarget.selectionStart = e.currentTarget.selectionEnd = start + 2;
+                        if (editorRef.current) {
+                          editorRef.current.selectionStart = editorRef.current.selectionEnd = start + 2;
+                        }
                       });
                     }
                   }}
