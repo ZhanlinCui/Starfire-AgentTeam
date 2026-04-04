@@ -120,15 +120,16 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | POST | /workspaces/:id/collapse | team.go |
 | POST | /workspaces/:id/restart | workspace.go |
 | POST | /workspaces/:id/a2a | workspace.go |
+| GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
 | GET/PUT | /canvas/viewport | viewport.go |
 | GET | /templates | templates.go |
+| POST | /templates/import | templates.go |
 | POST | /registry/register | registry.go |
 | POST | /registry/heartbeat | registry.go |
 | POST | /registry/update-card | registry.go |
 | GET | /registry/discover/:id | discovery.go |
 | GET | /registry/:id/peers | discovery.go |
 | POST | /registry/check-access | discovery.go |
-| GET | /templates | templates.go |
 | GET | /bundles/export/:id | bundle.go |
 | POST | /bundles/import | bundle.go |
 | GET | /events[/:workspaceId] | events.go |

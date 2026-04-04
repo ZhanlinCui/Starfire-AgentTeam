@@ -101,31 +101,33 @@ Communication topology is derived from the `parent_id` hierarchy — there is no
 
 See [Event Log](../architecture/event-log.md) for details.
 
-### Templates
+### Templates & Files
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/templates` | List available workspace templates (from `workspace-configs-templates/`) |
+| `POST` | `/templates/import` | Import agent folder as a new template (body: `{ name, files }`) |
+| `GET` | `/workspaces/:id/files` | List workspace config file tree |
+| `GET` | `/workspaces/:id/files/*path` | Read a workspace config file |
+| `PUT` | `/workspaces/:id/files/*path` | Write/create a workspace config file |
+| `PUT` | `/workspaces/:id/files` | Replace all workspace config files (body: `{ files }`) |
+| `DELETE` | `/workspaces/:id/files/*path` | Delete a workspace config file |
 
-Returns summary only — enough to render the template palette card:
+All file paths are validated against path traversal (`../` and absolute paths blocked).
 
-```json
-[
-  {
-    "id": "seo-agent",
-    "name": "Vancouver SEO Agent",
-    "description": "Bilingual EN/ZH SEO page builder",
-    "tier": 1,
-    "model": "anthropic:claude-sonnet-4-6",
-    "skills": ["generate-seo-page", "audit-seo-page", "keyword-research"],
-    "skill_count": 3
-  }
-]
-```
+### Canvas Viewport
 
-Full `config.yaml` is only read from disk at provisioning time (`POST /workspaces`). The template list is scanned at startup and cached in memory — a file watcher on `workspace-configs-templates/` invalidates the cache when templates are added, removed, or modified.
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/canvas/viewport` | Get saved canvas pan/zoom state |
+| `PUT` | `/canvas/viewport` | Save canvas pan/zoom state (body: `{ x, y, zoom }`) |
 
-See [Canvas UI — Creating Workspaces](../frontend/canvas.md#creating-workspaces) for the template palette UX.
+### Team Expansion
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/workspaces/:id/expand` | Expand workspace into team (creates sub-workspaces from config) |
+| `POST` | `/workspaces/:id/collapse` | Collapse team (stops and removes sub-workspaces) |
 
 ### Bundles
 

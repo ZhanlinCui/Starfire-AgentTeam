@@ -81,17 +81,48 @@ Clicking a workspace node opens a **480px-wide side panel** on the right edge of
 | **Chat** | `ChatTab` | Send A2A `message/send` via platform proxy (`POST /workspaces/:id/a2a`), handles JSON-RPC errors |
 | **Settings** | `SettingsTab` | Configure LLM provider + API keys per workspace via `/workspaces/:id/secrets`, quick-set rows for common keys |
 | **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
+| **Files** | `FilesTab` | VS Code-style file explorer with tree view, inline editor, create/delete files |
 | **Config** | `ConfigTab` | JSON editor for workspace config, load via `GET /workspaces/:id/config`, save changes |
 | **Memory** | `MemoryTab` | Browse key/value memory entries from `GET /workspaces/:id/memory`, add new entries with optional TTL |
 | **Events** | `EventsTab` | Workspace-scoped event log from `GET /events/:workspaceId`, color-coded by event type |
 
 Tab state is managed in the Zustand store via `panelTab` and `setPanelTab`. The panel closes when the user clicks the close button or clicks the canvas background.
 
-The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, and Restart triggers `POST /workspaces/:id/restart`.
+The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, Restart triggers `POST /workspaces/:id/restart`. Also includes Agent Management (assign/replace/remove model) and Replace Agent Folder (upload folder to swap agent files with confirmation).
 
 The **Settings tab** stores API keys in the `workspace_secrets` table — values are never exposed to the browser (only key names are returned by `GET /workspaces/:id/secrets`).
 
 The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. Sessions have a 30-minute idle timeout.
+
+The **Files tab** provides a VS Code-style file explorer:
+- Tree view with collapsible directories and file icons by extension
+- Inline editor with monospace font, Ctrl/Cmd+S to save, Tab inserts spaces
+- Create new files with path input, delete files with confirmation
+- File operations via `GET/PUT/DELETE /workspaces/:id/files/*path`
+
+## Canvas Chrome
+
+### Toolbar
+
+Fixed top-center bar showing the Starfire logo, live workspace status counts (online/offline/provisioning/failed), and total workspace count.
+
+### Template Palette
+
+Left sidebar toggled by the grid icon (top-left). Lists all available workspace templates from `GET /templates` with name, description, tier badge, and skill list. Click a template to deploy a new workspace. Includes "Import Agent Folder" button to upload any agent framework's folder (OpenClaw, Claude Code, Codex) as a new template.
+
+### Right-Click Context Menu
+
+Right-clicking a workspace node shows a context menu with:
+- Details / Chat / Terminal — open side panel tabs
+- Export Bundle — downloads `.bundle.json`
+- Duplicate — exports then re-imports with new IDs
+- Expand to Team / Collapse Team — team expansion via `POST /workspaces/:id/expand` or `/collapse`
+- Restart — for offline/failed workspaces
+- Delete — removes workspace
+
+### Bundle Drop Zone
+
+Drag a `.bundle.json` file onto the canvas to import a workspace tree via `POST /bundles/import`. Shows blue overlay during drag, import progress spinner, and success/error toast.
 
 ## Creating Workspaces
 
