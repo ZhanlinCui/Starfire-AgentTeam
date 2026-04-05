@@ -48,7 +48,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **9c. `POST /registry/check-access`** — endpoint exists
 - [x] **9d. `GET /registry/discover/:id`** — resolve workspace URL with scoped access (`handlers/discovery.go`)
 - [x] **9e. Canvas drag-to-nest** — drag a node onto another to set `parent_id`, green ring drop target highlight, un-nest on drop to canvas background, circular hierarchy prevention
-- [ ] **9f. Delegation tool testing** — needs e2e test with two running agents (blocked by API key requirement)
+- [x] **9f. Delegation tool testing** — E2E tested with SEO + Echo agents via OpenRouter, peer discovery + access control verified
 - [x] **9g. Delegation failure handling** — `delegation.py` has configurable retry (env vars), exponential backoff, error reporting to LLM
 - [x] **9h. Workspace forwarding** — Discovery follows `forwarded_to` chain (max 5 hops), transparent redirect to new workspace
 

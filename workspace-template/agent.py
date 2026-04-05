@@ -23,26 +23,36 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
         provider = "anthropic"
         model_name = model_str
 
+    # Import the provider package
     try:
-        if provider == "anthropic":
-            from langchain_anthropic import ChatAnthropic
-            llm = ChatAnthropic(model=model_name)
-        elif provider == "openai":
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model=model_name)
+        if provider in ("anthropic",):
+            from langchain_anthropic import ChatAnthropic as LLMClass
+        elif provider in ("openai", "openrouter"):
+            from langchain_openai import ChatOpenAI as LLMClass
         elif provider == "google_genai":
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            llm = ChatGoogleGenerativeAI(model=model_name)
+            from langchain_google_genai import ChatGoogleGenerativeAI as LLMClass
         elif provider == "ollama":
-            from langchain_ollama import ChatOllama
-            llm = ChatOllama(model=model_name)
+            from langchain_ollama import ChatOllama as LLMClass
         else:
             raise ValueError(f"Unsupported model provider: {provider}")
     except ImportError as e:
-        raise ImportError(
-            f"Provider '{provider}' requires package 'langchain-{provider}'. "
-            f"Install it with: pip install langchain-{provider}"
-        ) from e
+        pkg = "langchain-openai" if provider == "openrouter" else f"langchain-{provider}"
+        raise ImportError(f"Provider '{provider}' requires package '{pkg}'. Install: pip install {pkg}") from e
+
+    # Instantiate the LLM
+    if provider == "anthropic":
+        llm = LLMClass(model=model_name)
+    elif provider == "openrouter":
+        api_key = os.environ.get("OPENROUTER_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+        llm = LLMClass(
+            model=model_name,
+            openai_api_key=api_key,
+            openai_api_base="https://openrouter.ai/api/v1",
+        )
+    elif provider == "openai":
+        llm = LLMClass(model=model_name)
+    else:
+        llm = LLMClass(model=model_name)
 
     # Auto-inject Langfuse tracing if env vars are present
     callbacks = _setup_langfuse()

@@ -1,10 +1,11 @@
-CREATE EXTENSION IF NOT EXISTS vector;
+-- pgvector is optional — embedding column can be added later via:
+--   CREATE EXTENSION IF NOT EXISTS vector;
+--   ALTER TABLE agent_memories ADD COLUMN embedding vector(1536);
 
 CREATE TABLE IF NOT EXISTS agent_memories (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id    UUID REFERENCES workspaces(id),
     content         TEXT NOT NULL,
-    embedding       vector(1536),
     scope           VARCHAR(10) NOT NULL CHECK (scope IN ('LOCAL', 'TEAM', 'GLOBAL')),
     created_at      TIMESTAMPTZ DEFAULT now(),
     updated_at      TIMESTAMPTZ DEFAULT now()
