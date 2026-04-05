@@ -8,6 +8,14 @@
         "@awareness-sdk/local",
         "mcp"
       ]
+    },
+    "starfire": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-server/dist/index.js"],
+      "env": {
+        "STARFIRE_URL": "http://localhost:8080"
+      }
     }
   }
 }
