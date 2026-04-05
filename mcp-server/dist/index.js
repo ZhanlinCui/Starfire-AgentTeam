@@ -186,6 +186,104 @@ server.tool("decide_approval", "Approve or deny a pending approval request", {
     });
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 });
+// === MISSING TOOLS — FULL COVERAGE ===
+server.tool("update_workspace", "Update workspace fields (name, role, tier, parent_id, position)", {
+    workspace_id: z.string(),
+    name: z.string().optional(),
+    role: z.string().optional(),
+    tier: z.number().optional(),
+    parent_id: z.string().nullable().optional().describe("Set parent for nesting, null to un-nest"),
+}, async ({ workspace_id, ...fields }) => {
+    const data = await apiCall("PATCH", `/workspaces/${workspace_id}`, fields);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("replace_agent", "Replace the model on an existing workspace agent", { workspace_id: z.string(), model: z.string() }, async ({ workspace_id, model }) => {
+    const data = await apiCall("PATCH", `/workspaces/${workspace_id}/agent`, { model });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("remove_agent", "Remove the agent from a workspace", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("DELETE", `/workspaces/${workspace_id}/agent`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("move_agent", "Move an agent from one workspace to another", { workspace_id: z.string(), target_workspace_id: z.string() }, async ({ workspace_id, target_workspace_id }) => {
+    const data = await apiCall("POST", `/workspaces/${workspace_id}/agent/move`, { target_workspace_id });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("delete_secret", "Delete a secret from a workspace", { workspace_id: z.string(), key: z.string() }, async ({ workspace_id, key }) => {
+    const data = await apiCall("DELETE", `/workspaces/${workspace_id}/secrets/${encodeURIComponent(key)}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("get_config", "Get workspace runtime config as JSON", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("GET", `/workspaces/${workspace_id}/config`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("update_config", "Update workspace runtime config", { workspace_id: z.string(), config: z.record(z.unknown()).describe("Config fields to update") }, async ({ workspace_id, config }) => {
+    const data = await apiCall("PATCH", `/workspaces/${workspace_id}/config`, config);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("list_peers", "List reachable peer workspaces (siblings, children, parent)", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("GET", `/registry/${workspace_id}/peers`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("discover_workspace", "Resolve a workspace URL by ID (for A2A communication)", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("GET", `/registry/discover/${workspace_id}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("check_access", "Check if two workspaces can communicate", { caller_id: z.string(), target_id: z.string() }, async ({ caller_id, target_id }) => {
+    const data = await apiCall("POST", `/registry/check-access`, { caller_id, target_id });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("list_events", "List structure events (global or per workspace)", { workspace_id: z.string().optional().describe("Filter to workspace, or omit for all") }, async ({ workspace_id }) => {
+    const path = workspace_id ? `/events/${workspace_id}` : "/events";
+    const data = await apiCall("GET", path);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("export_bundle", "Export a workspace as a portable .bundle.json", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("GET", `/bundles/export/${workspace_id}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("import_bundle", "Import a workspace from a bundle JSON object", { bundle: z.record(z.unknown()).describe("Bundle JSON object") }, async ({ bundle }) => {
+    const data = await apiCall("POST", `/bundles/import`, bundle);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("import_template", "Import agent files as a new workspace template", {
+    name: z.string().describe("Template name"),
+    files: z.record(z.string()).describe("Map of file path → content"),
+}, async ({ name, files }) => {
+    const data = await apiCall("POST", `/templates/import`, { name, files });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("replace_all_files", "Replace all workspace config files at once", {
+    workspace_id: z.string(),
+    files: z.record(z.string()).describe("Map of file path → content"),
+}, async ({ workspace_id, files }) => {
+    const data = await apiCall("PUT", `/workspaces/${workspace_id}/files`, { files });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("list_traces", "List recent LLM traces from Langfuse for a workspace", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("GET", `/workspaces/${workspace_id}/traces`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("delete_memory", "Delete a specific memory entry", { workspace_id: z.string(), memory_id: z.string() }, async ({ workspace_id, memory_id }) => {
+    const data = await apiCall("DELETE", `/workspaces/${workspace_id}/memories/${memory_id}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("get_model", "Get current model configuration for a workspace", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("GET", `/workspaces/${workspace_id}/model`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("create_approval", "Create an approval request for a workspace", {
+    workspace_id: z.string(),
+    action: z.string().describe("What needs approval"),
+    reason: z.string().optional().describe("Why it's needed"),
+}, async ({ workspace_id, action, reason }) => {
+    const data = await apiCall("POST", `/workspaces/${workspace_id}/approvals`, { action, reason });
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
+server.tool("get_workspace_approvals", "List approval requests for a specific workspace", { workspace_id: z.string() }, async ({ workspace_id }) => {
+    const data = await apiCall("GET", `/workspaces/${workspace_id}/approvals`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+});
 // === START SERVER ===
 async function main() {
     // Validate platform connectivity on startup
