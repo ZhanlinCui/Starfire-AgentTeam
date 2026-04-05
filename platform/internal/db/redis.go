@@ -52,6 +52,18 @@ func GetCachedURL(ctx context.Context, workspaceID string) (string, error) {
 	return RDB.Get(ctx, key).Result()
 }
 
+// CacheInternalURL caches the Docker-internal URL for workspace-to-workspace discovery.
+func CacheInternalURL(ctx context.Context, workspaceID, url string) error {
+	key := fmt.Sprintf("ws:%s:internal_url", workspaceID)
+	return RDB.Set(ctx, key, url, 5*time.Minute).Err()
+}
+
+// GetCachedInternalURL gets the Docker-internal URL for a workspace.
+func GetCachedInternalURL(ctx context.Context, workspaceID string) (string, error) {
+	key := fmt.Sprintf("ws:%s:internal_url", workspaceID)
+	return RDB.Get(ctx, key).Result()
+}
+
 // IsOnline checks if a workspace is online.
 func IsOnline(ctx context.Context, workspaceID string) (bool, error) {
 	key := fmt.Sprintf("ws:%s", workspaceID)

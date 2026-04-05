@@ -30,6 +30,15 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	// Workspace-to-workspace: return Docker-internal URL (containers can't reach host ports)
+	// Canvas/external: return host-accessible URL
+	if callerID != "" {
+		if internalURL, err := db.GetCachedInternalURL(ctx, targetID); err == nil && internalURL != "" {
+			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL})
+			return
+		}
+	}
 	if url, err := db.GetCachedURL(ctx, targetID); err == nil {
 		c.JSON(http.StatusOK, gin.H{"id": targetID, "url": url})
 		return

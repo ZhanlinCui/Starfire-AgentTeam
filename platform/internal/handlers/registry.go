@@ -73,6 +73,12 @@ func (h *RegistryHandler) Register(c *gin.Context) {
 		log.Printf("Registry cache url error: %v", err)
 	}
 
+	// Cache agent-reported URL separately for workspace-to-workspace discovery
+	// (Docker containers can reach each other by hostname but not via host ports)
+	if err := db.CacheInternalURL(ctx, payload.ID, payload.URL); err != nil {
+		log.Printf("Registry cache internal url error: %v", err)
+	}
+
 	// Broadcast WORKSPACE_ONLINE
 	if err := h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.ID, map[string]interface{}{
 		"url":        cachedURL,
