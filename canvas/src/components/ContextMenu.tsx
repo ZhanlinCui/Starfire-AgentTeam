@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { api } from "@/lib/api";
+import { showToast } from "./Toaster";
 
 interface MenuItem {
   label: string;
@@ -52,8 +53,9 @@ export function ContextMenu() {
       a.download = `${(contextMenu.nodeData.name || "workspace").toLowerCase().replace(/\s+/g, "-")}.bundle.json`;
       a.click();
       URL.revokeObjectURL(url);
+      showToast("Bundle exported", "success");
     } catch (e) {
-      console.error("Export failed:", e);
+      showToast("Export failed", "error");
     }
     closeContextMenu();
   }, [contextMenu, closeContextMenu]);
@@ -64,7 +66,7 @@ export function ContextMenu() {
       const bundle = await api.get<Record<string, unknown>>(`/bundles/export/${contextMenu.nodeId}`);
       await api.post("/bundles/import", bundle);
     } catch (e) {
-      console.error("Duplicate failed:", e);
+      showToast("Duplicate failed", "error");
     }
     closeContextMenu();
   }, [contextMenu, closeContextMenu]);
@@ -75,7 +77,7 @@ export function ContextMenu() {
       await api.post(`/workspaces/${contextMenu.nodeId}/restart`, {});
       updateNodeData(contextMenu.nodeId, { status: "provisioning" });
     } catch (e) {
-      console.error("Restart failed:", e);
+      showToast("Restart failed", "error");
     }
     closeContextMenu();
   }, [contextMenu, updateNodeData, closeContextMenu]);
@@ -86,7 +88,7 @@ export function ContextMenu() {
       await api.del(`/workspaces/${contextMenu.nodeId}`);
       removeNode(contextMenu.nodeId);
     } catch (e) {
-      console.error("Delete failed:", e);
+      showToast("Delete failed", "error");
     }
     closeContextMenu();
   }, [contextMenu, removeNode, closeContextMenu]);
@@ -117,7 +119,7 @@ export function ContextMenu() {
     try {
       await api.post(`/workspaces/${contextMenu.nodeId}/expand`, {});
     } catch (e) {
-      console.error("Expand failed:", e);
+      showToast("Expand failed", "error");
     }
     closeContextMenu();
   }, [contextMenu, closeContextMenu]);
@@ -127,7 +129,7 @@ export function ContextMenu() {
     try {
       await api.post(`/workspaces/${contextMenu.nodeId}/collapse`, {});
     } catch (e) {
-      console.error("Collapse failed:", e);
+      showToast("Collapse failed", "error");
     }
     closeContextMenu();
   }, [contextMenu, closeContextMenu]);

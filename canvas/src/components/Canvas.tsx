@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useMemo } from "react";
+import { useCallback, useRef, useMemo, useEffect } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -22,6 +22,9 @@ import { CreateWorkspaceButton } from "./CreateWorkspaceDialog";
 import { ContextMenu } from "./ContextMenu";
 import { TemplatePalette } from "./TemplatePalette";
 import { BundleDropZone } from "./BundleDropZone";
+import { EmptyState } from "./EmptyState";
+import { SearchDialog } from "./SearchDialog";
+import { Toaster } from "./Toaster";
 import { Toolbar } from "./Toolbar";
 
 const nodeTypes = {
@@ -96,7 +99,25 @@ function CanvasInner() {
 
   const onPaneClick = useCallback(() => {
     selectNode(null);
+    useCanvasStore.getState().closeContextMenu();
   }, [selectNode]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Escape closes panel and context menu
+      if (e.key === "Escape") {
+        const state = useCanvasStore.getState();
+        if (state.contextMenu) {
+          state.closeContextMenu();
+        } else if (state.selectedNodeId) {
+          state.selectNode(null);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const saveViewport = useCanvasStore((s) => s.saveViewport);
   const viewport = useCanvasStore((s) => s.viewport);
@@ -174,11 +195,14 @@ function CanvasInner() {
         />
       </ReactFlow>
 
+      {nodes.length === 0 && <EmptyState />}
       <Toolbar />
       <BundleDropZone />
       <TemplatePalette />
       <SidePanel />
       <ContextMenu />
+      <SearchDialog />
+      <Toaster />
       {!selectedNodeId && <CreateWorkspaceButton />}
     </div>
   );

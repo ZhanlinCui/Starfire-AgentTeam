@@ -41,6 +41,19 @@ export function Toolbar() {
       <div className="pl-3 border-l border-zinc-800/60">
         <span className="text-[10px] text-zinc-500">{counts.total} workspace{counts.total !== 1 ? "s" : ""}</span>
       </div>
+
+      {/* Search shortcut */}
+      <button
+        onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+        className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700/40 rounded-lg transition-colors"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-zinc-500">
+          <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+        <span className="text-[10px] text-zinc-500">Search</span>
+        <kbd className="text-[8px] text-zinc-600 bg-zinc-900/60 px-1 py-0.5 rounded border border-zinc-700/30">⌘K</kbd>
+      </button>
     </div>
   );
 }

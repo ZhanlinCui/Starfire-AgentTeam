@@ -70,6 +70,15 @@ body {
   to { transform: translateX(0); }
 }
 
+@keyframes slide-in-from-bottom {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.slide-in-from-bottom {
+  animation-name: slide-in-from-bottom;
+}
+
 .animate-in {
   animation-fill-mode: both;
 }
