@@ -123,6 +123,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | GET | /approvals/pending | approvals.go |
 | POST/GET | /workspaces/:id/memories | memories.go |
 | DELETE | /workspaces/:id/memories/:id | memories.go |
+| GET | /workspaces/:id/traces | traces.go |
 | POST | /workspaces/:id/restart | workspace.go |
 | POST | /workspaces/:id/a2a | workspace.go |
 | GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
