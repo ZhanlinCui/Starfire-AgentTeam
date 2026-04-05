@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/gin-gonic/gin"
 )
@@ -73,12 +74,19 @@ func (h *SecretsHandler) Set(c *gin.Context) {
 		return
 	}
 
-	// Upsert — store as plaintext bytes for MVP (AES-256 encryption in Phase 14)
-	_, err := db.DB.ExecContext(ctx, `
+	// Encrypt the value (AES-256-GCM if SECRETS_ENCRYPTION_KEY is set, plaintext otherwise)
+	encrypted, err := crypto.Encrypt([]byte(body.Value))
+	if err != nil {
+		log.Printf("Encrypt secret error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt secret"})
+		return
+	}
+
+	_, err = db.DB.ExecContext(ctx, `
 		INSERT INTO workspace_secrets (workspace_id, key, encrypted_value)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (workspace_id, key) DO UPDATE SET encrypted_value = $3, updated_at = now()
-	`, workspaceID, body.Key, []byte(body.Value))
+	`, workspaceID, body.Key, encrypted)
 	if err != nil {
 		log.Printf("Set secret error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save secret"})
@@ -135,5 +143,11 @@ func (h *SecretsHandler) GetModel(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"model": string(modelBytes), "source": "workspace_secrets"})
+	decrypted, err := crypto.Decrypt(modelBytes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"model": string(decrypted), "source": "workspace_secrets"})
 }

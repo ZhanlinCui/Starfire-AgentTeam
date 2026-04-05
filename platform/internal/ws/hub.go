@@ -99,6 +99,18 @@ func WritePump(client *Client) {
 	}
 }
 
+// Close disconnects all WebSocket clients gracefully.
+func (h *Hub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for client := range h.clients {
+		close(client.Send)
+		client.Conn.Close()
+		delete(h.clients, client)
+	}
+	log.Printf("WebSocket hub closed (%d clients disconnected)", len(h.clients))
+}
+
 // ReadPump reads from WebSocket (keeps connection alive, discards messages).
 func ReadPump(client *Client, hub *Hub) {
 	defer func() {

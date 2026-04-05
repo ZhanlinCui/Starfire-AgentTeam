@@ -1,8 +1,11 @@
 package router
 
 import (
+	"time"
+
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/handlers"
+	"github.com/agent-molecule/platform/internal/middleware"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/ws"
 	"github.com/docker/docker/client"
@@ -19,6 +22,10 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 		AllowHeaders:     []string{"Origin", "Content-Type", "X-Workspace-ID"},
 		AllowCredentials: true,
 	}))
+
+	// Rate limiting — 100 requests per minute per IP
+	limiter := middleware.NewRateLimiter(100, time.Minute)
+	r.Use(limiter.Middleware())
 
 	// Health
 	r.GET("/health", func(c *gin.Context) {

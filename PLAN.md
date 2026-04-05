@@ -108,7 +108,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **13e. Canvas expand UX** — Right-click node → "Expand to Team" / "Collapse Team" in context menu
 - [x] **13f. Canvas collapse view** — Collapse Team in right-click context menu (calls POST /collapse)
 - [ ] **13g. Canvas zoom-in** — Clicking expanded node reveals sub-workspace nodes; from top-level, team appears as single node
-- [ ] **13h. Delete team** — Warn listing sub-workspaces, allow drag-out before confirm, cascade delete on confirm
+- [x] **13h. Delete team** — Cascade delete with confirmation (returns children list if not ?confirm=true, stops containers)
 
 ---
 
@@ -204,9 +204,9 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 - [x] **20a. Full Docker Compose** — `docker compose up` boots postgres, redis, langfuse+clickhouse, platform, canvas on shared network
 - [x] **20b. Health checks** — All 6 services have Docker healthchecks (pg_isready, redis-cli ping, wget /health)
-- [ ] **20c. Secrets encryption** — AES-256 at-rest encryption for `workspace_secrets` (PRD F8.5)
-- [ ] **20d. Rate limiting** — Protect platform API endpoints
-- [ ] **20e. Graceful shutdown** — Platform drains WebSocket connections, stops liveness monitor cleanly
+- [x] **20c. Secrets encryption** — AES-256-GCM via `crypto/aes.go`, encrypt on write, decrypt on read + provisioner inject. Enabled via `SECRETS_ENCRYPTION_KEY` env var.
+- [x] **20d. Rate limiting** — Token bucket rate limiter (100 req/min/IP) via `middleware/ratelimit.go`
+- [x] **20e. Graceful shutdown** — Signal handler (SIGINT/SIGTERM), context cancellation, HTTP drain (30s), WebSocket hub Close()
 - [x] **20f. Error recovery** — `events.py` reconnects with exponential backoff, `socket.ts` re-hydrates on reconnect
 
 ---

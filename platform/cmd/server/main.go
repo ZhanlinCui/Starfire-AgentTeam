@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
+	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/provisioner"
@@ -16,6 +21,14 @@ import (
 )
 
 func main() {
+	// Secrets encryption (optional — disabled if SECRETS_ENCRYPTION_KEY not set)
+	crypto.Init()
+	if crypto.IsEnabled() {
+		log.Println("Secrets encryption: AES-256-GCM enabled")
+	} else {
+		log.Println("Secrets encryption: disabled (set SECRETS_ENCRYPTION_KEY for production)")
+	}
+
 	// Database
 	databaseURL := envOr("DATABASE_URL", "postgres://dev:dev@localhost:5432/agentmolecule?sslmode=disable")
 	if err := db.InitPostgres(databaseURL); err != nil {
@@ -44,7 +57,8 @@ func main() {
 	broadcaster := events.NewBroadcaster(hub)
 
 	// Start Redis pub/sub subscriber
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go broadcaster.Subscribe(ctx)
 
 	// Start Liveness Monitor — use broadcaster callback to avoid import cycles
@@ -69,10 +83,41 @@ func main() {
 
 	// Router
 	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir)
-	log.Printf("Platform starting on :%s", port)
-	if err := r.Run(fmt.Sprintf(":%s", port)); err != nil {
-		log.Fatalf("Server failed: %v", err)
+
+	// HTTP server with graceful shutdown
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%s", port),
+		Handler: r,
 	}
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Platform starting on :%s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down gracefully...")
+
+	// Cancel background goroutines (liveness monitor, Redis subscriber)
+	cancel()
+
+	// Drain HTTP connections (30s timeout)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server forced shutdown: %v", err)
+	}
+
+	// Close WebSocket hub
+	hub.Close()
+
+	log.Println("Platform stopped")
 }
 
 func envOr(key, fallback string) string {

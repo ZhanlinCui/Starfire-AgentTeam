@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/models"
@@ -255,25 +256,65 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 }
 
 // Delete handles DELETE /workspaces/:id
+// If the workspace has children (is a team), cascade deletes all sub-workspaces.
+// Use ?confirm=true to actually delete (otherwise returns children list for confirmation).
 func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	ctx := c.Request.Context()
+	confirm := c.Query("confirm") == "true"
 
-	_, err := db.DB.ExecContext(ctx, `
-		UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1
-	`, id)
+	// Check for children
+	rows, err := db.DB.QueryContext(ctx,
+		`SELECT id, name FROM workspaces WHERE parent_id = $1 AND status != 'removed'`, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check children"})
+		return
+	}
+	defer rows.Close()
+
+	var children []map[string]string
+	for rows.Next() {
+		var childID, childName string
+		if rows.Scan(&childID, &childName) == nil {
+			children = append(children, map[string]string{"id": childID, "name": childName})
+		}
+	}
+
+	// If has children and not confirmed, return children list for confirmation
+	if len(children) > 0 && !confirm {
+		c.JSON(http.StatusOK, gin.H{
+			"status":           "confirmation_required",
+			"message":          "This workspace has sub-workspaces. Delete with ?confirm=true to cascade delete.",
+			"children":         children,
+			"children_count":   len(children),
+		})
 		return
 	}
 
+	// Cascade delete children
+	for _, child := range children {
+		childID := child["id"]
+		// Stop container if provisioner available
+		if h.provisioner != nil {
+			h.provisioner.Stop(ctx, childID)
+		}
+		db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, childID)
+		db.DB.ExecContext(ctx, `DELETE FROM canvas_layouts WHERE workspace_id = $1`, childID)
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", childID, map[string]interface{}{})
+	}
+
+	// Delete the workspace itself
+	if h.provisioner != nil {
+		h.provisioner.Stop(ctx, id)
+	}
+	db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, id)
 	db.DB.ExecContext(ctx, `DELETE FROM canvas_layouts WHERE workspace_id = $1`, id)
 
 	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", id, map[string]interface{}{
-		"forwarded_to": nil,
+		"cascade_deleted": len(children),
 	})
 
-	c.JSON(http.StatusOK, gin.H{"status": "removed"})
+	c.JSON(http.StatusOK, gin.H{"status": "removed", "cascade_deleted": len(children)})
 }
 
 // provisionWorkspace handles async container deployment with timeout.
@@ -288,9 +329,15 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var k, v string
+			var k string
+			var v []byte
 			if rows.Scan(&k, &v) == nil {
-				envVars[k] = v // TODO: decrypt with AES-256 when encryption is implemented
+				decrypted, decErr := crypto.Decrypt(v)
+				if decErr != nil {
+					log.Printf("Provisioner: failed to decrypt secret %s: %v", k, decErr)
+					continue
+				}
+				envVars[k] = string(decrypted)
 			}
 		}
 	}

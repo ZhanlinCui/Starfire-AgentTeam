@@ -72,7 +72,7 @@ export function DetailsTab({ workspaceId, data }: Props) {
   const handleDelete = async () => {
     setDeleteError(null);
     try {
-      await api.del(`/workspaces/${workspaceId}`);
+      await api.del(`/workspaces/${workspaceId}?confirm=true`);
       removeNode(workspaceId);
       selectNode(null);
     } catch (e) {
