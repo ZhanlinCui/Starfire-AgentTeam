@@ -63,6 +63,27 @@ Secrets are stored in `workspace_secrets` table as plaintext bytes for MVP (AES-
 
 Upgrades to WebSocket, creates a Docker exec `/bin/sh` session, bridges stdin/stdout. Sessions auto-close after 30 minutes of inactivity. WebSocket origins restricted to localhost.
 
+### Approvals (Human-in-the-Loop)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/approvals/pending` | List all pending approvals across workspaces (single query) |
+| `POST` | `/workspaces/:id/approvals` | Create approval request (body: `{ action, reason }`) |
+| `GET` | `/workspaces/:id/approvals` | List approvals for a workspace |
+| `POST` | `/workspaces/:id/approvals/:approvalId/decide` | Approve or deny (body: `{ decision, decided_by }`) |
+
+Pending approvals auto-expire after 10 minutes. Events: `APPROVAL_REQUESTED`, `APPROVAL_ESCALATED`, `APPROVAL_APPROVED`, `APPROVAL_DENIED`.
+
+### Agent Memories (HMA)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/workspaces/:id/memories` | Commit a memory fact (body: `{ content, scope }`) |
+| `GET` | `/workspaces/:id/memories` | Search memories (params: `q`, `scope`) |
+| `DELETE` | `/workspaces/:id/memories/:memoryId` | Delete a memory |
+
+Scopes: `LOCAL` (workspace only), `TEAM` (parent + siblings), `GLOBAL` (all read, root write only). Access enforced via `CanCommunicate()`.
+
 ### Agents
 
 | Method | Path | Description |
