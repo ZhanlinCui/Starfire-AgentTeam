@@ -104,14 +104,20 @@ class ConsolidationLoop:
 
                         logger.info("Consolidated %d memories into team knowledge", len(memories))
                 except Exception as e:
-                    logger.warning("Agent consolidation failed: %s", e)
-            else:
-                # Without agent, just concatenate and store
+                    logger.error(
+                        "CONSOLIDATION: Agent summarization failed (rate limit? model error?): %s. "
+                        "Falling back to simple concatenation.", e
+                    )
+                    # Fall through to concatenation below
+
+            # Fallback: concatenate without agent summarization
+            if not (self.agent and summary):
                 combined = " | ".join(contents[:20])
                 await client.post(
                     f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
                     json={"content": f"[Consolidated] {combined}", "scope": "TEAM"},
                 )
+                logger.info("Consolidated %d memories via concatenation fallback", len(memories))
 
     def stop(self):
         self._running = False

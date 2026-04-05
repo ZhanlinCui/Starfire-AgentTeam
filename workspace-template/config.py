@@ -62,6 +62,7 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
 
     a2a_raw = raw.get("a2a", {})
     delegation_raw = raw.get("delegation", {})
+    sandbox_raw = raw.get("sandbox", {})
 
     return WorkspaceConfig(
         name=raw.get("name", "Workspace"),
@@ -82,6 +83,11 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
             retry_delay=delegation_raw.get("retry_delay", 5.0),
             timeout=delegation_raw.get("timeout", 120.0),
             escalate=delegation_raw.get("escalate", True),
+        ),
+        sandbox=SandboxConfig(
+            backend=sandbox_raw.get("backend", "subprocess"),
+            memory_limit=sandbox_raw.get("memory_limit", "256m"),
+            timeout=sandbox_raw.get("timeout", 30),
         ),
         sub_workspaces=raw.get("sub_workspaces", []),
     )

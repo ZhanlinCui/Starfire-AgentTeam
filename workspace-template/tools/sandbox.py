@@ -3,8 +3,6 @@
 Executes code in an isolated environment:
 - Docker backend (MVP): throwaway container, network disabled, memory capped
 - Falls back to subprocess with timeout if Docker not available
-
-Tier 3+ workspaces get full sandbox. Tier 1-2 get subprocess fallback.
 """
 
 import asyncio
@@ -16,7 +14,7 @@ from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
-SANDBOX_BACKEND = os.environ.get("SANDBOX_BACKEND", "subprocess")  # docker | subprocess
+SANDBOX_BACKEND = os.environ.get("SANDBOX_BACKEND", "subprocess")
 SANDBOX_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT", "30"))
 SANDBOX_MEMORY_LIMIT = os.environ.get("SANDBOX_MEMORY_LIMIT", "256m")
 MAX_OUTPUT = 10_000
@@ -25,10 +23,6 @@ MAX_OUTPUT = 10_000
 @tool
 async def run_code(code: str, language: str = "python") -> dict:
     """Execute code in an isolated sandbox and return the output.
-
-    Use this for running untrusted code, testing snippets, or executing
-    computations. The sandbox is isolated — no network, limited memory,
-    destroyed after execution.
 
     Args:
         code: The code to execute.
@@ -62,13 +56,10 @@ async def _run_subprocess(code: str, language: str) -> dict:
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=SANDBOX_TIMEOUT)
 
-        stdout_str = stdout.decode("utf-8", errors="replace")[:MAX_OUTPUT]
-        stderr_str = stderr.decode("utf-8", errors="replace")[:MAX_OUTPUT]
-
         return {
             "exit_code": proc.returncode,
-            "stdout": stdout_str,
-            "stderr": stderr_str,
+            "stdout": stdout.decode("utf-8", errors="replace")[:MAX_OUTPUT],
+            "stderr": stderr.decode("utf-8", errors="replace")[:MAX_OUTPUT],
             "language": language,
             "backend": "subprocess",
         }
@@ -84,30 +75,27 @@ async def _run_subprocess(code: str, language: str) -> dict:
 
 
 async def _run_docker(code: str, language: str) -> dict:
-    """Run code in a throwaway Docker container."""
+    """Run code in a throwaway Docker container via mounted temp file."""
     image_map = {
-        "python": "python:3.11-slim",
-        "javascript": "node:20-slim",
-        "shell": "alpine:3.18",
-        "bash": "alpine:3.18",
+        "python": ("python:3.11-slim", ["python3", "/sandbox/code.py"]),
+        "javascript": ("node:20-slim", ["node", "/sandbox/code.js"]),
+        "shell": ("alpine:3.18", ["sh", "/sandbox/code.sh"]),
+        "bash": ("alpine:3.18", ["sh", "/sandbox/code.sh"]),
     }
 
-    image = image_map.get(language)
-    if not image:
+    entry = image_map.get(language)
+    if not entry:
         return {"error": f"Unsupported language: {language}", "exit_code": -1}
 
-    cmd_map = {
-        "python": ["python3", "-c"],
-        "javascript": ["node", "-e"],
-        "shell": ["sh", "-c"],
-        "bash": ["sh", "-c"],
-    }
+    image, run_cmd = entry
+    code_file = None
 
     try:
-        # Write code to temp file to avoid shell escaping issues
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".code", delete=False) as f:
+        # Write code to temp file — avoids shell metacharacter injection
+        ext = {"python": ".py", "javascript": ".js", "shell": ".sh", "bash": ".sh"}.get(language, ".txt")
+        fd, code_file = tempfile.mkstemp(suffix=ext, prefix="sandbox_")
+        with os.fdopen(fd, "w") as f:
             f.write(code)
-            code_file = f.name
 
         cmd = [
             "docker", "run", "--rm",
@@ -116,20 +104,9 @@ async def _run_docker(code: str, language: str) -> dict:
             "--cpus", "0.5",
             "--read-only",
             "--tmpfs", "/tmp:size=32m",
-            "-v", f"{code_file}:/code:ro",
+            "-v", f"{code_file}:/sandbox/code{ext}:ro",
             image,
-        ] + cmd_map[language] + [f"$(cat /code)"]
-
-        # Actually use the command prefix directly with code
-        cmd = [
-            "docker", "run", "--rm",
-            "--network", "none",
-            "--memory", SANDBOX_MEMORY_LIMIT,
-            "--cpus", "0.5",
-            "--read-only",
-            "--tmpfs", "/tmp:size=32m",
-            image,
-        ] + cmd_map[language] + [code]
+        ] + run_cmd
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -139,13 +116,10 @@ async def _run_docker(code: str, language: str) -> dict:
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=SANDBOX_TIMEOUT)
 
-        stdout_str = stdout.decode("utf-8", errors="replace")[:MAX_OUTPUT]
-        stderr_str = stderr.decode("utf-8", errors="replace")[:MAX_OUTPUT]
-
         return {
             "exit_code": proc.returncode,
-            "stdout": stdout_str,
-            "stderr": stderr_str,
+            "stdout": stdout.decode("utf-8", errors="replace")[:MAX_OUTPUT],
+            "stderr": stderr.decode("utf-8", errors="replace")[:MAX_OUTPUT],
             "language": language,
             "backend": "docker",
             "image": image,
@@ -155,7 +129,8 @@ async def _run_docker(code: str, language: str) -> dict:
     except Exception as e:
         return {"error": str(e), "exit_code": -1}
     finally:
-        try:
-            os.unlink(code_file)
-        except Exception:
-            pass
+        if code_file:
+            try:
+                os.unlink(code_file)
+            except OSError:
+                pass
