@@ -103,10 +103,38 @@ function CanvasInner() {
     useCanvasStore.getState().closeContextMenu();
   }, [selectNode]);
 
+  // Team zoom-in: double-click a team node to zoom to its children
+  const { fitBounds } = useReactFlow();
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { nodeId } = (e as CustomEvent).detail;
+      const state = useCanvasStore.getState();
+      const children = state.nodes.filter((n) => n.data.parentId === nodeId);
+      if (children.length === 0) return;
+
+      const parent = state.nodes.find((n) => n.id === nodeId);
+      const allNodes = parent ? [parent, ...children] : children;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of allNodes) {
+        minX = Math.min(minX, n.position.x);
+        minY = Math.min(minY, n.position.y);
+        maxX = Math.max(maxX, n.position.x + 260);
+        maxY = Math.max(maxY, n.position.y + 120);
+      }
+
+      fitBounds(
+        { x: minX - 50, y: minY - 50, width: maxX - minX + 100, height: maxY - minY + 100 },
+        { padding: 0.2, duration: 500 }
+      );
+    };
+    window.addEventListener("starfire:zoom-to-team", handler);
+    return () => window.removeEventListener("starfire:zoom-to-team", handler);
+  }, [fitBounds]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Escape closes panel and context menu
       if (e.key === "Escape") {
         const state = useCanvasStore.getState();
         if (state.contextMenu) {

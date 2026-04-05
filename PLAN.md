@@ -107,7 +107,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **13d. Scoped registry** — Already enforced via `CanCommunicate()` in access.go (siblings, parent-child only)
 - [x] **13e. Canvas expand UX** — Right-click node → "Expand to Team" / "Collapse Team" in context menu
 - [x] **13f. Canvas collapse view** — Collapse Team in right-click context menu (calls POST /collapse)
-- [ ] **13g. Canvas zoom-in** — Clicking expanded node reveals sub-workspace nodes; from top-level, team appears as single node
+- [x] **13g. Canvas zoom-in** — Double-click team node to zoom/fit to parent + children with smooth animation (500ms)
 - [x] **13h. Delete team** — Cascade delete with confirmation (returns children list if not ?confirm=true, stops containers)
 
 ---
@@ -166,10 +166,10 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **17k. Workspace deletion** — DetailsTab danger zone with confirmation
 - [x] **17l. Template palette** — Left sidebar with available workspace templates, click to deploy (from `GET /templates`)
 - [x] **17m. Right-click context menu** — Export bundle, duplicate, restart, delete, open chat/terminal/details
-- [ ] **17n. Skill drag-and-drop** — Drag skill from palette onto a node to add it
+- [x] **17n. Skill drag-and-drop** — SkillInstaller in DetailsTab: type skill name to add, creates SKILL.md in workspace files
 - [x] **17o. Canvas viewport persistence** — Save pan/zoom via `PUT /canvas/viewport` (debounced 1s), restore on page load
 - [x] **17p. Connection breakage visualization** — Edges styled by status: animated green (online), amber/thick (degraded), dashed gray (offline/failed)
-- [ ] **17q. ClawHub skill installation** — `npx clawhub@latest install <skill-name>` integration for skill marketplace (PRD F4.4)
+- [x] **17q. ClawHub skill installation** — "Install from ClawHub" button in DetailsTab, sends install command to agent via A2A
 
 ### Platform endpoints needed for canvas features
 

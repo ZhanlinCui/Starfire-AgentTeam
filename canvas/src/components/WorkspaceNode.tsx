@@ -41,6 +41,13 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         e.stopPropagation();
         selectNode(isSelected ? null : id);
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        if (childCount > 0) {
+          // Zoom to children — dispatch custom event picked up by Canvas
+          window.dispatchEvent(new CustomEvent("starfire:zoom-to-team", { detail: { nodeId: id } }));
+        }
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
+import { SkillInstaller } from "../SkillInstaller";
 import { StatusDot } from "../StatusDot";
 
 interface Props {
@@ -193,6 +194,11 @@ export function DetailsTab({ workspaceId, data }: Props) {
       {/* Replace Agent Files */}
       <Section title="Agent Files">
         <ReplaceAgentButton workspaceId={workspaceId} onReplaced={() => updateNodeData(workspaceId, { status: "provisioning" })} />
+      </Section>
+
+      {/* Install Skills */}
+      <Section title="Install Skill">
+        <SkillInstaller workspaceId={workspaceId} />
       </Section>
 
       {/* Agent Card / Skills */}
