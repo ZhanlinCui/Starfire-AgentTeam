@@ -103,7 +103,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 - [x] **13a. Expand API** — `POST /workspaces/:id/expand` reads `sub_workspaces` from config, creates+provisions child workspaces (emits `WORKSPACE_EXPANDED`)
 - [x] **13b. Collapse API** — `POST /workspaces/:id/collapse` — stops containers, removes children (emits `WORKSPACE_COLLAPSED`)
-- [ ] **13c. Coordinator pattern** — Parent agent stays as team lead, routes incoming A2A to appropriate children based on capabilities
+- [x] **13c. Coordinator pattern** — `coordinator.py` auto-detects children, injects team description into prompt, adds `route_task_to_team` tool. Agent analyzes task + children's skills to route.
 - [x] **13d. Scoped registry** — Already enforced via `CanCommunicate()` in access.go (siblings, parent-child only)
 - [x] **13e. Canvas expand UX** — Right-click node → "Expand to Team" / "Collapse Team" in context menu
 - [x] **13f. Canvas collapse view** — Collapse Team in right-click context menu (calls POST /collapse)
