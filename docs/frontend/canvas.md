@@ -201,12 +201,18 @@ Right-click an existing node → "Duplicate". This exports the workspace as a bu
 - **Import:** Drag `.bundle.json` onto canvas -> `POST /bundles/import` -> platform provisions workspace tree -> new nodes appear
 - **Duplicate:** Right-click node -> "Duplicate" -> export + re-import with new IDs
 
-## Team Zoom-In
+## Team Visualization (Embedded Sub-Workspaces)
 
-When a workspace is expanded into a team:
-- The node shows a badge indicating it contains sub-workspaces
-- Clicking/zooming into the node reveals the sub-workspace nodes inside
-- From the top-level view, the team appears as a single node
+When a workspace is expanded into a team, children render **inside** the parent node:
+
+- Parent node expands in size (320-450px wide) to accommodate children
+- Children appear as clickable mini-cards in a "Team Members" 2-column grid
+- Each child chip shows status dot, name, and role
+- Click a child chip to select it and open its side panel
+- No separate canvas nodes or edges for parent→child relationships
+- Children are hidden from React Flow (`hidden: true`) but exist in the store
+- Double-click a team node to zoom/fit to the parent area
+- Parent shows a "N sub" badge in the header
 - Sub-workspace nodes are only visible when zoomed into the parent
 
 See [Team Expansion](../agent-runtime/team-expansion.md) for the full mechanics.
