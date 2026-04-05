@@ -1,21 +1,23 @@
 "use client";
 
+import { useMemo } from "react";
 import { useCanvasStore } from "@/store/canvas";
 
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
 
-  const rootNodes = nodes.filter((n) => !n.data.parentId);
-  const childNodes = nodes.filter((n) => !!n.data.parentId);
-  const counts = {
-    total: nodes.length,
-    roots: rootNodes.length,
-    children: childNodes.length,
-    online: nodes.filter((n) => n.data.status === "online").length,
-    offline: nodes.filter((n) => n.data.status === "offline").length,
-    failed: nodes.filter((n) => n.data.status === "failed").length,
-    provisioning: nodes.filter((n) => n.data.status === "provisioning").length,
-  };
+  const counts = useMemo(() => {
+    const c = { total: nodes.length, roots: 0, children: 0, online: 0, offline: 0, failed: 0, provisioning: 0 };
+    for (const n of nodes) {
+      if (n.data.parentId) c.children++; else c.roots++;
+      const s = n.data.status;
+      if (s === "online") c.online++;
+      else if (s === "offline") c.offline++;
+      else if (s === "failed") c.failed++;
+      else if (s === "provisioning") c.provisioning++;
+    }
+    return c;
+  }, [nodes]);
 
   return (
     <div className="fixed top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-zinc-900/80 backdrop-blur-md border border-zinc-800/60 rounded-xl px-4 py-2 shadow-xl shadow-black/20">

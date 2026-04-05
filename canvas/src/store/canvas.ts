@@ -217,7 +217,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   applyEvent: (msg: WSMessage) => {
-    const { nodes, edges } = get();
+    const { nodes, edges, selectedNodeId } = get();
 
     switch (msg.event) {
       case "WORKSPACE_ONLINE": {
@@ -296,30 +296,36 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       }
 
       case "WORKSPACE_REMOVED": {
+        const removedNode = nodes.find((n) => n.id === msg.workspace_id);
+        const parentOfRemoved = removedNode?.data.parentId ?? null;
         set({
-          nodes: nodes.filter((n) => n.id !== msg.workspace_id),
+          nodes: nodes
+            .filter((n) => n.id !== msg.workspace_id)
+            .map((n) =>
+              n.data.parentId === msg.workspace_id
+                ? {
+                    ...n,
+                    hidden: !!parentOfRemoved,
+                    data: { ...n.data, parentId: parentOfRemoved },
+                  }
+                : n
+            ),
           edges: edges.filter(
             (e) =>
               e.source !== msg.workspace_id && e.target !== msg.workspace_id
           ),
+          selectedNodeId: selectedNodeId === msg.workspace_id ? null : selectedNodeId,
         });
         break;
       }
 
       case "AGENT_CARD_UPDATED": {
+        const card = msg.payload.agent_card;
+        const agentCard = (typeof card === "object" && card !== null ? card : null) as Record<string, unknown> | null;
         set({
           nodes: nodes.map((n) =>
             n.id === msg.workspace_id
-              ? {
-                  ...n,
-                  data: {
-                    ...n.data,
-                    agentCard: msg.payload.agent_card as Record<
-                      string,
-                      unknown
-                    >,
-                  },
-                }
+              ? { ...n, data: { ...n.data, agentCard } }
               : n
           ),
         });
@@ -340,8 +346,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   savePosition: async (nodeId: string, x: number, y: number) => {
     try {
       await api.patch(`/workspaces/${nodeId}`, { x, y });
-    } catch (e) {
-      console.error("Failed to save position:", e);
+    } catch {
+      // Non-critical — position save failure doesn't block user
     }
   },
 }));

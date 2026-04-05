@@ -30,7 +30,7 @@ The node reflects `active_tasks` from the workspace heartbeat:
 | 1-5 | Green node + small task count badge |
 | > 5 | Amber node + count (getting busy) |
 
-Edges between workspaces are rendered **automatically from the hierarchy** (parent/child relationships). There is no manual edge drawing — users nest workspaces by dragging one inside another.
+There are **no edges** between workspaces — parent/child relationships are rendered as [embedded sub-workspaces](#team-visualization-embedded-sub-workspaces) inside the parent node. Users nest workspaces by dragging one inside another.
 
 ### Nesting Mechanic
 
@@ -213,7 +213,7 @@ When a workspace is expanded into a team, children render **inside** the parent 
 - Children appear as clickable `TeamMemberChip` components in a "Team Members" single-column layout
 - Each child chip mirrors the parent card layout: status dot + gradient bar, name, tier badge, skills pills, status label, active tasks, descendant count badge
 - **Recursive rendering**: sub-cards can contain their own "Team" section with further nested sub-cards, up to `MAX_NESTING_DEPTH = 3` levels
-- `countDescendants()` helper (memoized) counts all descendants recursively; badge shows total, not just direct children
+- `countDescendants()` helper (memoized, with cycle-protection via `visited` Set) counts all descendants recursively; badge shows total, not just direct children
 - Click a child chip to select it and open its side panel
 - **Eject/Extract**: each child chip shows a sky-blue eject button (arrow-up-right icon) on hover to extract it from the team (sets `parent_id` to null, unhides node)
 - No separate canvas nodes or edges for parent→child relationships
@@ -221,6 +221,8 @@ When a workspace is expanded into a team, children render **inside** the parent 
 - Double-click a team node to zoom/fit to the parent area
 - Parent shows a descendant count badge in the header
 - Callbacks (`onSelect`, `onExtract`) passed as props to avoid N+1 Zustand subscriptions per chip
+- `useHierarchyInfo` consolidated hook: single stable selector returns children, `hasGrandchildren`, and `descendantCount` — avoids double `s.nodes` subscription
+- `EmbeddedTeam` wrapper component isolates the `allNodes` subscription so it only mounts when children exist
 
 See [Team Expansion](../agent-runtime/team-expansion.md) for the full mechanics.
 
@@ -264,7 +266,8 @@ function hydrate(workspaces: WorkspaceRow[]) {
     id: ws.id,
     type: "workspaceNode",
     position: { x: ws.x, y: ws.y },
-    parentId: ws.parent_id ?? undefined,
+    // Don't set React Flow parentId — children render embedded inside WorkspaceNode
+    hidden: !!ws.parent_id, // Hide child nodes from canvas
     data: {
       name: ws.name,
       status: ws.status,
@@ -292,7 +295,7 @@ interface CanvasState {
 
   // Selection / panel state
   selectedNodeId: string | null;
-  panelTab: PanelTab; // "details" | "chat" | "config" | "memory" | "events"
+  panelTab: PanelTab; // "details" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events"
 
   // Actions
   hydrate(workspaces): void;
@@ -307,9 +310,9 @@ interface CanvasState {
 }
 ```
 
-`removeNode` cleans up edges connected to the removed node, properly re-parents children (using `n.data.parentId`, not React Flow's layout `parentId`), sets `hidden` correctly on re-parented children, and clears selection if the removed node was selected.
+`removeNode` cleans up edges connected to the removed node, properly re-parents children (using `n.data.parentId`, not React Flow's layout `parentId`), sets `hidden` correctly on re-parented children, and clears selection if the removed node was selected. The `WORKSPACE_REMOVED` event handler mirrors this logic — re-parenting children and clearing stale selection.
 
-Edges are derived from the parent/child hierarchy — no separate topology endpoint needed.
+Edges array is empty — parent/child relationships are rendered as embedded sub-workspaces inside the parent node, not as React Flow edges.
 
 Node positions are persisted in Postgres (`canvas_layouts` table), not browser localStorage. This ensures the layout survives browser clears and is consistent across machines.
 

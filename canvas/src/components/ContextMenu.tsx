@@ -22,6 +22,8 @@ export function ContextMenu() {
   const selectNode = useCanvasStore((s) => s.selectNode);
   const setPanelTab = useCanvasStore((s) => s.setPanelTab);
   const nestNode = useCanvasStore((s) => s.nestNode);
+  const contextNodeId = contextMenu?.nodeId ?? null;
+  const hasChildren = useCanvasStore((s) => contextNodeId ? s.nodes.some((n) => n.data.parentId === contextNodeId) : false);
   const ref = useRef<HTMLDivElement>(null);
 
   // Close on click outside or Escape
@@ -151,10 +153,6 @@ export function ContextMenu() {
   const isOfflineOrFailed = contextMenu.nodeData.status === "offline" || contextMenu.nodeData.status === "failed";
   const isOnline = contextMenu.nodeData.status === "online";
   const isChild = !!contextMenu.nodeData.parentId;
-
-  // Check if workspace has children (is a team)
-  const store = useCanvasStore.getState();
-  const hasChildren = store.nodes.some((n) => n.data.parentId === contextMenu.nodeId);
 
   const items: MenuItem[] = [
     { label: "Details", icon: "i", action: handleViewDetails },
