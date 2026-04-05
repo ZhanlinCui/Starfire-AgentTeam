@@ -80,16 +80,25 @@ function buildNodesAndEdges(workspaces: WorkspaceData[]) {
     },
   }));
 
-  // Edges from parent/child hierarchy
+  // Edges from parent/child hierarchy — styled by child status
   const edges: Edge[] = workspaces
     .filter((ws) => ws.parent_id)
-    .map((ws) => ({
-      id: `edge-${ws.parent_id}-${ws.id}`,
-      source: ws.parent_id!,
-      target: ws.id,
-      animated: true,
-      style: { stroke: "#525252" },
-    }));
+    .map((ws) => {
+      const isHealthy = ws.status === "online";
+      const isDegraded = ws.status === "degraded";
+      const isOffline = ws.status === "offline" || ws.status === "failed";
+      return {
+        id: `edge-${ws.parent_id}-${ws.id}`,
+        source: ws.parent_id!,
+        target: ws.id,
+        animated: isHealthy,
+        style: {
+          stroke: isDegraded ? "#f59e0b" : isOffline ? "#52525b" : "#3f3f46",
+          strokeWidth: isDegraded ? 2 : 1.5,
+          strokeDasharray: isOffline ? "5 5" : undefined,
+        },
+      };
+    });
 
   return { nodes, edges };
 }

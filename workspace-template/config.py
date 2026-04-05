@@ -24,6 +24,12 @@ class A2AConfig:
 
 
 @dataclass
+class SandboxConfig:
+    backend: str = "subprocess"  # subprocess | docker
+    memory_limit: str = "256m"
+    timeout: int = 30
+
+@dataclass
 class WorkspaceConfig:
     name: str = "Workspace"
     description: str = ""
@@ -32,9 +38,10 @@ class WorkspaceConfig:
     model: str = "anthropic:claude-sonnet-4-6"
     skills: list[str] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
-    prompt_files: list[str] = field(default_factory=list)  # ordered list of prompt files to load
+    prompt_files: list[str] = field(default_factory=list)
     a2a: A2AConfig = field(default_factory=A2AConfig)
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)
     sub_workspaces: list[dict] = field(default_factory=list)
 
 

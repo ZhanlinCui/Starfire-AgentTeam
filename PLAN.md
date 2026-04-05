@@ -135,7 +135,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **15d. L3: Global Corporate Memory** — `scope='GLOBAL'`, readable by all, write restricted to root (no parent_id)
 - [x] **15e. Access control enforcement** — `CanCommunicate()` check on TEAM results, parent_id check on GLOBAL writes
 - [x] **15f. A2A memory tools** — `commit_memory(content, scope)` and `search_memory(query, scope)` in tools/memory.py
-- [ ] **15g. Consolidation loop** — Background thread summarizes local scratchpad into dense knowledge when agent idle
+- [x] **15g. Consolidation loop** — `consolidation.py` runs every 5min, summarizes LOCAL memories into TEAM knowledge when threshold reached
 
 ---
 
@@ -168,7 +168,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **17m. Right-click context menu** — Export bundle, duplicate, restart, delete, open chat/terminal/details
 - [ ] **17n. Skill drag-and-drop** — Drag skill from palette onto a node to add it
 - [x] **17o. Canvas viewport persistence** — Save pan/zoom via `PUT /canvas/viewport` (debounced 1s), restore on page load
-- [ ] **17p. Connection breakage visualization** — Visual indicator when A2A communication between workspaces fails (PRD F1.13)
+- [x] **17p. Connection breakage visualization** — Edges styled by status: animated green (online), amber/thick (degraded), dashed gray (offline/failed)
 - [ ] **17q. ClawHub skill installation** — `npx clawhub@latest install <skill-name>` integration for skill marketplace (PRD F4.4)
 
 ### Platform endpoints needed for canvas features
@@ -182,11 +182,11 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Tier 3 workspaces can execute arbitrary code safely (per `docs/development/code-sandbox.md`).
 
-- [ ] **18a. `run_code` tool** — Agent tool that executes code in isolated sandbox
-- [ ] **18b. Docker-in-Docker backend (MVP)** — Throwaway container per execution, network disabled, memory capped, read-only fs
+- [x] **18a. `run_code` tool** — `tools/sandbox.py` executes code in isolated sandbox (subprocess or Docker)
+- [x] **18b. Docker-in-Docker backend (MVP)** — `--network none --memory 256m --read-only --cpus 0.5` throwaway container
 - [ ] **18c. Firecracker backend (production)** — MicroVM isolation, faster cold starts
 - [ ] **18d. E2B backend (cloud)** — Cloud-hosted via E2B API, no local Docker needed
-- [ ] **18e. Sandbox config** — `sandbox` field in config.yaml (backend, memory_limit, timeout)
+- [x] **18e. Sandbox config** — `SandboxConfig` dataclass in config.py (backend, memory_limit, timeout)
 
 ---
 

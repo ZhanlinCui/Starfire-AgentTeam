@@ -26,6 +26,7 @@ from skills.loader import load_skills
 from tools.approval import request_approval
 from tools.delegation import delegate_to_workspace
 from tools.memory import commit_memory, search_memory
+from tools.sandbox import run_code
 
 
 def get_machine_ip() -> str:
@@ -71,7 +72,7 @@ async def main():
     print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
 
     # 4. Gather tools from skills + built-in delegation tool
-    all_tools = [delegate_to_workspace, request_approval, commit_memory, search_memory]
+    all_tools = [delegate_to_workspace, request_approval, commit_memory, search_memory, run_code]
     for skill in loaded_skills:
         all_tools.extend(skill.tools)
 
