@@ -28,10 +28,11 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
   const isSelected = selectedNodeId === id;
   const isOnline = data.status === "online";
 
-  // Count children for team badge
-  const childCount = useCanvasStore((s) =>
-    s.nodes.filter((n) => n.data.parentId === id).length
+  // Get children to render embedded inside this node
+  const children = useCanvasStore((s) =>
+    s.nodes.filter((n) => n.data.parentId === id)
   );
+  const hasChildren = children.length > 0;
 
   const skills = getSkillNames(data.agentCard as Record<string, unknown> | null);
 
@@ -43,8 +44,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        if (childCount > 0) {
-          // Zoom to children — dispatch custom event picked up by Canvas
+        if (hasChildren) {
           window.dispatchEvent(new CustomEvent("starfire:zoom-to-team", { detail: { nodeId: id } }));
         }
       }}
@@ -54,7 +54,8 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         openContextMenu({ x: e.clientX, y: e.clientY, nodeId: id, nodeData: data as unknown as import("@/store/canvas").WorkspaceNodeData });
       }}
       className={`
-        group relative rounded-xl min-w-[210px] max-w-[280px]
+        group relative rounded-xl
+        ${hasChildren ? "min-w-[320px] max-w-[450px]" : "min-w-[210px] max-w-[280px]"}
         cursor-pointer overflow-hidden
         transition-all duration-200 ease-out
         ${isDragTarget
@@ -85,10 +86,9 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
             </span>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Team badge */}
-            {childCount > 0 && (
+            {hasChildren && (
               <span className="text-[8px] font-mono text-violet-300 bg-violet-900/40 border border-violet-700/30 px-1.5 py-0.5 rounded-md">
-                {childCount} sub
+                {children.length} sub
               </span>
             )}
             <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-md ${tierCfg.color}`}>
@@ -125,9 +125,38 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
           </div>
         )}
 
+        {/* Embedded children — rendered INSIDE the parent node */}
+        {hasChildren && (
+          <div className="mt-2 pt-2 border-t border-zinc-700/30">
+            <div className="text-[8px] text-zinc-500 uppercase tracking-widest mb-1.5">Team Members</div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {children.map((child) => {
+                const childStatus = STATUS_CONFIG[child.data.status] || STATUS_CONFIG.offline;
+                return (
+                  <button
+                    key={child.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectNode(child.id);
+                    }}
+                    className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700/30 rounded-lg text-left transition-colors"
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${childStatus.dot}`} />
+                    <div className="min-w-0">
+                      <div className="text-[9px] text-zinc-200 truncate">{child.data.name}</div>
+                      {child.data.role && (
+                        <div className="text-[7px] text-zinc-500 truncate">{child.data.role}</div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Bottom row: status / active tasks */}
         <div className="flex items-center justify-between mt-0.5">
-          {/* Status for non-online */}
           {data.status !== "online" && (
             <div className={`text-[8px] uppercase tracking-widest font-medium ${
               data.status === "failed" ? "text-red-400" :
@@ -140,7 +169,6 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
           )}
           {data.status === "online" && <div />}
 
-          {/* Active tasks */}
           {data.activeTasks > 0 && (
             <div className="flex items-center gap-1">
               <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />

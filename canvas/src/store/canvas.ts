@@ -60,11 +60,12 @@ interface CanvasState {
 }
 
 function buildNodesAndEdges(workspaces: WorkspaceData[]) {
+  // All workspaces become nodes (children are rendered inside parent via WorkspaceNode)
   const nodes: Node<WorkspaceNodeData>[] = workspaces.map((ws) => ({
     id: ws.id,
     type: "workspaceNode",
     position: { x: ws.x, y: ws.y },
-    parentId: ws.parent_id ?? undefined,
+    // Don't set React Flow parentId — children render embedded inside the WorkspaceNode component
     data: {
       name: ws.name,
       status: ws.status,
@@ -78,27 +79,13 @@ function buildNodesAndEdges(workspaces: WorkspaceData[]) {
       url: ws.url,
       parentId: ws.parent_id,
     },
+    // Hide child nodes from canvas — they render inside the parent WorkspaceNode
+    hidden: !!ws.parent_id,
   }));
 
-  // Edges from parent/child hierarchy — styled by child status
-  const edges: Edge[] = workspaces
-    .filter((ws) => ws.parent_id)
-    .map((ws) => {
-      const isHealthy = ws.status === "online";
-      const isDegraded = ws.status === "degraded";
-      const isOffline = ws.status === "offline" || ws.status === "failed";
-      return {
-        id: `edge-${ws.parent_id}-${ws.id}`,
-        source: ws.parent_id!,
-        target: ws.id,
-        animated: isHealthy,
-        style: {
-          stroke: isDegraded ? "#f59e0b" : isOffline ? "#52525b" : "#3f3f46",
-          strokeWidth: isDegraded ? 2 : 1.5,
-          strokeDasharray: isOffline ? "5 5" : undefined,
-        },
-      };
-    });
+  // No parent→child edges — children are embedded inside the parent node.
+  // Only create edges between siblings or cross-team connections if needed in future.
+  const edges: Edge[] = [];
 
   return { nodes, edges };
 }
