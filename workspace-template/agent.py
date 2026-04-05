@@ -44,10 +44,12 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
         llm = LLMClass(model=model_name)
     elif provider == "openrouter":
         api_key = os.environ.get("OPENROUTER_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+        max_tokens = int(os.environ.get("MAX_TOKENS", "2048"))
         llm = LLMClass(
             model=model_name,
             openai_api_key=api_key,
             openai_api_base="https://openrouter.ai/api/v1",
+            max_tokens=max_tokens,
         )
     elif provider == "openai":
         llm = LLMClass(model=model_name)
