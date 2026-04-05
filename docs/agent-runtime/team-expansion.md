@@ -72,10 +72,14 @@ Communication rules are automatically derived from the new hierarchy — no manu
 
 ## Canvas Behavior
 
-- Expanding a workspace shows a "zoom-in" view of the team inside
-- The parent workspace node shows a badge indicating it's a team
-- Sub-workspace nodes are only visible when zoomed into the parent
-- From the top-level canvas view, the team appears as a single node
+- Children render as embedded mini-cards (`TeamMemberChip`) inside the parent node, not as separate canvas nodes
+- Each mini-card shows full status: gradient bar, name, tier badge, skills pills, active tasks, descendant count
+- **Recursive rendering** up to 3 levels deep (`MAX_NESTING_DEPTH = 3`) — sub-cards can contain their own "Team" sections
+- Parent node dynamically resizes: 210-280px (no children), 320-450px (children), 400-560px (grandchildren)
+- Eject button (sky-blue arrow icon) on hover extracts a child from the team
+- "Extract from Team" also available in the right-click context menu
+- Double-click a team node to zoom/fit to the parent area
+- The parent workspace node shows a badge with total descendant count
 
 ## Collapsing a Team
 

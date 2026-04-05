@@ -105,6 +105,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 - Initial load: HTTP fetch from `GET /workspaces` → Zustand hydrate
 - Real-time updates: WebSocket events → `applyEvent()` in Zustand store
 - Position persistence: `onNodeDragStop` → `PATCH /workspaces/:id` with `{x, y}`
+- Embedded sub-workspaces: `nestNode` sets `hidden: !!targetId` on child nodes; children render as recursive `TeamMemberChip` components inside parent (up to 3 levels), not as separate canvas nodes. Use `n.data.parentId` (not React Flow's `n.parentId`) for hierarchy lookups.
 
 ### Workspace Lifecycle
 `provisioning` → `online` (on register) → `degraded` (error_rate > 0.5) → `online` (recovered) → `offline` (Redis TTL expired) → `removed` (deleted)

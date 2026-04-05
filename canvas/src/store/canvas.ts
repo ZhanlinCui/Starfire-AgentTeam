@@ -134,24 +134,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     // No change needed
     if (currentParentId === targetId) return;
 
-    // Optimistic update: move edges and parentId
+    // Optimistic update:
+    // - Set parentId in data
+    // - Hide child nodes (they render inside parent WorkspaceNode)
+    // - Remove all edges involving the dragged node
     const newEdges = edges.filter(
-      (e) => !(e.target === draggedId && e.source === currentParentId)
+      (e) => e.source !== draggedId && e.target !== draggedId
     );
-    if (targetId) {
-      newEdges.push({
-        id: `edge-${targetId}-${draggedId}`,
-        source: targetId,
-        target: draggedId,
-        animated: true,
-        style: { stroke: "#525252" },
-      });
-    }
 
     set({
       nodes: nodes.map((n) =>
         n.id === draggedId
-          ? { ...n, data: { ...n.data, parentId: targetId } }
+          ? {
+              ...n,
+              hidden: !!targetId, // Hide if becoming a child, show if un-nesting
+              data: { ...n.data, parentId: targetId },
+            }
           : n
       ),
       edges: newEdges,
@@ -165,7 +163,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       set({
         nodes: get().nodes.map((n) =>
           n.id === draggedId
-            ? { ...n, data: { ...n.data, parentId: currentParentId } }
+            ? {
+                ...n,
+                hidden: !!currentParentId,
+                data: { ...n.data, parentId: currentParentId },
+              }
             : n
         ),
         edges,
@@ -191,28 +193,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const { nodes, edges, selectedNodeId } = get();
     // Re-parent children to the deleted node's parent (or root)
     const deletedNode = nodes.find((n) => n.id === id);
-    const parentOfDeleted = deletedNode?.parentId;
+    const parentOfDeleted = deletedNode?.data.parentId ?? null;
     set({
       nodes: nodes
         .filter((n) => n.id !== id)
         .map((n) =>
-          n.parentId === id
-            ? { ...n, parentId: parentOfDeleted, data: { ...n.data, parentId: parentOfDeleted ?? null } }
+          n.data.parentId === id
+            ? {
+                ...n,
+                hidden: !!parentOfDeleted,
+                data: { ...n.data, parentId: parentOfDeleted },
+              }
             : n
         ),
-      edges: edges
-        .filter((e) => e.source !== id && e.target !== id)
-        .concat(
-          // Re-create edges from the grandparent to orphaned children
-          edges
-            .filter((e) => e.source === id)
-            .filter((e) => parentOfDeleted)
-            .map((e) => ({
-              ...e,
-              id: `edge-${parentOfDeleted}-${e.target}`,
-              source: parentOfDeleted!,
-            }))
-        ),
+      edges: edges.filter((e) => e.source !== id && e.target !== id),
       selectedNodeId: selectedNodeId === id ? null : selectedNodeId,
     });
   },

@@ -21,6 +21,7 @@ export function ContextMenu() {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const selectNode = useCanvasStore((s) => s.selectNode);
   const setPanelTab = useCanvasStore((s) => s.setPanelTab);
+  const nestNode = useCanvasStore((s) => s.nestNode);
   const ref = useRef<HTMLDivElement>(null);
 
   // Close on click outside or Escape
@@ -134,10 +135,22 @@ export function ContextMenu() {
     closeContextMenu();
   }, [contextMenu, closeContextMenu]);
 
+  const handleRemoveFromTeam = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      await nestNode(contextMenu.nodeId, null);
+      showToast("Extracted from team", "success");
+    } catch {
+      showToast("Extract failed", "error");
+    }
+    closeContextMenu();
+  }, [contextMenu, nestNode, closeContextMenu]);
+
   if (!contextMenu) return null;
 
   const isOfflineOrFailed = contextMenu.nodeData.status === "offline" || contextMenu.nodeData.status === "failed";
   const isOnline = contextMenu.nodeData.status === "online";
+  const isChild = !!contextMenu.nodeData.parentId;
 
   // Check if workspace has children (is a team)
   const store = useCanvasStore.getState();
@@ -150,6 +163,9 @@ export function ContextMenu() {
     { label: "", icon: "", action: () => {}, divider: true },
     { label: "Export Bundle", icon: "📦", action: handleExportBundle },
     { label: "Duplicate", icon: "⧉", action: handleDuplicate },
+    ...(isChild
+      ? [{ label: "Extract from Team", icon: "⤴", action: handleRemoveFromTeam }]
+      : []),
     ...(hasChildren
       ? [{ label: "Collapse Team", icon: "◁", action: handleCollapse }]
       : [{ label: "Expand to Team", icon: "▷", action: handleExpand }]),

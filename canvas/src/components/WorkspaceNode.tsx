@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 
@@ -11,6 +11,16 @@ const STATUS_CONFIG: Record<string, { dot: string; glow: string; label: string; 
   failed: { dot: "bg-red-400", glow: "shadow-red-400/50", label: "Failed", bar: "from-red-500/20 to-transparent" },
   provisioning: { dot: "bg-sky-400 animate-pulse", glow: "shadow-sky-400/50", label: "Starting", bar: "from-sky-500/20 to-transparent" },
 };
+
+/** Eject/extract arrow icon — visually distinct from delete ✕ */
+function EjectIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7L7 3" />
+      <path d="M4 3H7V6" />
+    </svg>
+  );
+}
 
 const TIER_CONFIG: Record<number, { label: string; color: string }> = {
   1: { label: "T1", color: "text-zinc-500 bg-zinc-800/80" },
@@ -25,6 +35,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
   const selectNode = useCanvasStore((s) => s.selectNode);
   const openContextMenu = useCanvasStore((s) => s.openContextMenu);
+  const nestNode = useCanvasStore((s) => s.nestNode);
   const isDragTarget = useCanvasStore((s) => s.dragOverNodeId === id);
   const isSelected = selectedNodeId === id;
   const isOnline = data.status === "online";
@@ -37,8 +48,23 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
     [allNodes, id]
   );
   const hasChildren = children.length > 0;
+  // Check for grandchildren to size the node wider
+  const hasGrandchildren = useMemo(
+    () => hasChildren && children.some((c) => allNodes.some((n) => n.data.parentId === c.id)),
+    [allNodes, children, hasChildren] // allNodes needed for grandchild lookup, children for child IDs
+  );
 
   const skills = getSkillNames(data.agentCard as Record<string, unknown> | null);
+
+  const descendantCount = useMemo(
+    () => hasChildren ? countDescendants(id, allNodes) : 0,
+    [allNodes, id, hasChildren]
+  );
+
+  const handleExtract = useCallback(
+    (childId: string) => nestNode(childId, null),
+    [nestNode]
+  );
 
   return (
     <div
@@ -59,7 +85,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
       }}
       className={`
         group relative rounded-xl
-        ${hasChildren ? "min-w-[320px] max-w-[450px]" : "min-w-[210px] max-w-[280px]"}
+        ${hasGrandchildren ? "min-w-[400px] max-w-[560px]" : hasChildren ? "min-w-[320px] max-w-[450px]" : "min-w-[210px] max-w-[280px]"}
         cursor-pointer overflow-hidden
         transition-all duration-200 ease-out
         ${isDragTarget
@@ -92,7 +118,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
           <div className="flex items-center gap-1.5 shrink-0">
             {hasChildren && (
               <span className="text-[8px] font-mono text-violet-300 bg-violet-900/40 border border-violet-700/30 px-1.5 py-0.5 rounded-md">
-                {children.length} sub
+                {descendantCount} sub
               </span>
             )}
             <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-md ${tierCfg.color}`}>
@@ -133,28 +159,10 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         {hasChildren && (
           <div className="mt-2 pt-2 border-t border-zinc-700/30">
             <div className="text-[8px] text-zinc-500 uppercase tracking-widest mb-1.5">Team Members</div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {children.map((child) => {
-                const childStatus = STATUS_CONFIG[child.data.status] || STATUS_CONFIG.offline;
-                return (
-                  <button
-                    key={child.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      selectNode(child.id);
-                    }}
-                    className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700/30 rounded-lg text-left transition-colors"
-                  >
-                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${childStatus.dot}`} />
-                    <div className="min-w-0">
-                      <div className="text-[9px] text-zinc-200 truncate">{child.data.name}</div>
-                      {child.data.role && (
-                        <div className="text-[7px] text-zinc-500 truncate">{child.data.role}</div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="space-y-1.5">
+              {children.map((child) => (
+                <TeamMemberChip key={child.id} node={child} allNodes={allNodes} depth={0} onSelect={selectNode} onExtract={handleExtract} />
+              ))}
             </div>
           </div>
         )}
@@ -199,6 +207,157 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         position={Position.Bottom}
         className="!w-2.5 !h-1 !rounded-full !bg-zinc-600/80 !border-0 !-bottom-0.5 hover:!bg-blue-400 hover:!h-1.5 transition-all"
       />
+    </div>
+  );
+}
+
+const MAX_NESTING_DEPTH = 3;
+
+/** Count all descendants (children + grandchildren + ...) */
+function countDescendants(nodeId: string, allNodes: Node<WorkspaceNodeData>[]): number {
+  const directChildren = allNodes.filter((n) => n.data.parentId === nodeId);
+  let count = directChildren.length;
+  for (const child of directChildren) {
+    count += countDescendants(child.id, allNodes);
+  }
+  return count;
+}
+
+/** Recursive mini-card — mirrors parent card layout at smaller scale */
+function TeamMemberChip({
+  node,
+  allNodes,
+  depth,
+  onSelect,
+  onExtract,
+}: {
+  node: Node<WorkspaceNodeData>;
+  allNodes: Node<WorkspaceNodeData>[];
+  depth: number;
+  onSelect: (id: string) => void;
+  onExtract: (id: string) => void;
+}) {
+  const { data } = node;
+  const statusCfg = STATUS_CONFIG[data.status] || STATUS_CONFIG.offline;
+  const tierCfg = TIER_CONFIG[data.tier] || { label: `T${data.tier}`, color: "text-zinc-500 bg-zinc-800" };
+  const isOnline = data.status === "online";
+  const skills = getSkillNames(data.agentCard as Record<string, unknown> | null);
+
+  const subChildren = useMemo(
+    () => allNodes.filter((n) => n.data.parentId === node.id),
+    [allNodes, node.id]
+  );
+  const hasSubChildren = subChildren.length > 0;
+  const descendantCount = useMemo(
+    () => hasSubChildren ? countDescendants(node.id, allNodes) : 0,
+    [allNodes, node.id, hasSubChildren]
+  );
+
+  return (
+    <div>
+      <div
+        className="group/child relative rounded-lg bg-zinc-800/60 hover:bg-zinc-700/70 border border-zinc-700/30 hover:border-zinc-600/40 overflow-hidden transition-colors cursor-pointer"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(node.id);
+        }}
+      >
+        {/* Status gradient bar */}
+        <div className={`absolute inset-x-0 top-0 h-5 bg-gradient-to-b ${statusCfg.bar} pointer-events-none`} />
+
+        <div className="relative px-2 py-1.5">
+          {/* Header: name + badges + extract */}
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusCfg.dot}`} />
+              <span className="text-[9px] font-semibold text-zinc-200 truncate leading-tight">
+                {data.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {hasSubChildren && (
+                <span className="text-[7px] font-mono text-violet-300 bg-violet-900/40 border border-violet-700/30 px-1 py-0.5 rounded">
+                  {descendantCount}
+                </span>
+              )}
+              <span className={`text-[7px] font-mono px-1 py-0.5 rounded ${tierCfg.color}`}>
+                {tierCfg.label}
+              </span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExtract(node.id);
+                }}
+                title="Extract from team"
+                className="opacity-0 group-hover/child:opacity-100 text-zinc-500 hover:text-sky-400 transition-all"
+              >
+                <EjectIcon />
+              </button>
+            </div>
+          </div>
+
+          {/* Role */}
+          {data.role && (
+            <div className="text-[8px] text-zinc-500 mb-1 leading-tight truncate">{data.role}</div>
+          )}
+
+          {/* Skills */}
+          {skills.length > 0 && (
+            <div className="flex flex-wrap gap-0.5 mb-1">
+              {skills.slice(0, 3).map((skill) => (
+                <span
+                  key={skill}
+                  className={`text-[7px] px-1 py-0.5 rounded border ${
+                    isOnline
+                      ? "text-emerald-300/70 bg-emerald-950/20 border-emerald-800/20"
+                      : "text-zinc-500 bg-zinc-800/40 border-zinc-700/30"
+                  }`}
+                >
+                  {skill}
+                </span>
+              ))}
+              {skills.length > 3 && (
+                <span className="text-[7px] text-zinc-500 self-center">+{skills.length - 3}</span>
+              )}
+            </div>
+          )}
+
+          {/* Status + active tasks row */}
+          <div className="flex items-center justify-between">
+            {data.status !== "online" && (
+              <span className={`text-[7px] uppercase tracking-widest font-medium ${
+                data.status === "failed" ? "text-red-400" :
+                data.status === "degraded" ? "text-amber-400" :
+                data.status === "provisioning" ? "text-sky-400" :
+                "text-zinc-500"
+              }`}>
+                {statusCfg.label}
+              </span>
+            )}
+            {data.status === "online" && <span />}
+            {data.activeTasks > 0 && (
+              <div className="flex items-center gap-0.5">
+                <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-[7px] text-amber-300/80 tabular-nums">
+                  {data.activeTasks}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Recursive sub-children rendered inside this card */}
+          {hasSubChildren && depth < MAX_NESTING_DEPTH && (
+            <div className="mt-1.5 pt-1.5 border-t border-zinc-700/20">
+              <div className="text-[7px] text-zinc-600 uppercase tracking-widest mb-1">Team</div>
+              <div className="space-y-1">
+                {subChildren.map((sub) => (
+                  <TeamMemberChip key={sub.id} node={sub} allNodes={allNodes} depth={depth + 1} onSelect={onSelect} onExtract={onExtract} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

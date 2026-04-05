@@ -138,6 +138,7 @@ Right-clicking a workspace node shows a context menu with:
 - Export Bundle — downloads `.bundle.json`
 - Duplicate — exports then re-imports with new IDs
 - Expand to Team / Collapse Team — team expansion via `POST /workspaces/:id/expand` or `/collapse`
+- Extract from Team — for child nodes, un-nests from parent (sets `parent_id` to null)
 - Restart — for offline/failed workspaces
 - Delete — removes workspace
 
@@ -203,17 +204,23 @@ Right-click an existing node → "Duplicate". This exports the workspace as a bu
 
 ## Team Visualization (Embedded Sub-Workspaces)
 
-When a workspace is expanded into a team, children render **inside** the parent node:
+When a workspace is expanded into a team, children render **inside** the parent node as recursive mini-cards:
 
-- Parent node expands in size (320-450px wide) to accommodate children
-- Children appear as clickable mini-cards in a "Team Members" 2-column grid
-- Each child chip shows status dot, name, and role
+- Parent node dynamically sizes based on nesting depth:
+  - No children: 210-280px
+  - With children: 320-450px
+  - With grandchildren: 400-560px
+- Children appear as clickable `TeamMemberChip` components in a "Team Members" single-column layout
+- Each child chip mirrors the parent card layout: status dot + gradient bar, name, tier badge, skills pills, status label, active tasks, descendant count badge
+- **Recursive rendering**: sub-cards can contain their own "Team" section with further nested sub-cards, up to `MAX_NESTING_DEPTH = 3` levels
+- `countDescendants()` helper (memoized) counts all descendants recursively; badge shows total, not just direct children
 - Click a child chip to select it and open its side panel
+- **Eject/Extract**: each child chip shows a sky-blue eject button (arrow-up-right icon) on hover to extract it from the team (sets `parent_id` to null, unhides node)
 - No separate canvas nodes or edges for parent→child relationships
-- Children are hidden from React Flow (`hidden: true`) but exist in the store
+- Children are hidden from React Flow (`hidden: true`) but exist in the store; `nestNode` sets `hidden: !!targetId` so nodes hide when nested and reappear when un-nested
 - Double-click a team node to zoom/fit to the parent area
-- Parent shows a "N sub" badge in the header
-- Sub-workspace nodes are only visible when zoomed into the parent
+- Parent shows a descendant count badge in the header
+- Callbacks (`onSelect`, `onExtract`) passed as props to avoid N+1 Zustand subscriptions per chip
 
 See [Team Expansion](../agent-runtime/team-expansion.md) for the full mechanics.
 
@@ -300,7 +307,7 @@ interface CanvasState {
 }
 ```
 
-`removeNode` cleans up edges connected to the removed node and clears selection if the removed node was selected.
+`removeNode` cleans up edges connected to the removed node, properly re-parents children (using `n.data.parentId`, not React Flow's layout `parentId`), sets `hidden` correctly on re-parented children, and clears selection if the removed node was selected.
 
 Edges are derived from the parent/child hierarchy — no separate topology endpoint needed.
 
