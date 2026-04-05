@@ -5,8 +5,12 @@ import { useCanvasStore } from "@/store/canvas";
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
 
+  const rootNodes = nodes.filter((n) => !n.data.parentId);
+  const childNodes = nodes.filter((n) => !!n.data.parentId);
   const counts = {
     total: nodes.length,
+    roots: rootNodes.length,
+    children: childNodes.length,
     online: nodes.filter((n) => n.data.status === "online").length,
     offline: nodes.filter((n) => n.data.status === "offline").length,
     failed: nodes.filter((n) => n.data.status === "failed").length,
@@ -39,7 +43,10 @@ export function Toolbar() {
 
       {/* Total */}
       <div className="pl-3 border-l border-zinc-800/60">
-        <span className="text-[10px] text-zinc-500">{counts.total} workspace{counts.total !== 1 ? "s" : ""}</span>
+        <span className="text-[10px] text-zinc-500">
+          {counts.roots} workspace{counts.roots !== 1 ? "s" : ""}
+          {counts.children > 0 && <span className="text-zinc-600"> + {counts.children} sub</span>}
+        </span>
       </div>
 
       {/* Search shortcut */}
