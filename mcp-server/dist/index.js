@@ -13,17 +13,24 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 const PLATFORM_URL = process.env.STARFIRE_URL || "http://localhost:8080";
 async function apiCall(method, path, body) {
-    const res = await fetch(`${PLATFORM_URL}${path}`, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await res.text();
     try {
-        return JSON.parse(text);
+        const res = await fetch(`${PLATFORM_URL}${path}`, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: body ? JSON.stringify(body) : undefined,
+        });
+        const text = await res.text();
+        try {
+            return JSON.parse(text);
+        }
+        catch {
+            return { raw: text, status: res.status };
+        }
     }
-    catch {
-        return { raw: text, status: res.status };
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`Starfire API error (${method} ${path}): ${msg}`);
+        return { error: `Failed to reach Starfire platform at ${PLATFORM_URL}. Is it running?`, detail: msg };
     }
 }
 const server = new McpServer({
@@ -181,8 +188,21 @@ server.tool("decide_approval", "Approve or deny a pending approval request", {
 });
 // === START SERVER ===
 async function main() {
+    // Validate platform connectivity on startup
+    try {
+        const res = await fetch(`${PLATFORM_URL}/health`);
+        if (res.ok) {
+            console.error(`Starfire platform connected: ${PLATFORM_URL}`);
+        }
+        else {
+            console.error(`WARNING: Starfire platform at ${PLATFORM_URL} returned ${res.status}. Tools may fail.`);
+        }
+    }
+    catch {
+        console.error(`WARNING: Cannot reach Starfire platform at ${PLATFORM_URL}. Start it with: cd platform && go run ./cmd/server`);
+    }
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Starfire MCP server running on stdio");
+    console.error("Starfire MCP server running on stdio (20 tools available)");
 }
 main().catch(console.error);
