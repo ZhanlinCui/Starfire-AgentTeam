@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useCanvasStore } from "@/store/canvas";
-import { useReactFlow } from "@xyflow/react";
 
 export function SearchDialog() {
-  const [open, setOpen] = useState(false);
+  const open = useCanvasStore((s) => s.searchOpen);
+  const setOpen = useCanvasStore((s) => s.setSearchOpen);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const nodes = useCanvasStore((s) => s.nodes);
@@ -26,7 +26,7 @@ export function SearchDialog() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open]);
+  }, [open, setOpen]);
 
   useEffect(() => {
     if (open) {

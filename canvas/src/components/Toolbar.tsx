@@ -1,6 +1,7 @@
 "use client";
 
 import { useCanvasStore } from "@/store/canvas";
+// Toolbar uses useCanvasStore.getState() for search — no extra import needed
 
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
@@ -44,7 +45,7 @@ export function Toolbar() {
 
       {/* Search shortcut */}
       <button
-        onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+        onClick={() => useCanvasStore.getState().setSearchOpen(true)}
         className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700/40 rounded-lg transition-colors"
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-zinc-500">

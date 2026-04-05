@@ -52,6 +52,8 @@ interface CanvasState {
   isDescendant: (ancestorId: string, nodeId: string) => boolean;
   openContextMenu: (menu: ContextMenuState) => void;
   closeContextMenu: () => void;
+  searchOpen: boolean;
+  setSearchOpen: (open: boolean) => void;
   viewport: { x: number; y: number; zoom: number };
   setViewport: (v: { x: number; y: number; zoom: number }) => void;
   saveViewport: (x: number, y: number, zoom: number) => void;
@@ -105,6 +107,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   selectNode: (id) => set({ selectedNodeId: id }),
   openContextMenu: (menu) => set({ contextMenu: menu }),
   closeContextMenu: () => set({ contextMenu: null }),
+  searchOpen: false,
+  setSearchOpen: (open) => set({ searchOpen: open }),
   setViewport: (v) => set({ viewport: v }),
   saveViewport: async (x, y, zoom) => {
     set({ viewport: { x, y, zoom } });
