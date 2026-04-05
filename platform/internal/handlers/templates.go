@@ -381,6 +381,53 @@ func (h *TemplatesHandler) DeleteFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath, "type": "file"})
 }
 
+// SharedContext handles GET /workspaces/:id/shared-context
+// Returns the files listed in the workspace's config.yaml shared_context field.
+func (h *TemplatesHandler) SharedContext(c *gin.Context) {
+	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	var wsName string
+	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+
+	configDir := filepath.Join(h.configsDir, normalizeName(wsName))
+	configData, err := os.ReadFile(filepath.Join(configDir, "config.yaml"))
+	if err != nil {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
+	var cfg struct {
+		SharedContext []string `yaml:"shared_context"`
+	}
+	if err := yaml.Unmarshal(configData, &cfg); err != nil || len(cfg.SharedContext) == 0 {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
+	type contextFile struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+
+	files := make([]contextFile, 0, len(cfg.SharedContext))
+	for _, relPath := range cfg.SharedContext {
+		if err := validateRelPath(relPath); err != nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(configDir, relPath))
+		if err != nil {
+			continue
+		}
+		files = append(files, contextFile{Path: relPath, Content: string(data)})
+	}
+
+	c.JSON(http.StatusOK, files)
+}
+
 // List handles GET /templates
 func (h *TemplatesHandler) List(c *gin.Context) {
 	entries, err := os.ReadDir(h.configsDir)

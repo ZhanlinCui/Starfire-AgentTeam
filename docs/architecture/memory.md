@@ -55,5 +55,13 @@ Memory interactions happen via standardized tool definitions exposed to the lang
 - `search_memory("what is the database password", scope="TEAM")`
 - `commit_memory("the staging API URL is api.stage.com", scope="TEAM")`
 
-### 3. Asynchronous Cognitive Consolidation
+### 3. Parent Context Inheritance (L2 complement)
+
+L2 Team Memory stores facts explicitly committed at runtime. **Shared context** complements this by giving children access to the parent's static project knowledge (architecture docs, conventions, API schemas) without requiring the parent to commit each document as a memory entry.
+
+The parent declares `shared_context: [architecture.md, conventions.md]` in its `config.yaml`. Children fetch these files at startup via `GET /workspaces/{parent_id}/shared-context` and inject them into their system prompt as a `## Parent Context` section. This is 1-level only — grandchildren see their direct parent's shared context, not the grandparent's.
+
+See [Config Format — shared_context](../agent-runtime/config-format.md) and [System Prompt Structure — Parent Context](../agent-runtime/system-prompt-structure.md).
+
+### 4. Asynchronous Cognitive Consolidation
 Since Local Memory degrades as the context window fills, agents feature an independent Consolidation Loop. Similar to human sleep, when an agent reaches a configurable TTL of heartbeat-idleness, it can wake up a background goroutine/LangGraph thread to summarize noisy local scratchpad entries into dense, high-value knowledge facts, committing them back to L1 or L2 memory.

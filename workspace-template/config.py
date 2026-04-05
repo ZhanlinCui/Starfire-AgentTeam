@@ -39,6 +39,7 @@ class WorkspaceConfig:
     skills: list[str] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
     prompt_files: list[str] = field(default_factory=list)
+    shared_context: list[str] = field(default_factory=list)
     a2a: A2AConfig = field(default_factory=A2AConfig)
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
@@ -73,6 +74,7 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
         skills=raw.get("skills", []),
         tools=raw.get("tools", []),
         prompt_files=raw.get("prompt_files", []),
+        shared_context=raw.get("shared_context", []),
         a2a=A2AConfig(
             port=a2a_raw.get("port", 8000),
             streaming=a2a_raw.get("streaming", True),

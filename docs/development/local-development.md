@@ -54,6 +54,7 @@ WORKSPACE_CONFIG_PATH=  # path to config folder inside container
 MODEL_PROVIDER=         # e.g. anthropic:claude-sonnet-4-6
 TIER=                   # 1, 2, 3, or 4
 PLATFORM_URL=           # http://platform:8080
+PARENT_ID=              # set by platform during team expansion (empty for top-level)
 ANTHROPIC_API_KEY=      # or OPENAI_API_KEY, etc.
 LANGFUSE_HOST=          # http://langfuse-web:3000 (internal container port; host-mapped to :3001)
 LANGFUSE_PUBLIC_KEY=

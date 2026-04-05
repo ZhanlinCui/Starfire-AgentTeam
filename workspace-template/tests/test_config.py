@@ -172,3 +172,23 @@ def test_load_config_env_path(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKSPACE_CONFIG_PATH", str(tmp_path))
     cfg = load_config()  # no argument
     assert cfg.name == "EnvAgent"
+
+
+def test_shared_context_default(tmp_path):
+    """shared_context defaults to empty list when not specified in YAML."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.dump({}))
+
+    cfg = load_config(str(tmp_path))
+    assert cfg.shared_context == []
+
+
+def test_shared_context_from_yaml(tmp_path):
+    """shared_context reads file paths from YAML."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(
+        yaml.dump({"shared_context": ["guidelines.md", "architecture.md"]})
+    )
+
+    cfg = load_config(str(tmp_path))
+    assert cfg.shared_context == ["guidelines.md", "architecture.md"]

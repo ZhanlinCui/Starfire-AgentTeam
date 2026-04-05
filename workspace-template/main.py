@@ -18,7 +18,7 @@ from a2a.types import AgentCard, AgentCapabilities, AgentSkill
 from a2a_executor import LangGraphA2AExecutor
 from agent import create_agent
 from config import load_config
-from coordinator import get_children, build_children_description, route_task_to_team
+from coordinator import get_children, get_parent_context, build_children_description, route_task_to_team
 from heartbeat import HeartbeatLoop
 from plugins import load_plugins
 from prompt import build_system_prompt, get_peer_capabilities
@@ -83,7 +83,12 @@ async def main():
         print(f"Coordinator mode: {len(children)} children ({[c.get('name') for c in children]})")
         all_tools.append(route_task_to_team)
 
-    # 6. Fetch peer capabilities and build system prompt
+    # 6. Fetch parent's shared context (if this is a child workspace)
+    parent_context = await get_parent_context()
+    if parent_context:
+        print(f"Inherited {len(parent_context)} context files from parent")
+
+    # 7. Fetch peer capabilities and build system prompt
     peers = await get_peer_capabilities(platform_url, workspace_id)
 
     coordinator_prompt = build_children_description(children) if is_coordinator else ""
@@ -96,6 +101,7 @@ async def main():
         prompt_files=config.prompt_files,
         plugin_rules=plugins.rules,
         plugin_prompts=extra_prompts,
+        parent_context=parent_context,
     )
 
     # 7. Create the agent

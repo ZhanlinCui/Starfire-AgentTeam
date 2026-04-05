@@ -5,9 +5,12 @@ When a workspace agent starts (or rebuilds its prompt), the system prompt is ass
 ## Assembly Order
 
 ```
-1. system-prompt.md          — agent's core identity and instructions
-2. Skill instructions         — SKILL.md body from each loaded skill
-3. Reachable workspace cards  — Agent Card skill descriptions from peers
+1. Prompt files               — agent's core identity and instructions (system-prompt.md or custom list)
+2. Parent context             — shared files from direct parent (if child workspace)
+3. Platform rules & prompts   — plugin rules, coordinator prompt
+4. Skill instructions         — SKILL.md body from each loaded skill
+5. Reachable workspace cards  — Agent Card skill descriptions from peers
+6. Delegation failure handling — always appended
 ```
 
 ### 1. system-prompt.md
@@ -21,7 +24,23 @@ When you receive a task, break it into sub-tasks and delegate to your team.
 Always review work before reporting completion to the caller.
 ```
 
-### 2. Skill Instructions
+### 2. Parent Context (if child workspace)
+
+If this workspace was created via team expansion (has a `PARENT_ID` env var), it fetches its parent's shared context files at startup via `GET /workspaces/{parent_id}/shared-context`. The parent declares which files to share in its `config.yaml`:
+
+```yaml
+shared_context:
+  - architecture.md
+  - conventions.md
+```
+
+These files are injected as a `## Parent Context` section, with each file rendered under a `### {filename}` heading. This gives children the parent's project knowledge (architecture, conventions, API schemas) without exposing the parent's system prompt or full config.
+
+**1-level inheritance only:** A grandchild sees its direct parent's shared context, not its grandparent's. This mirrors the L2 Team Memory scope.
+
+**Graceful degradation:** If the parent is offline or the endpoint returns an error, the child starts normally without parent context.
+
+### 3. Skill Instructions
 
 The body (non-frontmatter) content of each `SKILL.md` from loaded skills. Appended in the order listed in `config.yaml`. This tells the agent what it can do directly.
 

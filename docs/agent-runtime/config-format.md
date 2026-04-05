@@ -27,6 +27,12 @@ prompt_files:
 # OpenAI Codex example:
 #   prompt_files: [AGENTS.md]
 
+# Files to share with direct children (1-level inheritance)
+# Children fetch these at startup via GET /workspaces/:id/shared-context
+shared_context:
+  - architecture.md
+  - conventions.md
+
 # Skills to load -- folder names under skills/
 skills:
   - generate-seo-page
@@ -96,6 +102,7 @@ env:
 | `tier` | Yes | 1-4, determines deployment method |
 | `model` | Yes | LangChain-compatible provider string (e.g. `anthropic:claude-sonnet-4-6`). Overridden by `MODEL_PROVIDER` env var if set. |
 | `prompt_files` | No | Ordered list of markdown files to load as system prompt. Defaults to `["system-prompt.md"]` if omitted. Supports any agent framework's file structure (OpenClaw, Claude Code, etc.) |
+| `shared_context` | No | Files from this workspace's config dir to share with direct children. Children fetch these at startup and inject into their system prompt as `## Parent Context`. 1-level inheritance only (grandchildren don't see grandparent's context). |
 | `skills` | Yes | List of skill folder names to load from `skills/` |
 | `tools` | No | Built-in tools from workspace-template |
 | `memory` | No | Memory backend config (defaults to filesystem) |
@@ -120,6 +127,7 @@ The file watcher monitors the entire config directory. When `config.yaml` change
 | `name`, `description`, `version` | Yes | Rebuild Agent Card with new metadata |
 | `a2a` | **No** | Port and protocol changes require container restart |
 | `delegation` | Yes | Retry/timeout defaults take effect on next delegation call |
+| `shared_context` | Yes | Children fetch on next prompt rebuild; no restart needed |
 | `sub_workspaces` | **No** | Team structure changes go through `POST /workspaces/:id/expand` |
 
 See [Skills — Live Reload](./skills.md#live-reload) for the full file watcher flow.

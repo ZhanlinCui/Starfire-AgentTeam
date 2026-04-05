@@ -124,7 +124,7 @@ func (h *TeamHandler) Expand(c *gin.Context) {
 						ConfigPath:  cPath,
 						PluginsPath: pPath,
 						Tier:        t,
-						EnvVars:     map[string]string{},
+						EnvVars:     map[string]string{"PARENT_ID": parentID},
 						PlatformURL: h.platformURL,
 					}
 					if _, err := h.provisioner.Start(ctx, cfg); err != nil {

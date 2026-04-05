@@ -31,6 +31,7 @@ def build_system_prompt(
     prompt_files: list[str] | None = None,
     plugin_rules: list[str] | None = None,
     plugin_prompts: list[str] | None = None,
+    parent_context: list[dict] | None = None,
 ) -> str:
     """Build the complete system prompt.
 
@@ -59,6 +60,18 @@ def build_system_prompt(
                 parts.append(content)
         else:
             print(f"Warning: prompt file not found: {file_path}")
+
+    # Inject parent's shared context (if this workspace is a child)
+    if parent_context:
+        parts.append("\n## Parent Context\n")
+        parts.append("The following context was shared by your parent workspace:\n")
+        for ctx_file in parent_context:
+            path = ctx_file.get("path", "unknown")
+            content = ctx_file.get("content", "")
+            if content.strip():
+                parts.append(f"### {path}")
+                parts.append(content.strip())
+                parts.append("")
 
     # Inject plugin rules (always-on guidelines from ECC, Superpowers, etc.)
     if plugin_rules:

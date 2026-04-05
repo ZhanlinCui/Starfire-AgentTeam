@@ -50,6 +50,33 @@ def _make_a2a_mocks():
     sys.modules["a2a.utils"] = utils_mod
 
 
+def _make_langchain_mocks():
+    """Create mock modules for langchain_core so coordinator.py can be imported."""
+    langchain_core_mod = ModuleType("langchain_core")
+    langchain_core_tools_mod = ModuleType("langchain_core.tools")
+    # Make @tool a no-op decorator
+    langchain_core_tools_mod.tool = lambda f: f
+
+    sys.modules["langchain_core"] = langchain_core_mod
+    sys.modules["langchain_core.tools"] = langchain_core_tools_mod
+
+
+def _make_tools_mocks():
+    """Create mock modules for tools.delegation so coordinator.py can be imported."""
+    tools_mod = ModuleType("tools")
+    tools_delegation_mod = ModuleType("tools.delegation")
+    tools_delegation_mod.delegate_to_workspace = MagicMock()
+
+    sys.modules["tools"] = tools_mod
+    sys.modules["tools.delegation"] = tools_delegation_mod
+
+
 # Install mocks before any test collection imports a2a_executor
 if "a2a" not in sys.modules:
     _make_a2a_mocks()
+
+if "langchain_core" not in sys.modules:
+    _make_langchain_mocks()
+
+if "tools" not in sys.modules:
+    _make_tools_mocks()

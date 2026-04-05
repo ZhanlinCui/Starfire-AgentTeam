@@ -125,6 +125,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	tmplh := handlers.NewTemplatesHandler(configsDir)
 	r.GET("/templates", tmplh.List)
 	r.POST("/templates/import", tmplh.Import)
+	r.GET("/workspaces/:id/shared-context", tmplh.SharedContext)
 	r.PUT("/workspaces/:id/files", tmplh.ReplaceFiles)
 	r.GET("/workspaces/:id/files", tmplh.ListFiles)
 	r.GET("/workspaces/:id/files/*path", tmplh.ReadFile)

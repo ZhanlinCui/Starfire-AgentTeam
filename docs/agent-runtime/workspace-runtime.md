@@ -14,6 +14,7 @@ WORKSPACE_CONFIG_PATH=/configs/seo-agent
 MODEL_PROVIDER=anthropic:claude-sonnet-4-6
 TIER=1
 PLATFORM_URL=http://platform:8080
+PARENT_ID=                   # set by platform during team expansion (empty for top-level)
 ANTHROPIC_API_KEY=sk-...
 LANGFUSE_HOST=http://langfuse-web:3000
 LANGFUSE_PUBLIC_KEY=pk-...
@@ -59,6 +60,9 @@ plugins.py scans /plugins/ for shared skills, rules, prompt fragments
 skills/loader.py loads workspace skills + plugin skills (deduplicated by ID)
       |
       v
+coordinator.py fetches parent's shared context (if PARENT_ID set)
+      |
+      v
 agent.py creates LangGraph ReAct agent with model + all tools
       |
       v
@@ -89,6 +93,7 @@ Workspace is live, discoverable, and receiving peer events
 | `main.py` | Entry point — wraps agent in A2A server via `a2a-sdk` |
 | `config.py` | Loads workspace config from `WORKSPACE_CONFIG_PATH` |
 | `agent.py` | Creates the LangGraph ReAct agent with model + skills + tools |
+| `coordinator.py` | Team coordination (get_children, get_parent_context, route_task) |
 | `a2a_executor.py` | Bridges deepagent (LangGraph) to A2A request/response |
 | `skills/loader.py` | Loads skill packages (SKILL.md + tools) from config |
 | `heartbeat.py` | Sends 30s heartbeat to platform registry |
