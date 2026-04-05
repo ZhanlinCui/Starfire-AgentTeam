@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
@@ -33,11 +34,15 @@ func (h *RegistryHandler) Register(c *gin.Context) {
 
 	// Upsert workspace: update url, agent_card, status if already exists.
 	// On INSERT (workspace not yet created via POST /workspaces), use ID as name placeholder.
+	// Keep existing URL if provisioner already set a host-accessible one (starts with http://127.0.0.1).
 	_, err := db.DB.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, url, agent_card, status, last_heartbeat_at)
 		VALUES ($1, $2, $3, $4::jsonb, 'online', now())
 		ON CONFLICT (id) DO UPDATE SET
-			url = EXCLUDED.url,
+			url = CASE
+				WHEN workspaces.url LIKE 'http://127.0.0.1%' THEN workspaces.url
+				ELSE EXCLUDED.url
+			END,
 			agent_card = EXCLUDED.agent_card,
 			status = 'online',
 			last_heartbeat_at = now(),
@@ -54,14 +59,18 @@ func (h *RegistryHandler) Register(c *gin.Context) {
 		log.Printf("Registry redis error: %v", err)
 	}
 
-	// Cache URL
-	if err := db.CacheURL(ctx, payload.ID, payload.URL); err != nil {
+	// Cache URL — prefer existing provisioner URL over agent-reported one
+	cachedURL := payload.URL
+	if existing, _ := db.GetCachedURL(ctx, payload.ID); strings.HasPrefix(existing, "http://127.0.0.1") {
+		cachedURL = existing
+	}
+	if err := db.CacheURL(ctx, payload.ID, cachedURL); err != nil {
 		log.Printf("Registry cache url error: %v", err)
 	}
 
 	// Broadcast WORKSPACE_ONLINE
 	if err := h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.ID, map[string]interface{}{
-		"url":        payload.URL,
+		"url":        cachedURL,
 		"agent_card": payload.AgentCard,
 	}); err != nil {
 		log.Printf("Registry broadcast error: %v", err)

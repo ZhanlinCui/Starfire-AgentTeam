@@ -78,7 +78,7 @@ func main() {
 	}
 
 	port := envOr("PORT", "8080")
-	platformURL := fmt.Sprintf("http://localhost:%s", port)
+	platformURL := envOr("PLATFORM_URL", fmt.Sprintf("http://host.docker.internal:%s", port))
 	configsDir := envOr("CONFIGS_DIR", findConfigsDir())
 
 	// Router
@@ -135,6 +135,20 @@ func findConfigsDir() string {
 	}
 	for _, c := range candidates {
 		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			// Verify the directory has at least one template with a config.yaml
+			entries, _ := os.ReadDir(c)
+			hasTemplate := false
+			for _, e := range entries {
+				if e.IsDir() {
+					if _, err := os.Stat(filepath.Join(c, e.Name(), "config.yaml")); err == nil {
+						hasTemplate = true
+						break
+					}
+				}
+			}
+			if !hasTemplate {
+				continue
+			}
 			abs, _ := filepath.Abs(c)
 			return abs
 		}

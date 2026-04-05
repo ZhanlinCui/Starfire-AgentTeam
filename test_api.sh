@@ -147,6 +147,77 @@ R=$(curl -s "$BASE/workspaces")
 COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
 check "List after delete (count=1)" "1" "$COUNT"
 
+# Test 22: Bundle round-trip — export → delete → import → verify same config
+echo ""
+echo "--- Bundle Round-Trip Test ---"
+
+# Export the summarizer workspace
+BUNDLE=$(curl -s "$BASE/bundles/export/$SUM_ID")
+check "GET /bundles/export/:id" '"name":"Summarizer Agent"' "$BUNDLE"
+
+# Capture original config for comparison
+ORIG_NAME=$(echo "$BUNDLE" | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])")
+ORIG_TIER=$(echo "$BUNDLE" | python3 -c "import sys,json; print(json.load(sys.stdin)['tier'])")
+ORIG_SKILLS=$(echo "$BUNDLE" | python3 -c "import sys,json; b=json.load(sys.stdin); card=b.get('agent_card') or {}; skills=card.get('skills',[]); print(','.join(s.get('name','') for s in skills))")
+
+# Delete the workspace
+R=$(curl -s -X DELETE "$BASE/workspaces/$SUM_ID")
+check "Delete before re-import" '"status":"removed"' "$R"
+
+R=$(curl -s "$BASE/workspaces")
+COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+check "All workspaces deleted (count=0)" "0" "$COUNT"
+
+# Re-import from the exported bundle
+R=$(curl -s -X POST "$BASE/bundles/import" -H "Content-Type: application/json" -d "$BUNDLE")
+check "POST /bundles/import" '"status":"provisioning"' "$R"
+NEW_ID=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['workspace_id'])")
+
+# Verify new ID is different from old
+if [ "$NEW_ID" != "$SUM_ID" ]; then
+  echo "PASS: New workspace has different ID"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: New workspace should have a new ID"
+  FAIL=$((FAIL + 1))
+fi
+
+# Verify re-imported workspace has same config
+R=$(curl -s "$BASE/workspaces/$NEW_ID")
+check "Re-imported workspace exists" '"status":"provisioning"' "$R"
+
+REIMPORT_NAME=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])")
+REIMPORT_TIER=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['tier'])")
+
+if [ "$REIMPORT_NAME" = "$ORIG_NAME" ]; then
+  echo "PASS: Name matches after round-trip ($ORIG_NAME)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: Name mismatch — expected '$ORIG_NAME', got '$REIMPORT_NAME'"
+  FAIL=$((FAIL + 1))
+fi
+
+if [ "$REIMPORT_TIER" = "$ORIG_TIER" ]; then
+  echo "PASS: Tier matches after round-trip ($ORIG_TIER)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: Tier mismatch — expected '$ORIG_TIER', got '$REIMPORT_TIER'"
+  FAIL=$((FAIL + 1))
+fi
+
+# Register the re-imported workspace to verify agent_card round-trips
+R=$(curl -s -X POST "$BASE/registry/register" -H "Content-Type: application/json" \
+  -d "{\"id\":\"$NEW_ID\",\"url\":\"http://localhost:8002\",\"agent_card\":{\"name\":\"Summarizer\",\"skills\":[{\"id\":\"summarize\",\"name\":\"Summarize\"}]}}")
+check "Register re-imported workspace" '"status":"registered"' "$R"
+
+# Re-export and compare skills survived the round-trip
+REBUNDLE=$(curl -s "$BASE/bundles/export/$NEW_ID")
+REIMPORT_SKILLS=$(echo "$REBUNDLE" | python3 -c "import sys,json; b=json.load(sys.stdin); card=b.get('agent_card') or {}; skills=card.get('skills',[]); print(','.join(s.get('name','') for s in skills))")
+check "Re-exported bundle has agent_card" '"agent_card"' "$REBUNDLE"
+
+# Clean up
+curl -s -X DELETE "$BASE/workspaces/$NEW_ID" > /dev/null
+
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 exit $FAIL

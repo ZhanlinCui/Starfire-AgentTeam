@@ -104,6 +104,11 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	hostCfg := &container.HostConfig{
 		Binds: binds,
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
+		PortBindings: nat.PortMap{
+			nat.Port(DefaultPort + "/tcp"): []nat.PortBinding{
+				{HostIP: "127.0.0.1", HostPort: ""}, // Ephemeral host port
+			},
+		},
 	}
 
 	// Tier-based flags
@@ -139,7 +144,15 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		return "", fmt.Errorf("failed to start container: %w", err)
 	}
 
+	// Resolve the ephemeral host port for the A2A proxy
 	url := internalURL(cfg.WorkspaceID)
+	info, inspectErr := p.cli.ContainerInspect(ctx, resp.ID)
+	if inspectErr == nil {
+		if bindings, ok := info.NetworkSettings.Ports[nat.Port(DefaultPort+"/tcp")]; ok && len(bindings) > 0 {
+			url = fmt.Sprintf("http://127.0.0.1:%s", bindings[0].HostPort)
+		}
+	}
+
 	log.Printf("Provisioner: started container %s for workspace %s at %s", name, cfg.WorkspaceID, url)
 	return url, nil
 }

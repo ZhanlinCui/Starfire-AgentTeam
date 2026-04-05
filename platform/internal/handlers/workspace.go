@@ -352,7 +352,7 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 		PlatformURL: h.platformURL,
 	}
 
-	_, err = h.provisioner.Start(ctx, cfg)
+	url, err := h.provisioner.Start(ctx, cfg)
 	if err != nil {
 		log.Printf("Provisioner: failed to start workspace %s: %v", workspaceID, err)
 		db.DB.ExecContext(ctx,
@@ -360,6 +360,10 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISION_FAILED", workspaceID, map[string]interface{}{
 			"error": err.Error(),
 		})
+	} else if url != "" {
+		// Pre-store the host-accessible URL so the A2A proxy can reach the container
+		db.DB.ExecContext(ctx, `UPDATE workspaces SET url = $1 WHERE id = $2`, url, workspaceID)
+		db.CacheURL(ctx, workspaceID, url)
 	}
 	// On success, the workspace will register via POST /registry/register
 	// which transitions status to 'online' and broadcasts WORKSPACE_ONLINE
