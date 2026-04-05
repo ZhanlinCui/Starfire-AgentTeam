@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 
@@ -29,8 +30,11 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
   const isOnline = data.status === "online";
 
   // Get children to render embedded inside this node
-  const children = useCanvasStore((s) =>
-    s.nodes.filter((n) => n.data.parentId === id)
+  // Use stable selector: get all nodes, then filter in useMemo
+  const allNodes = useCanvasStore((s) => s.nodes);
+  const children = useMemo(
+    () => allNodes.filter((n) => n.data.parentId === id),
+    [allNodes, id]
   );
   const hasChildren = children.length > 0;
 
