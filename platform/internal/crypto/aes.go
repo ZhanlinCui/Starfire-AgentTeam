@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"log"
 	"os"
 )
 
@@ -25,11 +26,15 @@ func Init() {
 		// Try raw key (must be exactly 32 bytes)
 		if len(key) == 32 {
 			encryptionKey = []byte(key)
+		} else {
+			log.Printf("WARNING: SECRETS_ENCRYPTION_KEY is set but invalid (not base64 and not 32 bytes). Encryption disabled.")
 		}
 		return
 	}
 	if len(decoded) == 32 {
 		encryptionKey = decoded
+	} else {
+		log.Printf("WARNING: SECRETS_ENCRYPTION_KEY decoded to %d bytes (expected 32). Encryption disabled.", len(decoded))
 	}
 }
 

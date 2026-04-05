@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -23,24 +24,30 @@ type bucket struct {
 }
 
 // NewRateLimiter creates a rate limiter with the given rate per interval.
-func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
+// Pass a context to stop the cleanup goroutine on shutdown.
+func NewRateLimiter(rate int, interval time.Duration, ctx context.Context) *RateLimiter {
 	rl := &RateLimiter{
 		buckets:  make(map[string]*bucket),
 		rate:     rate,
 		interval: interval,
 	}
-	// Cleanup old buckets every 5 minutes
 	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
 		for {
-			time.Sleep(5 * time.Minute)
-			rl.mu.Lock()
-			cutoff := time.Now().Add(-10 * time.Minute)
-			for ip, b := range rl.buckets {
-				if b.lastReset.Before(cutoff) {
-					delete(rl.buckets, ip)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				rl.mu.Lock()
+				cutoff := time.Now().Add(-10 * time.Minute)
+				for ip, b := range rl.buckets {
+					if b.lastReset.Before(cutoff) {
+						delete(rl.buckets, ip)
+					}
 				}
+				rl.mu.Unlock()
 			}
-			rl.mu.Unlock()
 		}
 	}()
 	return rl
