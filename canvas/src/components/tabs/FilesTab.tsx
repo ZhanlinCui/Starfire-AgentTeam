@@ -154,14 +154,13 @@ export function FilesTab({ workspaceId }: Props) {
   };
 
   const handleDownloadAll = async () => {
-    // Fetch all file contents and create a zip-like JSON bundle
+    const fileEntries = files.filter((f) => !f.dir);
+    const results = await Promise.allSettled(
+      fileEntries.map((f) => api.get<{ content: string }>(`/workspaces/${workspaceId}/files/${f.path}`).then((res) => ({ path: f.path, content: res.content })))
+    );
     const allFiles: Record<string, string> = {};
-    for (const f of files) {
-      if (f.dir) continue;
-      try {
-        const res = await api.get<{ content: string }>(`/workspaces/${workspaceId}/files/${f.path}`);
-        allFiles[f.path] = res.content;
-      } catch { /* skip unreadable */ }
+    for (const r of results) {
+      if (r.status === "fulfilled") allFiles[r.value.path] = r.value.content;
     }
     const blob = new Blob([JSON.stringify(allFiles, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
