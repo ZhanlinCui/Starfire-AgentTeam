@@ -58,6 +58,14 @@ bash test_api.sh             # Runs 34 API tests against localhost:8080
 ```
 Requires platform running. Tests full CRUD, registry, heartbeat, discovery, peers, access control, events, degraded/recovery lifecycle.
 
+### MCP Server
+```bash
+cd mcp-server
+npm install && npm run build   # Build MCP server
+node dist/index.js             # Run (stdio transport)
+```
+Exposes 20 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
+
 ### Docker Compose
 ```bash
 docker compose -f docker-compose.infra.yml up -d    # Infra only
