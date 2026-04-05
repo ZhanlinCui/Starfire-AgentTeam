@@ -275,7 +275,7 @@ export function FilesTab({ workspaceId }: Props) {
 
       {confirmDelete && (
         <div className="mx-3 mt-2 px-3 py-2 bg-amber-950/30 border border-amber-800/40 rounded space-y-1.5">
-          <p className="text-xs text-amber-300">Delete <span className="font-mono">{confirmDelete}</span>?</p>
+          <p className="text-xs text-amber-300">Delete <span className="font-mono">{confirmDelete}</span>{files.find((f) => f.path === confirmDelete && f.dir) ? " and all its contents" : ""}?</p>
           <div className="flex gap-2">
             <button onClick={confirmDeleteFile} className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-[10px] rounded text-white">
               Delete
@@ -496,15 +496,24 @@ function TreeItem({
   if (node.isDir) {
     return (
       <div>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center gap-1 px-2 py-0.5 text-left hover:bg-zinc-800/40 transition-colors"
+        <div
+          className="group w-full flex items-center gap-1 px-2 py-0.5 text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
+          onClick={() => setExpanded(!expanded)}
         >
           <span className="text-[9px] text-zinc-500 w-3">{expanded ? "▼" : "▶"}</span>
           <span className="text-[10px]">📁</span>
-          <span className="text-[10px] text-zinc-400">{node.name}</span>
-        </button>
+          <span className="text-[10px] text-zinc-400 flex-1">{node.name}</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(node.path);
+            }}
+            className="text-[9px] text-red-400/0 group-hover:text-red-400/60 hover:!text-red-400 transition-colors"
+          >
+            ✕
+          </button>
+        </div>
         {expanded && (
           <TreeView
             nodes={node.children}

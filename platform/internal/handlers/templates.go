@@ -357,12 +357,28 @@ func (h *TemplatesHandler) DeleteFile(c *gin.Context) {
 	}
 
 	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
-	if err := os.Remove(fullPath); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath})
+	if info.IsDir() {
+		if err := os.RemoveAll(fullPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete folder"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath, "type": "directory"})
+		return
+	}
+
+	if err := os.Remove(fullPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath, "type": "file"})
 }
 
 // List handles GET /templates
