@@ -145,7 +145,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 - [x] **16a. Langfuse auto-injection** — `_setup_langfuse()` in agent.py detects env vars, creates CallbackHandler, sets LANGSMITH_TRACING
 - [x] **16b. Cross-workspace trace linking** — Delegation tool passes `parent_task_id` and `source_workspace_id` in A2A metadata
-- [ ] **16c. Canvas trace preview (future)** — Click node → see recent LLM calls inline
+- [x] **16c. Canvas trace preview** — TracesTab in SidePanel shows recent LLM calls from Langfuse (input/output/latency/cost/tokens), proxy via `GET /workspaces/:id/traces`
 
 ---
 

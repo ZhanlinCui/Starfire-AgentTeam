@@ -9,6 +9,7 @@ import { SettingsTab } from "./tabs/SettingsTab";
 import { TerminalTab } from "./tabs/TerminalTab";
 import { FilesTab } from "./tabs/FilesTab";
 import { MemoryTab } from "./tabs/MemoryTab";
+import { TracesTab } from "./tabs/TracesTab";
 import { EventsTab } from "./tabs/EventsTab";
 
 const TABS: { id: PanelTab; label: string; icon: string }[] = [
@@ -19,6 +20,7 @@ const TABS: { id: PanelTab; label: string; icon: string }[] = [
   { id: "files", label: "Files", icon: "⊞" },
   { id: "config", label: "Config", icon: "{}" },
   { id: "memory", label: "Memory", icon: "◇" },
+  { id: "traces", label: "Traces", icon: "◎" },
   { id: "events", label: "Events", icon: "◊" },
 ];
 
@@ -98,6 +100,7 @@ export function SidePanel() {
         {panelTab === "files" && <FilesTab workspaceId={selectedNodeId} />}
         {panelTab === "config" && <ConfigTab workspaceId={selectedNodeId} />}
         {panelTab === "memory" && <MemoryTab workspaceId={selectedNodeId} />}
+        {panelTab === "traces" && <TracesTab workspaceId={selectedNodeId} />}
         {panelTab === "events" && <EventsTab workspaceId={selectedNodeId} />}
       </div>
 

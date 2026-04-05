@@ -43,6 +43,10 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/restart", wh.Restart)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
+	// Traces (Langfuse proxy)
+	trh := handlers.NewTracesHandler()
+	r.GET("/workspaces/:id/traces", trh.List)
+
 	// Agent Memories (HMA)
 	memsh := handlers.NewMemoriesHandler()
 	r.POST("/workspaces/:id/memories", memsh.Commit)
