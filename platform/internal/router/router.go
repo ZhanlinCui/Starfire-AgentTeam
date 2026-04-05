@@ -43,6 +43,18 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/restart", wh.Restart)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
+	// Agent Memories (HMA)
+	memsh := handlers.NewMemoriesHandler()
+	r.POST("/workspaces/:id/memories", memsh.Commit)
+	r.GET("/workspaces/:id/memories", memsh.Search)
+	r.DELETE("/workspaces/:id/memories/:memoryId", memsh.Delete)
+
+	// Approvals
+	apph := handlers.NewApprovalsHandler(broadcaster)
+	r.POST("/workspaces/:id/approvals", apph.Create)
+	r.GET("/workspaces/:id/approvals", apph.List)
+	r.POST("/workspaces/:id/approvals/:approvalId/decide", apph.Decide)
+
 	// Team Expansion
 	teamh := handlers.NewTeamHandler(broadcaster, prov, platformURL, configsDir)
 	r.POST("/workspaces/:id/expand", teamh.Expand)

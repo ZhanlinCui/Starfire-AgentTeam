@@ -21,6 +21,7 @@ import { SidePanel } from "./SidePanel";
 import { CreateWorkspaceButton } from "./CreateWorkspaceDialog";
 import { ContextMenu } from "./ContextMenu";
 import { TemplatePalette } from "./TemplatePalette";
+import { ApprovalBanner } from "./ApprovalBanner";
 import { BundleDropZone } from "./BundleDropZone";
 import { EmptyState } from "./EmptyState";
 import { SearchDialog } from "./SearchDialog";
@@ -197,6 +198,7 @@ function CanvasInner() {
 
       {nodes.length === 0 && <EmptyState />}
       <Toolbar />
+      <ApprovalBanner />
       <BundleDropZone />
       <TemplatePalette />
       <SidePanel />

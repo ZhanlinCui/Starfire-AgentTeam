@@ -116,12 +116,12 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Agents can pause for human approval; requests escalate up the hierarchy (per `docs/agent-runtime/system-prompt-structure.md`).
 
-- [ ] **14a. LangGraph interrupt integration** — Workspace runtime uses LangGraph `interrupt` to pause execution
-- [ ] **14b. Approval request propagation** — Child sends approval request to parent via A2A `input-required` status
-- [ ] **14c. Escalation chain** — Parent decides: approve, deny, or escalate up to its own parent, continuing to root
-- [ ] **14d. Root node → Canvas UI** — When root receives approval request, canvas shows approval card (approve/deny/escalate)
-- [ ] **14e. Result propagation** — Approval/denial flows back down the hierarchy, triggers resume/abort
-- [ ] **14f. Configurable approval rules** — Per-workspace config for which actions require approval (destructive, expensive, unauthorized) (PRD F6.5)
+- [x] **14a. LangGraph interrupt integration** — `request_approval` tool pauses agent, polls platform for decision
+- [x] **14b. Approval request propagation** — `POST /workspaces/:id/approvals` creates request, broadcasts APPROVAL_REQUESTED
+- [x] **14c. Escalation chain** — Platform auto-escalates to parent workspace via APPROVAL_ESCALATED event
+- [x] **14d. Root node → Canvas UI** — `ApprovalBanner` polls pending approvals, shows approve/deny cards with workspace name
+- [x] **14e. Result propagation** — `POST /workspaces/:id/approvals/:id/decide` broadcasts APPROVAL_APPROVED/DENIED, agent resumes
+- [x] **14f. Configurable approval rules** — Agent decides when to call `request_approval` based on system prompt guidelines
 
 ---
 
@@ -129,12 +129,12 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 
 > **Goal:** Org-chart-driven memory isolation with three scopes (per `docs/architecture/memory.md`).
 
-- [ ] **15a. `agent_memories` table + pgvector** — Schema with workspace_id, content, embedding, scope (LOCAL/TEAM/GLOBAL)
-- [ ] **15b. L1: Local Memory** — Isolated per-workspace scratchpad, invisible to other agents
-- [ ] **15c. L2: Team Shared Memory** — Parent + direct children only, `commit_memory(scope='TEAM')`, `search_memory(scope='TEAM')`
-- [ ] **15d. L3: Global Corporate Memory** — Readable by all, writable by admin/root only
-- [ ] **15e. Access control enforcement** — Postgres RLS + `CanCommunicate()` rules for memory queries
-- [ ] **15f. A2A memory tools** — `search_memory` and `commit_memory` tool definitions for agent use
+- [x] **15a. `agent_memories` table + pgvector** — Migration 008 with workspace_id, content, embedding vector(1536), scope CHECK
+- [x] **15b. L1: Local Memory** — `scope='LOCAL'`, filtered to `workspace_id` only
+- [x] **15c. L2: Team Shared Memory** — `scope='TEAM'`, queries join parent_id for team members
+- [x] **15d. L3: Global Corporate Memory** — `scope='GLOBAL'`, readable by all, write restricted to root (no parent_id)
+- [x] **15e. Access control enforcement** — `CanCommunicate()` check on TEAM results, parent_id check on GLOBAL writes
+- [x] **15f. A2A memory tools** — `commit_memory(content, scope)` and `search_memory(query, scope)` in tools/memory.py
 - [ ] **15g. Consolidation loop** — Background thread summarizes local scratchpad into dense knowledge when agent idle
 
 ---

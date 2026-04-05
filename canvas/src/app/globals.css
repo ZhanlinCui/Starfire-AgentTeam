@@ -79,6 +79,15 @@ body {
   animation-name: slide-in-from-bottom;
 }
 
+@keyframes slide-in-from-top {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.slide-in-from-top {
+  animation-name: slide-in-from-top;
+}
+
 .animate-in {
   animation-fill-mode: both;
 }

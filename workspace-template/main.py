@@ -23,7 +23,9 @@ from heartbeat import HeartbeatLoop
 from plugins import load_plugins
 from prompt import build_system_prompt, get_peer_capabilities
 from skills.loader import load_skills
+from tools.approval import request_approval
 from tools.delegation import delegate_to_workspace
+from tools.memory import commit_memory, search_memory
 
 
 def get_machine_ip() -> str:
@@ -69,7 +71,7 @@ async def main():
     print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
 
     # 4. Gather tools from skills + built-in delegation tool
-    all_tools = [delegate_to_workspace]
+    all_tools = [delegate_to_workspace, request_approval, commit_memory, search_memory]
     for skill in loaded_skills:
         all_tools.extend(skill.tools)
 
