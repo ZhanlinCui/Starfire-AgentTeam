@@ -52,6 +52,13 @@ npm run build && npm start   # Production
 ```
 Env vars: `NEXT_PUBLIC_PLATFORM_URL` (default http://localhost:8080), `NEXT_PUBLIC_WS_URL` (default ws://localhost:8080/ws).
 
+### Unit Tests
+```bash
+cd platform && go test ./...                    # 9 Go handler tests (sqlmock + miniredis)
+cd canvas && npm test                            # 47 Vitest store tests
+cd workspace-template && python -m pytest -v     # 45 pytest tests (config, heartbeat, prompt, skills, a2a)
+```
+
 ### Integration Tests
 ```bash
 bash test_api.sh             # Runs 43 API tests against localhost:8080
@@ -68,6 +75,13 @@ npm install && npm run build   # Build MCP server
 node dist/index.js             # Run (stdio transport)
 ```
 Exposes 20 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
+
+### CI Pipeline
+GitHub Actions (`.github/workflows/ci.yml`) runs on push to main and PRs:
+- **platform-build**: Go build, vet, test
+- **canvas-build**: npm build, vitest
+- **mcp-server-build**: npm build
+- **python-lint**: pytest
 
 ### Docker Compose
 ```bash

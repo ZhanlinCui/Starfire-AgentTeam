@@ -64,18 +64,42 @@ LANGSMITH_TRACING=true  # LangGraph reads this to enable tracing
 ## Technology Versions
 
 ```
-Go              1.22+
+Go              1.25+ (go.mod)
 Python          3.11+
 Node.js         20+
 Next.js         15
-React Flow      11+  (xyflow)
-deepagents      0.4+
-a2a-sdk         latest   (A2A server SDK, install with a2a-sdk[http-server])
+React Flow      12   (@xyflow/react)
+a2a-sdk         0.3+ (A2A server SDK, install with a2a-sdk[http-server])
 langfuse        3.x  (self-hosted Docker)
 Postgres        16
 Redis           7
 Docker Compose  2.x
 ```
+
+## Running Tests
+
+### Unit Tests
+
+```bash
+cd platform && go test ./...                    # Go handler tests (9 tests)
+cd canvas && npm test                            # Vitest store tests (47 tests)
+cd workspace-template && python -m pytest -v     # Python runtime tests (45 tests)
+```
+
+### Integration Tests
+
+```bash
+bash test_api.sh             # 43 API tests (requires platform running)
+bash test_a2a_e2e.sh         # 22 A2A e2e tests (requires platform + 2 agents)
+```
+
+### CI Pipeline
+
+GitHub Actions runs automatically on push to `main` and on PRs (`.github/workflows/ci.yml`):
+- **platform-build** — Go build, vet, test
+- **canvas-build** — npm build, vitest
+- **mcp-server-build** — npm build
+- **python-lint** — pytest
 
 ## Utility Scripts
 
@@ -84,6 +108,8 @@ Docker Compose  2.x
 | `infra/scripts/setup.sh` | Initialize the local environment |
 | `infra/scripts/nuke.sh` | Tear down and clean up everything |
 | `bundle-compile.sh` | Compile workspace config folders into `.bundle.json` files |
+| `test_api.sh` | Run 43 platform API integration tests |
+| `test_a2a_e2e.sh` | Run 22 A2A end-to-end tests |
 
 ## Related Docs
 

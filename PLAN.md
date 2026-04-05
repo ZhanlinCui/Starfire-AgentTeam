@@ -93,7 +93,7 @@ The foundational loop is complete: workspace registers → canvas shows it → h
 - [x] **12g. Canvas duplicate node** — Right-click → "Duplicate" (export + re-import via context menu)
 - [x] **12h. Recursive sub-workspaces** — `importer.go` already recursively imports `sub_workspaces[]` tree
 - [x] **12i. Partial failure handling** — `importer.go` continues on child failure, returns ImportResult per workspace with error details
-- [ ] **12j. Round-trip test** — Export → delete → import → workspace reappears with same config
+- [x] **12j. Round-trip test** — Export → delete → import → workspace reappears with same config
 
 ---
 
