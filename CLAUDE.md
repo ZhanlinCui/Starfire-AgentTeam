@@ -39,7 +39,7 @@ go run ./cmd/server          # Run server (requires Postgres + Redis running)
 go build -o molecli ./cmd/cli  # Build TUI dashboard
 ./molecli                    # Run TUI dashboard (requires platform running)
 ```
-Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`).
+Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`).
 
 `molecli` reads `MOLECLI_URL` (default http://localhost:8080) to locate the platform. Logs are written to `molecli.log` in the working directory (already covered by `*.log` in `.gitignore`).
 
@@ -54,9 +54,12 @@ Env vars: `NEXT_PUBLIC_PLATFORM_URL` (default http://localhost:8080), `NEXT_PUBL
 
 ### Integration Tests
 ```bash
-bash test_api.sh             # Runs 34 API tests against localhost:8080
+bash test_api.sh             # Runs 43 API tests against localhost:8080
+bash test_a2a_e2e.sh         # Runs 22 A2A end-to-end tests (requires 2 online agents)
 ```
-Requires platform running. Tests full CRUD, registry, heartbeat, discovery, peers, access control, events, degraded/recovery lifecycle.
+`test_api.sh` requires platform running. Tests full CRUD, registry, heartbeat, discovery, peers, access control, events, degraded/recovery lifecycle, bundle round-trip (export → delete → import → verify).
+
+`test_a2a_e2e.sh` requires platform + two provisioned agents (Echo Agent, SEO Agent) running with a valid `OPENROUTER_API_KEY`. Tests message/send, JSON-RPC wrapping, error handling, peer discovery, agent cards, heartbeat. Timeout configurable via `A2A_TIMEOUT` env var (default 120s).
 
 ### MCP Server
 ```bash

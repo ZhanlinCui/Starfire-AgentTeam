@@ -205,6 +205,19 @@ On completion, the task returns artifacts:
 }
 ```
 
+## Platform A2A Proxy
+
+The canvas (browser) cannot reach Docker-internal agent URLs directly. The platform provides `POST /workspaces/:id/a2a` as a proxy:
+
+1. Canvas sends JSON-RPC to the platform proxy
+2. Proxy resolves the agent's host-accessible URL from Redis cache (falls back to DB)
+3. If the request lacks a `jsonrpc` field, the proxy wraps it in a JSON-RPC 2.0 envelope with a generated UUID
+4. If `params.message.messageId` is missing, the proxy injects one (required by a2a-sdk)
+5. Proxy forwards the request to the agent (120s timeout, 10MB response limit)
+6. Agent response is returned to the caller
+
+This proxy is the **only** way the canvas communicates with agents. Workspace-to-workspace communication is direct (no proxy).
+
 ## Key Properties
 
 - **Transport:** JSON-RPC 2.0 over HTTP — any language can implement it
@@ -212,7 +225,7 @@ On completion, the task returns artifacts:
 - **On-demand:** Workspaces discover peers when needed, not at startup
 - **Opaque execution:** The caller doesn't know (or care) what's inside the callee
 - **Interoperable:** Any A2A-compliant agent from any framework can plug in
-- **Direct:** No message routing through the platform
+- **Direct:** Workspace-to-workspace messages go direct; canvas uses platform proxy
 - **MVP auth:** Discovery-time only; post-MVP adds signed tokens
 
 ## Related Docs

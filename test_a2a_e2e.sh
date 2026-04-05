@@ -4,7 +4,7 @@ set -euo pipefail
 BASE="http://localhost:8080"
 PASS=0
 FAIL=0
-TIMEOUT=120  # seconds per A2A call
+TIMEOUT="${A2A_TIMEOUT:-120}"  # seconds per A2A call (override via A2A_TIMEOUT env var)
 
 check() {
   local desc="$1"

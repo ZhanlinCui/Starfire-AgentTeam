@@ -59,10 +59,15 @@ func (h *RegistryHandler) Register(c *gin.Context) {
 		log.Printf("Registry redis error: %v", err)
 	}
 
-	// Cache URL — prefer existing provisioner URL over agent-reported one
+	// Cache URL — prefer existing provisioner URL over agent-reported one.
+	// The DB CASE already preserves provisioner URLs, so read from DB as source of truth
+	// instead of adding a Redis round-trip on every registration.
 	cachedURL := payload.URL
-	if existing, _ := db.GetCachedURL(ctx, payload.ID); strings.HasPrefix(existing, "http://127.0.0.1") {
-		cachedURL = existing
+	var dbURL string
+	if err := db.DB.QueryRowContext(ctx, `SELECT url FROM workspaces WHERE id = $1`, payload.ID).Scan(&dbURL); err == nil {
+		if strings.HasPrefix(dbURL, "http://127.0.0.1") {
+			cachedURL = dbURL
+		}
 	}
 	if err := db.CacheURL(ctx, payload.ID, cachedURL); err != nil {
 		log.Printf("Registry cache url error: %v", err)

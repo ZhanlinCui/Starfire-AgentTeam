@@ -362,8 +362,12 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 		})
 	} else if url != "" {
 		// Pre-store the host-accessible URL so the A2A proxy can reach the container
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET url = $1 WHERE id = $2`, url, workspaceID)
-		db.CacheURL(ctx, workspaceID, url)
+		if _, dbErr := db.DB.ExecContext(ctx, `UPDATE workspaces SET url = $1 WHERE id = $2`, url, workspaceID); dbErr != nil {
+			log.Printf("Provisioner: failed to store URL for %s: %v", workspaceID, dbErr)
+		}
+		if cacheErr := db.CacheURL(ctx, workspaceID, url); cacheErr != nil {
+			log.Printf("Provisioner: failed to cache URL for %s: %v", workspaceID, cacheErr)
+		}
 	}
 	// On success, the workspace will register via POST /registry/register
 	// which transitions status to 'online' and broadcasts WORKSPACE_ONLINE
