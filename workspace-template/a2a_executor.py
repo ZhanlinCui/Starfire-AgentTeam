@@ -46,23 +46,27 @@ class LangGraphA2AExecutor(AgentExecutor):
                 },
             )
 
-            # Extract the last AI message from the result
+            # Extract the last AI message (skip tool/human messages)
             messages = result.get("messages", [])
             final_content = ""
             for msg in reversed(messages):
+                msg_type = getattr(msg, "type", "")
+                # Only accept AI/assistant messages, skip tool results and human
+                if msg_type not in ("ai", "AIMessage", "assistant"):
+                    continue
                 content = getattr(msg, "content", "")
                 if isinstance(content, list):
-                    # Anthropic content blocks
-                    content = " ".join(
-                        block.get("text", "") if isinstance(block, dict) else str(block)
-                        for block in content
-                    ).strip()
+                    # Anthropic content blocks — extract only text blocks
+                    text_parts = []
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif isinstance(block, str):
+                            text_parts.append(block)
+                    content = " ".join(text_parts).strip()
                 if isinstance(content, str) and content.strip():
-                    # Skip human messages
-                    msg_type = getattr(msg, "type", "")
-                    if msg_type != "human":
-                        final_content = content
-                        break
+                    final_content = content
+                    break
 
             if final_content:
                 await event_queue.enqueue_event(
