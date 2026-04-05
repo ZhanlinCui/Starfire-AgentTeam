@@ -16,10 +16,12 @@ Business Core (A2A client)  ->  Developer PM (A2A server)
 
 How Business Core finds Developer PM's URL:
 
-1. Business Core asks platform: `GET /registry/discover/developer-pm-id`
-2. Platform checks Redis cache `ws:developer-pm-id:url` (fast, 5min TTL)
-3. If cache miss, platform reads from Postgres, refreshes cache
-4. Platform returns URL to Business Core
+1. Business Core asks platform: `GET /registry/discover/developer-pm-id` with `X-Workspace-ID` header
+2. Platform checks `CanCommunicate()` for the caller/target pair
+3. Platform resolves the URL:
+   - **Workspace caller** (has `X-Workspace-ID`): returns Docker-internal URL from `ws:{id}:internal_url` Redis key — containers can reach each other by hostname on the Docker network
+   - **Canvas/external** (no header): returns host-mapped URL from `ws:{id}:url` Redis key — the ephemeral `127.0.0.1:PORT` bound by the provisioner
+4. If cache miss, platform reads from Postgres, refreshes cache
 5. Business Core sends A2A JSON-RPC message **directly** to Developer PM
 6. Developer PM processes the task and responds
 
