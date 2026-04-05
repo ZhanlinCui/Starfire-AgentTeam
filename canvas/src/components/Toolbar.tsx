@@ -1,7 +1,6 @@
 "use client";
 
 import { useCanvasStore } from "@/store/canvas";
-// Toolbar uses useCanvasStore.getState() for search — no extra import needed
 
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);

@@ -104,7 +104,28 @@ The **Files tab** provides a VS Code-style file explorer:
 
 ### Toolbar
 
-Fixed top-center bar showing the Starfire logo, live workspace status counts (online/offline/provisioning/failed), and total workspace count.
+Fixed top-center bar showing the Starfire logo, live workspace status counts (online/offline/provisioning/failed), total workspace count, and a search button (`⌘K`).
+
+### Search (⌘K)
+
+Press `Cmd+K` or click the search button to open the search dialog. Fuzzy search across workspace name, role, and status. Click a result to select the node and open the Details panel. State managed in Zustand store (`searchOpen`/`setSearchOpen`).
+
+### Empty State
+
+When no workspaces exist, shows a visual getting-started guide with keyboard shortcut reference (template palette, ⌘K search, right-click, drag-to-nest).
+
+### Toast Notifications
+
+Global notification system (`showToast()` callable from any component). Context menu actions show success/error toasts. Auto-dismiss after 4 seconds, slide-up animation.
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `⌘K` | Open search dialog |
+| `Escape` | Close context menu → close side panel (cascading) |
+| `Ctrl/Cmd+S` | Save file (in Files tab editor) |
+| `Right-click` | Open context menu on workspace node |
 
 ### Template Palette
 
