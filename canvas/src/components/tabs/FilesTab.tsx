@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
+import { showToast } from "../Toaster";
 
 interface Props {
   workspaceId: string;
@@ -138,6 +139,79 @@ export function FilesTab({ workspaceId }: Props) {
     }
   };
 
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  const handleDownloadFile = () => {
+    if (!selectedFile || !fileContent) return;
+    const blob = new Blob([editContent], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = selectedFile.split("/").pop() || "file";
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Downloaded", "success");
+  };
+
+  const handleDownloadAll = async () => {
+    // Fetch all file contents and create a zip-like JSON bundle
+    const allFiles: Record<string, string> = {};
+    for (const f of files) {
+      if (f.dir) continue;
+      try {
+        const res = await api.get<{ content: string }>(`/workspaces/${workspaceId}/files/${f.path}`);
+        allFiles[f.path] = res.content;
+      } catch { /* skip unreadable */ }
+    }
+    const blob = new Blob([JSON.stringify(allFiles, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "workspace-files.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded ${Object.keys(allFiles).length} files`, "success");
+  };
+
+  const handleUploadFiles = async (fileList: FileList) => {
+    setError(null);
+    let uploaded = 0;
+    for (const file of Array.from(fileList)) {
+      const path = file.webkitRelativePath || file.name;
+      const parts = path.split("/");
+      const relPath = parts.length > 1 ? parts.slice(1).join("/") : parts[0];
+      if (file.size > 1_000_000) continue;
+      try {
+        const content = await file.text();
+        await api.put(`/workspaces/${workspaceId}/files/${relPath}`, { content });
+        uploaded++;
+      } catch { /* skip binary */ }
+    }
+    if (uploaded > 0) {
+      showToast(`Uploaded ${uploaded} files`, "success");
+      loadFiles();
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    setError(null);
+    let deleted = 0;
+    for (const f of files) {
+      if (f.dir) continue;
+      try {
+        await api.del(`/workspaces/${workspaceId}/files/${f.path}`);
+        deleted++;
+      } catch { /* skip */ }
+    }
+    setSelectedFile(null);
+    setFileContent("");
+    setEditContent("");
+    showToast(`Deleted ${deleted} files`, "info");
+    loadFiles();
+  };
+
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+
   const isDirty = editContent !== fileContent;
 
   const tree = useMemo(() => buildTree(files), [files]);
@@ -152,14 +226,47 @@ export function FilesTab({ workspaceId }: Props) {
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/40 bg-zinc-900/30">
         <span className="text-[10px] text-zinc-500">{files.filter((f) => !f.dir).length} files</span>
         <div className="flex gap-1.5">
-          <button onClick={() => setShowNewFile(true)} className="text-[10px] text-blue-400 hover:text-blue-300">
+          <button onClick={() => setShowNewFile(true)} className="text-[10px] text-blue-400 hover:text-blue-300" title="Create new file">
             + New
           </button>
-          <button onClick={loadFiles} className="text-[10px] text-zinc-500 hover:text-zinc-300">
-            Refresh
+          <input
+            ref={uploadRef}
+            type="file"
+            // @ts-expect-error webkitdirectory
+            webkitdirectory=""
+            multiple
+            className="hidden"
+            onChange={(e) => e.target.files && handleUploadFiles(e.target.files)}
+          />
+          <button onClick={() => uploadRef.current?.click()} className="text-[10px] text-blue-400 hover:text-blue-300" title="Upload folder">
+            Upload
+          </button>
+          <button onClick={handleDownloadAll} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Download all files">
+            Export
+          </button>
+          <button onClick={() => setShowDeleteAll(true)} className="text-[10px] text-red-400/60 hover:text-red-400" title="Delete all files">
+            Clear
+          </button>
+          <button onClick={loadFiles} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Refresh">
+            ↻
           </button>
         </div>
       </div>
+
+      {/* Delete all confirmation */}
+      {showDeleteAll && (
+        <div className="mx-3 mt-2 px-3 py-2 bg-red-950/30 border border-red-800/40 rounded space-y-1.5">
+          <p className="text-xs text-red-300">Delete all {files.filter((f) => !f.dir).length} files? This cannot be undone.</p>
+          <div className="flex gap-2">
+            <button onClick={() => { handleDeleteAll(); setShowDeleteAll(false); }} className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-[10px] rounded text-white">
+              Delete All
+            </button>
+            <button onClick={() => setShowDeleteAll(false)} className="px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-[10px] rounded text-zinc-300">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mx-3 mt-2 px-3 py-1.5 bg-red-900/30 border border-red-800 rounded text-xs text-red-400">
@@ -225,6 +332,13 @@ export function FilesTab({ workspaceId }: Props) {
                 </div>
                 <div className="flex items-center gap-2">
                   {success && <span className="text-[9px] text-emerald-400">{success}</span>}
+                  <button
+                    onClick={handleDownloadFile}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                    title="Download file"
+                  >
+                    ↓
+                  </button>
                   <button
                     onClick={saveFile}
                     disabled={!isDirty || saving}
