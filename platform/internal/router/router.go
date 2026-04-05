@@ -51,6 +51,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 
 	// Approvals
 	apph := handlers.NewApprovalsHandler(broadcaster)
+	r.GET("/approvals/pending", apph.ListAll)
 	r.POST("/workspaces/:id/approvals", apph.Create)
 	r.GET("/workspaces/:id/approvals", apph.List)
 	r.POST("/workspaces/:id/approvals/:approvalId/decide", apph.Decide)

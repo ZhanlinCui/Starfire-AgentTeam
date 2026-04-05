@@ -1,20 +1,26 @@
 """Approval tool for human-in-the-loop workflows.
 
 When an agent encounters a destructive, expensive, or unauthorized action,
-it calls request_approval() which pauses execution until a human approves
-or denies the request via the canvas UI.
+it calls request_approval() which creates a request and polls for decision.
+
+The polling approach is simple but blocks the agent. For production, this
+should be replaced with a WebSocket notification. The 5-minute timeout
+ensures the agent doesn't hang indefinitely.
 """
 
 import asyncio
 import os
+import logging
 
 import httpx
 from langchain_core.tools import tool
 
+logger = logging.getLogger(__name__)
+
 PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
 WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "")
-APPROVAL_POLL_INTERVAL = 5.0  # seconds
-APPROVAL_TIMEOUT = 300.0  # 5 minutes max wait
+APPROVAL_POLL_INTERVAL = float(os.environ.get("APPROVAL_POLL_INTERVAL", "5"))
+APPROVAL_TIMEOUT = float(os.environ.get("APPROVAL_TIMEOUT", "300"))
 
 
 @tool
@@ -29,29 +35,19 @@ async def request_approval(
     where a human can approve or deny it.
 
     Args:
-        action: Short description of what you want to do (e.g., "delete production database")
+        action: Short description of what you want to do
         reason: Why this action is necessary
     """
     async with httpx.AsyncClient(timeout=10.0) as client:
-        # Create the approval request
         try:
             resp = await client.post(
                 f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/approvals",
-                json={
-                    "action": action,
-                    "reason": reason,
-                    "context": {
-                        "workspace_id": WORKSPACE_ID,
-                    },
-                },
+                json={"action": action, "reason": reason},
             )
             if resp.status_code != 201:
-                return {
-                    "approved": False,
-                    "error": f"Failed to create approval request: {resp.status_code}",
-                }
-
+                return {"approved": False, "error": f"Failed to create request: {resp.status_code}"}
             approval_id = resp.json().get("approval_id")
+            logger.info("Approval requested: %s (id=%s)", action, approval_id)
         except Exception as e:
             return {"approved": False, "error": f"Failed to request approval: {e}"}
 
@@ -65,30 +61,18 @@ async def request_approval(
             try:
                 resp = await client.get(
                     f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/approvals",
-                    params={"status": ""},  # get all
                 )
                 if resp.status_code == 200:
-                    for approval in resp.json():
-                        if approval.get("id") == approval_id:
-                            status = approval.get("status")
+                    for a in resp.json():
+                        if a.get("id") == approval_id:
+                            status = a.get("status")
                             if status == "approved":
-                                return {
-                                    "approved": True,
-                                    "approval_id": approval_id,
-                                    "decided_by": approval.get("decided_by"),
-                                }
+                                logger.info("Approval granted: %s", approval_id)
+                                return {"approved": True, "approval_id": approval_id, "decided_by": a.get("decided_by")}
                             elif status == "denied":
-                                return {
-                                    "approved": False,
-                                    "approval_id": approval_id,
-                                    "decided_by": approval.get("decided_by"),
-                                    "message": "Request was denied by human operator",
-                                }
+                                logger.info("Approval denied: %s", approval_id)
+                                return {"approved": False, "approval_id": approval_id, "decided_by": a.get("decided_by"), "message": "Denied by human"}
             except Exception:
-                pass  # Network error — keep polling
+                pass
 
-    return {
-        "approved": False,
-        "approval_id": approval_id,
-        "error": f"Approval timed out after {APPROVAL_TIMEOUT}s",
-    }
+    return {"approved": False, "approval_id": approval_id, "error": f"Timed out after {APPROVAL_TIMEOUT}s"}

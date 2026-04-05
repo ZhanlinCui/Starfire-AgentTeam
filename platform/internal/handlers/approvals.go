@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -20,7 +19,6 @@ func NewApprovalsHandler(b *events.Broadcaster) *ApprovalsHandler {
 }
 
 // Create handles POST /workspaces/:id/approvals
-// Creates a new approval request from a workspace agent.
 func (h *ApprovalsHandler) Create(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
@@ -36,19 +34,23 @@ func (h *ApprovalsHandler) Create(c *gin.Context) {
 		return
 	}
 
+	ctxJSON, _ := json.Marshal(body.Context)
+	if ctxJSON == nil {
+		ctxJSON = []byte("{}")
+	}
+
 	var approvalID string
 	err := db.DB.QueryRowContext(ctx, `
 		INSERT INTO approval_requests (workspace_id, task_id, action, reason, context)
 		VALUES ($1, $2, $3, $4, $5::jsonb)
 		RETURNING id
-	`, workspaceID, body.TaskID, body.Action, body.Reason, toJSONB(body.Context)).Scan(&approvalID)
+	`, workspaceID, body.TaskID, body.Action, body.Reason, string(ctxJSON)).Scan(&approvalID)
 	if err != nil {
 		log.Printf("Create approval error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create approval"})
 		return
 	}
 
-	// Broadcast to canvas
 	h.broadcaster.RecordAndBroadcast(ctx, "APPROVAL_REQUESTED", workspaceID, map[string]interface{}{
 		"approval_id": approvalID,
 		"action":      body.Action,
@@ -56,38 +58,41 @@ func (h *ApprovalsHandler) Create(c *gin.Context) {
 		"task_id":     body.TaskID,
 	})
 
-	// Try to escalate to parent workspace
+	// Auto-escalate to parent
 	var parentID *string
 	db.DB.QueryRowContext(ctx, `SELECT parent_id FROM workspaces WHERE id = $1`, workspaceID).Scan(&parentID)
 	if parentID != nil {
 		h.broadcaster.RecordAndBroadcast(ctx, "APPROVAL_ESCALATED", *parentID, map[string]interface{}{
-			"approval_id":        approvalID,
-			"from_workspace_id":  workspaceID,
-			"action":             body.Action,
-			"reason":             body.Reason,
+			"approval_id":       approvalID,
+			"from_workspace_id": workspaceID,
+			"action":            body.Action,
+			"reason":            body.Reason,
 		})
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"approval_id": approvalID, "status": "pending"})
 }
 
-// List handles GET /workspaces/:id/approvals
-func (h *ApprovalsHandler) List(c *gin.Context) {
-	workspaceID := c.Param("id")
+// ListAll handles GET /approvals/pending
+// Returns all pending approvals across all workspaces (for canvas polling).
+// Auto-expires approvals older than 10 minutes.
+func (h *ApprovalsHandler) ListAll(c *gin.Context) {
 	ctx := c.Request.Context()
-	statusFilter := c.DefaultQuery("status", "")
 
-	query := `SELECT id, task_id, action, reason, status, decided_by, decided_at, created_at
-		FROM approval_requests WHERE workspace_id = $1`
-	args := []interface{}{workspaceID}
+	// Auto-expire stale approvals (older than 10 min)
+	db.DB.ExecContext(ctx, `
+		UPDATE approval_requests SET status = 'denied', decided_by = 'auto-expired', decided_at = now()
+		WHERE status = 'pending' AND created_at < now() - interval '10 minutes'
+	`)
 
-	if statusFilter != "" {
-		query += ` AND status = $2`
-		args = append(args, statusFilter)
-	}
-	query += ` ORDER BY created_at DESC LIMIT 50`
-
-	rows, err := db.DB.QueryContext(ctx, query, args...)
+	rows, err := db.DB.QueryContext(ctx, `
+		SELECT a.id, a.workspace_id, w.name, a.action, a.reason, a.status, a.created_at
+		FROM approval_requests a
+		JOIN workspaces w ON w.id = a.workspace_id
+		WHERE a.status = 'pending'
+		ORDER BY a.created_at DESC
+		LIMIT 50
+	`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
 		return
@@ -96,21 +101,57 @@ func (h *ApprovalsHandler) List(c *gin.Context) {
 
 	approvals := make([]map[string]interface{}, 0)
 	for rows.Next() {
-		var id, action, status string
-		var taskID, reason, decidedBy sql.NullString
-		var decidedAt sql.NullTime
-		var createdAt string
+		var id, wsID, wsName, action, status, createdAt string
+		var reason *string
+		if rows.Scan(&id, &wsID, &wsName, &action, &reason, &status, &createdAt) != nil {
+			continue
+		}
+		approvals = append(approvals, map[string]interface{}{
+			"id":             id,
+			"workspace_id":   wsID,
+			"workspace_name": wsName,
+			"action":         action,
+			"reason":         reason,
+			"status":         status,
+			"created_at":     createdAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, approvals)
+}
+
+// List handles GET /workspaces/:id/approvals
+func (h *ApprovalsHandler) List(c *gin.Context) {
+	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	rows, err := db.DB.QueryContext(ctx, `
+		SELECT id, task_id, action, reason, status, decided_by, decided_at, created_at
+		FROM approval_requests WHERE workspace_id = $1
+		ORDER BY created_at DESC LIMIT 50
+	`, workspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+	defer rows.Close()
+
+	approvals := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id, action, status, createdAt string
+		var taskID, reason, decidedBy *string
+		var decidedAt *string
 		if rows.Scan(&id, &taskID, &action, &reason, &status, &decidedBy, &decidedAt, &createdAt) != nil {
 			continue
 		}
 		approvals = append(approvals, map[string]interface{}{
 			"id":         id,
-			"task_id":    nullStr(taskID),
+			"task_id":    taskID,
 			"action":     action,
-			"reason":     nullStr(reason),
+			"reason":     reason,
 			"status":     status,
-			"decided_by": nullStr(decidedBy),
-			"decided_at": nullTime(decidedAt),
+			"decided_by": decidedBy,
+			"decided_at": decidedAt,
 			"created_at": createdAt,
 		})
 	}
@@ -125,7 +166,7 @@ func (h *ApprovalsHandler) Decide(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var body struct {
-		Decision  string `json:"decision" binding:"required"` // "approved" or "denied"
+		Decision  string `json:"decision" binding:"required"`
 		DecidedBy string `json:"decided_by"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -171,26 +212,4 @@ func (h *ApprovalsHandler) Decide(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, gin.H{"status": body.Decision, "approval_id": approvalID})
-}
-
-func toJSONB(m map[string]interface{}) string {
-	if m == nil {
-		return "{}"
-	}
-	data, _ := json.Marshal(m)
-	return string(data)
-}
-
-func nullStr(ns sql.NullString) interface{} {
-	if ns.Valid {
-		return ns.String
-	}
-	return nil
-}
-
-func nullTime(nt sql.NullTime) interface{} {
-	if nt.Valid {
-		return nt.Time
-	}
-	return nil
 }

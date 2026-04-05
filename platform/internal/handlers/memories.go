@@ -83,19 +83,22 @@ func (h *MemoriesHandler) Search(c *gin.Context) {
 		args = []interface{}{workspaceID}
 
 	case "TEAM":
-		// Parent + siblings' TEAM memories
+		// Team = self + parent + siblings (same parent_id)
 		if parentID != nil {
+			// Child workspace: team is parent + siblings sharing same parent_id
 			sqlQuery = `SELECT m.id, m.workspace_id, m.content, m.scope, m.created_at
 				FROM agent_memories m
 				JOIN workspaces w ON w.id = m.workspace_id
-				WHERE m.scope = 'TEAM' AND (w.parent_id = $1 OR w.id = $1 OR w.id = $2)`
-			args = []interface{}{*parentID, workspaceID}
+				WHERE m.scope = 'TEAM' AND w.status != 'removed'
+				AND (w.parent_id = $1 OR w.id = $1)`
+			args = []interface{}{*parentID}
 		} else {
-			// Root workspace — team is self + direct children
+			// Root workspace: team is self + direct children only
 			sqlQuery = `SELECT m.id, m.workspace_id, m.content, m.scope, m.created_at
 				FROM agent_memories m
 				JOIN workspaces w ON w.id = m.workspace_id
-				WHERE m.scope = 'TEAM' AND (w.parent_id = $1 OR w.id = $1)`
+				WHERE m.scope = 'TEAM' AND w.status != 'removed'
+				AND (w.parent_id = $1 OR w.id = $1)`
 			args = []interface{}{workspaceID}
 		}
 
