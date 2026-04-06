@@ -185,13 +185,19 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 		return
 	}
 
-	dirName := normalizeName(wsName)
-	destDir := filepath.Join(h.configsDir, dirName)
-
-	// Clear existing files
-	if info, err := os.Stat(destDir); err == nil && info.IsDir() {
-		os.RemoveAll(destDir)
+	// Resolve config directory: prefer ID-based dir (auto-provisioned), fall back to name-based
+	idDirName := "ws-" + workspaceID
+	if len(idDirName) > 15 {
+		idDirName = idDirName[:15]
 	}
+	destDir := filepath.Join(h.configsDir, idDirName)
+	if _, err := os.Stat(destDir); os.IsNotExist(err) {
+		// Fall back to name-based dir
+		destDir = filepath.Join(h.configsDir, normalizeName(wsName))
+	}
+
+	// Create dir if needed, don't clear existing (merge files)
+	os.MkdirAll(destDir, 0o755)
 
 	if err := writeFiles(destDir, body.Files); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

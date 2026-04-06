@@ -411,10 +411,7 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
 		return
 	}
-	if status == "online" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace is already online"})
-		return
-	}
+	// Allow restart even when online (force restart) — stops existing container first
 
 	if h.provisioner == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provisioner not available"})
@@ -517,17 +514,45 @@ func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload model
 		configYAML += fmt.Sprintf("model: %s\n", model)
 	}
 
-	os.WriteFile(filepath.Join(containerPath, "config.yaml"), []byte(configYAML), 0o644)
+	// Only write config.yaml if it doesn't already exist (files API may have written one)
+	configYamlPath := filepath.Join(containerPath, "config.yaml")
+	if _, err := os.Stat(configYamlPath); os.IsNotExist(err) {
+		os.WriteFile(configYamlPath, []byte(configYAML), 0o644)
+	}
 
 	// Copy auth token from the default template if it exists (for CLI runtimes)
 	if runtime != "langgraph" {
-		defaultTokenPath := filepath.Join(h.configsDir, "claude-code-default", ".auth-token")
-		if tokenData, err := os.ReadFile(defaultTokenPath); err == nil {
-			os.WriteFile(filepath.Join(containerPath, ".auth-token"), tokenData, 0o600)
+		authPath := filepath.Join(containerPath, ".auth-token")
+		if _, err := os.Stat(authPath); os.IsNotExist(err) {
+			defaultTokenPath := filepath.Join(h.configsDir, "claude-code-default", ".auth-token")
+			if tokenData, err := os.ReadFile(defaultTokenPath); err == nil {
+				os.WriteFile(authPath, tokenData, 0o600)
+			}
 		}
 	}
 
-	log.Printf("Provisioner: generated default config at %s for workspace %s (runtime: %s)", configPath, workspaceID, runtime)
+	// Check if a name-based dir has files (from files API) and merge them
+	normalizedName := strings.ToLower(strings.ReplaceAll(payload.Name, " ", "-"))
+	namedDir := filepath.Join(h.configsDir, normalizedName)
+	if namedDir != containerPath {
+		if entries, err := os.ReadDir(namedDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					src := filepath.Join(namedDir, e.Name())
+					dst := filepath.Join(containerPath, e.Name())
+					// Don't overwrite existing files
+					if _, err := os.Stat(dst); os.IsNotExist(err) {
+						if data, err := os.ReadFile(src); err == nil {
+							os.WriteFile(dst, data, 0o644)
+						}
+					}
+				}
+			}
+			log.Printf("Provisioner: merged files from %s into %s", namedDir, containerPath)
+		}
+	}
+
+	log.Printf("Provisioner: config at %s for workspace %s (runtime: %s)", configPath, workspaceID, runtime)
 	return configPath
 }
 
