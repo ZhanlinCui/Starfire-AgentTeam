@@ -107,9 +107,24 @@ class CLIAgentExecutor(AgentExecutor):
         # Resolve auth token
         self._auth_token = self._resolve_auth_token()
         self._auth_helper_path: str | None = None
+        self._temp_files: list[str] = []  # Track temp files for cleanup
 
         if self._auth_token and self.preset.get("auth_pattern") == "apiKeyHelper":
             self._auth_helper_path = self._create_auth_helper(self._auth_token)
+
+        # Create MCP config once (reuse across invocations)
+        self._mcp_config_path: str | None = None
+        if self.preset.get("auth_pattern") in ("apiKeyHelper", "env"):
+            mcp_config = json.dumps({
+                "mcpServers": {
+                    "a2a": {"command": "python3", "args": ["/app/a2a_mcp_server.py"]}
+                }
+            })
+            fd, self._mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="a2a-mcp-")
+            os.close(fd)
+            with open(self._mcp_config_path, "w") as f:
+                f.write(mcp_config)
+            self._temp_files.append(self._mcp_config_path)
 
         # Verify command exists
         cmd = self.config.command or self.preset["command"]
@@ -209,21 +224,9 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             settings = json.dumps({"apiKeyHelper": self._auth_helper_path})
             args.extend(["--settings", settings])
 
-        # A2A MCP server — inject for MCP-compatible runtimes
-        if self.preset.get("auth_pattern") in ("apiKeyHelper", "env"):
-            mcp_config = json.dumps({
-                "mcpServers": {
-                    "a2a": {
-                        "command": "python3",
-                        "args": ["/app/a2a_mcp_server.py"],
-                    }
-                }
-            })
-            fd, mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="a2a-mcp-")
-            os.close(fd)
-            with open(mcp_config_path, "w") as f:
-                f.write(mcp_config)
-            args.extend(["--mcp-config", mcp_config_path])
+        # A2A MCP server — inject for MCP-compatible runtimes (created once in __init__)
+        if self._mcp_config_path:
+            args.extend(["--mcp-config", self._mcp_config_path])
 
         # Prompt
         prompt_flag = self.preset.get("prompt_flag")
@@ -271,6 +274,7 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                 env[auth_env] = self._auth_token
 
         for attempt in range(max_retries):
+            proc = None
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -319,11 +323,12 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
             except asyncio.TimeoutError:
                 logger.error("CLI agent timeout [%s] after %ds", self.runtime, timeout)
-                try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
-                    pass
+                if proc:
+                    try:
+                        proc.kill()
+                        await proc.wait()
+                    except Exception:
+                        pass
                 await event_queue.enqueue_event(
                     new_agent_text_message(f"Agent timed out after {timeout}s")
                 )
@@ -334,6 +339,19 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                     new_agent_text_message(f"Agent error: {e}")
                 )
                 return
+
+    def __del__(self):
+        """Clean up temp files."""
+        for f in self._temp_files:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+        if self._auth_helper_path:
+            try:
+                os.unlink(self._auth_helper_path)
+            except OSError:
+                pass
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue):
         """Cancel a running task."""

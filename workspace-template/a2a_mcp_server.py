@@ -120,7 +120,7 @@ TOOLS = [
     },
     {
         "name": "delegate_task_async",
-        "description": "Delegate a task to another workspace WITHOUT waiting for the response. Returns a task_id immediately. Use check_task_status to poll for results later. Best for long-running tasks.",
+        "description": "Send a task to another workspace with a short timeout (fire-and-forget). Returns immediately — the target continues processing. Best when you don't need the result right away. Note: check_task_status may not work with all workspace implementations.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -138,7 +138,7 @@ TOOLS = [
     },
     {
         "name": "check_task_status",
-        "description": "Check the status of a previously submitted async task. Returns 'working', 'completed' (with result), or 'failed'.",
+        "description": "Check the status of a previously submitted async task via tasks/get. Note: only works if the target workspace's A2A implementation supports task persistence. May return 'not found' for completed tasks.",
         "inputSchema": {
             "type": "object",
             "properties": {
