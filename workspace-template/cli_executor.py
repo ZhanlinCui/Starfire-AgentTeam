@@ -143,21 +143,17 @@ class CLIAgentExecutor(AgentExecutor):
         return helper_path
 
     def _get_a2a_instructions(self) -> str:
-        """Generate instructions for A2A delegation based on available peers."""
-        # For non-MCP runtimes, inject CLI-based delegation instructions
-        # MCP runtimes get the a2a MCP server instead (tools are auto-discovered)
-        if self.preset.get("auth_pattern") == "apiKeyHelper":
-            # MCP-compatible runtime — delegation available via MCP tools
-            return ""
-
-        # For non-MCP runtimes (ollama, custom), provide CLI instructions
+        """Generate A2A delegation instructions injected into every system prompt."""
         return """## Inter-Agent Communication
-You can delegate tasks to other workspaces using the a2a CLI:
+You can delegate tasks to other workspaces using the a2a command:
+
   python3 /app/a2a_cli.py peers                          # List available peers
   python3 /app/a2a_cli.py delegate <workspace_id> <task>  # Send task to a peer
   python3 /app/a2a_cli.py info                            # Your workspace info
 
-Only delegate to peers listed by the peers command (access control enforced)."""
+When asked to get information from another team, use the delegate command.
+Only delegate to peers listed by the peers command (access control enforced).
+Always run peers first to discover available workspace IDs."""
 
     def _get_system_prompt(self) -> str | None:
         """Get system prompt — re-read from file each time (supports hot-reload)."""
@@ -192,28 +188,9 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             args.extend([system_flag, system_prompt])
 
         # Auth (apiKeyHelper pattern for claude-code)
-        auth_settings = {}
         if self._auth_helper_path and self.preset.get("auth_pattern") == "apiKeyHelper":
-            auth_settings["apiKeyHelper"] = self._auth_helper_path
-
-        # MCP server for A2A delegation (Claude Code / Codex)
-        if self.preset.get("auth_pattern") == "apiKeyHelper":
-            # Write MCP config file for this invocation
-            mcp_config = {
-                "mcpServers": {
-                    "a2a": {
-                        "command": "python3",
-                        "args": ["/app/a2a_mcp_server.py"],
-                    }
-                }
-            }
-            mcp_config_path = os.path.join(tempfile.gettempdir(), "a2a-mcp-config.json")
-            with open(mcp_config_path, "w") as f:
-                json.dump(mcp_config, f)
-            args.extend(["--mcp-config", mcp_config_path])
-
-        if auth_settings:
-            args.extend(["--settings", json.dumps(auth_settings)])
+            settings = json.dumps({"apiKeyHelper": self._auth_helper_path})
+            args.extend(["--settings", settings])
 
         # Prompt
         prompt_flag = self.preset.get("prompt_flag")
