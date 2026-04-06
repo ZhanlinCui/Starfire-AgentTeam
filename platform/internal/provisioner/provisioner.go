@@ -52,8 +52,8 @@ func New() (*Provisioner, error) {
 	return &Provisioner{cli: cli}, nil
 }
 
-// containerName returns the Docker container name for a workspace.
-func containerName(workspaceID string) string {
+// ContainerName returns the Docker container name for a workspace.
+func ContainerName(workspaceID string) string {
 	id := workspaceID
 	if len(id) > 12 {
 		id = id[:12]
@@ -61,14 +61,14 @@ func containerName(workspaceID string) string {
 	return fmt.Sprintf("ws-%s", id)
 }
 
-// internalURL returns the Docker-internal URL for a workspace container.
-func internalURL(workspaceID string) string {
-	return fmt.Sprintf("http://%s:%s", containerName(workspaceID), DefaultPort)
+// InternalURL returns the Docker-internal URL for a workspace container.
+func InternalURL(workspaceID string) string {
+	return fmt.Sprintf("http://%s:%s", ContainerName(workspaceID), DefaultPort)
 }
 
 // Start provisions and starts a workspace container.
 func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, error) {
-	name := containerName(cfg.WorkspaceID)
+	name := ContainerName(cfg.WorkspaceID)
 
 	// Build environment variables
 	env := []string{
@@ -148,7 +148,7 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	// Resolve the host-mapped port so the platform can reach the container from the host.
 	// The provisioner uses ephemeral port binding (127.0.0.1:0 → 8000/tcp), so we need
 	// to inspect the container to find the actual assigned port.
-	hostURL := internalURL(cfg.WorkspaceID) // fallback to Docker-internal
+	hostURL := InternalURL(cfg.WorkspaceID) // fallback to Docker-internal
 	info, inspectErr := p.cli.ContainerInspect(ctx, resp.ID)
 	if inspectErr == nil {
 		portBindings := info.NetworkSettings.Ports[nat.Port(DefaultPort+"/tcp")]
@@ -162,13 +162,13 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		}
 	}
 
-	log.Printf("Provisioner: started container %s for workspace %s at %s (internal: %s)", name, cfg.WorkspaceID, hostURL, internalURL(cfg.WorkspaceID))
+	log.Printf("Provisioner: started container %s for workspace %s at %s (internal: %s)", name, cfg.WorkspaceID, hostURL, InternalURL(cfg.WorkspaceID))
 	return hostURL, nil
 }
 
 // Stop stops and removes a workspace container.
 func (p *Provisioner) Stop(ctx context.Context, workspaceID string) error {
-	name := containerName(workspaceID)
+	name := ContainerName(workspaceID)
 	timeout := 10
 
 	if err := p.cli.ContainerStop(ctx, name, container.StopOptions{Timeout: &timeout}); err != nil {
@@ -185,7 +185,7 @@ func (p *Provisioner) Stop(ctx context.Context, workspaceID string) error {
 
 // IsRunning checks if a workspace container is currently running.
 func (p *Provisioner) IsRunning(ctx context.Context, workspaceID string) (bool, error) {
-	name := containerName(workspaceID)
+	name := ContainerName(workspaceID)
 	info, err := p.cli.ContainerInspect(ctx, name)
 	if err != nil {
 		return false, nil // Container doesn't exist

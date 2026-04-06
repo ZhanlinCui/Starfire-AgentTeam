@@ -61,7 +61,6 @@ export function ChatTab({ workspaceId, data }: Props) {
   const [activeSessionId, setActiveSessionId] = useState<string>(initData.activeId);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [thinkingStartTime, setThinkingStartTime] = useState<number>(0);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const [thinkingStatus, setThinkingStatus] = useState("");
   const [agentReachable, setAgentReachable] = useState(false);
@@ -117,7 +116,7 @@ export function ChatTab({ workspaceId, data }: Props) {
       setThinkingStatus("");
       return;
     }
-    setThinkingStartTime(Date.now());
+    const startTime = Date.now();
     const statuses = [
       "Analyzing your request...",
       "Checking workspace context...",
@@ -130,12 +129,12 @@ export function ChatTab({ workspaceId, data }: Props) {
     let statusIdx = 0;
     setThinkingStatus(statuses[0]);
     const timer = setInterval(() => {
-      setThinkingElapsed(Math.floor((Date.now() - thinkingStartTime) / 1000));
+      setThinkingElapsed(Math.floor((Date.now() - startTime) / 1000));
       statusIdx = Math.min(statusIdx + 1, statuses.length - 1);
       setThinkingStatus(statuses[statusIdx]);
     }, 3000);
     return () => clearInterval(timer);
-  }, [sending, thinkingStartTime]);
+  }, [sending]);
 
   const createNewSession = useCallback(() => {
     const session: ChatSession = {
@@ -328,12 +327,12 @@ export function ChatTab({ workspaceId, data }: Props) {
                     : "bg-zinc-800 text-zinc-200"
                 }`}
               >
-                {msg.role === "user" ? (
-                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                ) : (
+                {msg.role === "agent" ? (
                   <div className="prose prose-sm prose-invert max-w-none break-words [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&>li]:my-0.5 [&>h1]:text-base [&>h2]:text-sm [&>h3]:text-sm [&>pre]:bg-zinc-900 [&>pre]:text-xs [&>code]:text-xs [&>code]:bg-zinc-900/50 [&>code]:px-1 [&>code]:rounded">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   </div>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                 )}
                 <p className="text-[9px] mt-1 opacity-50">
                   {new Date(msg.timestamp).toLocaleTimeString()}

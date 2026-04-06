@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
+	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
@@ -45,12 +46,13 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 
 	// Try multiple container name patterns:
 	// 1. Provisioner naming: ws-{id[:12]}
-	// 2. Workspace name from DB (normalized to lowercase-hyphen)
-	candidates := []string{}
-	if len(workspaceID) > 12 {
-		candidates = append(candidates, "ws-"+workspaceID[:12])
+	// 2. Full workspace ID fallback
+	// 3. Workspace name from DB (normalized to lowercase-hyphen)
+	name := provisioner.ContainerName(workspaceID)
+	candidates := []string{name}
+	if name != "ws-"+workspaceID {
+		candidates = append(candidates, "ws-"+workspaceID)
 	}
-	candidates = append(candidates, "ws-"+workspaceID)
 
 	// Look up workspace name for manual container naming
 	var wsName string

@@ -406,7 +406,7 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 		}
 		// Also cache the Docker-internal URL for workspace-to-workspace discovery.
 		// Containers on agent-molecule-net can reach each other by container name.
-		internalURL := fmt.Sprintf("http://ws-%s:8000", workspaceID[:12])
+		internalURL := provisioner.InternalURL(workspaceID)
 		if cacheErr := db.CacheInternalURL(ctx, workspaceID, internalURL); cacheErr != nil {
 			log.Printf("Provisioner: failed to cache internal URL for %s: %v", workspaceID, cacheErr)
 		}

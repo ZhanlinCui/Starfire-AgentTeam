@@ -75,12 +75,12 @@ LangSmith (the managed version) requires an enterprise license for self-hosting 
 ## Version Requirements
 
 ```
-Go              1.22+
+Go              1.25+ (go.mod)
 Python          3.11+
-Node.js         20+
+Node.js         22+
 Next.js         15
-React Flow      11+  (xyflow)
-deepagents      0.4+
+React Flow      12   (@xyflow/react)
+a2a-sdk         0.3+ (A2A server SDK)
 langfuse        3.x  (self-hosted Docker)
 Postgres        16
 Redis           7

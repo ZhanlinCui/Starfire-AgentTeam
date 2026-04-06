@@ -67,7 +67,7 @@ LANGSMITH_TRACING=true  # LangGraph reads this to enable tracing
 ```
 Go              1.25+ (go.mod)
 Python          3.11+
-Node.js         20+
+Node.js         22+
 Next.js         15
 React Flow      12   (@xyflow/react)
 a2a-sdk         0.3+ (A2A server SDK, install with a2a-sdk[http-server])
@@ -82,16 +82,17 @@ Docker Compose  2.x
 ### Unit Tests
 
 ```bash
-cd platform && go test ./...                    # Go handler tests (9 tests)
-cd canvas && npm test                            # Vitest store tests (47 tests)
-cd workspace-template && python -m pytest -v     # Python runtime tests (45 tests)
+cd platform && go test ./...                    # Go handler tests (25 tests)
+cd canvas && npm test                            # Vitest store tests (58 tests)
+cd workspace-template && python -m pytest -v     # Python runtime tests (49 tests)
 ```
 
 ### Integration Tests
 
 ```bash
-bash test_api.sh             # 43 API tests (requires platform running)
+bash test_api.sh             # 62 API tests (requires platform running)
 bash test_a2a_e2e.sh         # 22 A2A e2e tests (requires platform + 2 agents)
+bash test_activity_e2e.sh    # 25 activity/task E2E tests (requires platform + 1 agent)
 ```
 
 ### CI Pipeline
@@ -109,8 +110,9 @@ GitHub Actions runs automatically on push to `main` and on PRs (`.github/workflo
 | `infra/scripts/setup.sh` | Initialize the local environment |
 | `infra/scripts/nuke.sh` | Tear down and clean up everything |
 | `bundle-compile.sh` | Compile workspace config folders into `.bundle.json` files |
-| `test_api.sh` | Run 43 platform API integration tests |
+| `test_api.sh` | Run 62 platform API integration tests |
 | `test_a2a_e2e.sh` | Run 22 A2A end-to-end tests |
+| `test_activity_e2e.sh` | Run 25 activity/task E2E tests |
 
 ## Related Docs
 

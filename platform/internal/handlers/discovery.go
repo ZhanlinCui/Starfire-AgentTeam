@@ -3,11 +3,11 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/agent-molecule/platform/internal/db"
+	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/registry"
 	"github.com/gin-gonic/gin"
 )
@@ -40,15 +40,25 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL})
 			return
 		}
-		// Fallback: construct internal URL from workspace ID (container name convention: ws-<first12chars>)
-		shortID := targetID
-		if len(shortID) > 12 {
-			shortID = shortID[:12]
+		// Fallback: only synthesize a URL if the workspace exists and is online/degraded
+		var wsStatus string
+		dbErr := db.DB.QueryRowContext(ctx,
+			`SELECT status FROM workspaces WHERE id = $1`, targetID,
+		).Scan(&wsStatus)
+		if dbErr == nil && (wsStatus == "online" || wsStatus == "degraded") {
+			internalURL := provisioner.InternalURL(targetID)
+			if cacheErr := db.CacheInternalURL(ctx, targetID, internalURL); cacheErr != nil {
+				log.Printf("Discovery: failed to cache internal URL for %s: %v", targetID, cacheErr)
+			}
+			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL})
+			return
 		}
-		internalURL := fmt.Sprintf("http://ws-%s:8000", shortID)
-		// Cache it for next time
-		db.CacheInternalURL(ctx, targetID, internalURL)
-		c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL})
+		// Workspace is not reachable — don't fall through to host URL path
+		if dbErr == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace not available", "status": wsStatus})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		}
 		return
 	}
 	if url, err := db.GetCachedURL(ctx, targetID); err == nil {

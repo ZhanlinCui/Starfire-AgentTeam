@@ -81,7 +81,7 @@ Clicking a workspace node opens a **480px-wide side panel** on the right edge of
 |-----|-----------|-------------|
 | **Details** | `DetailsTab` | Inline editing of name/role/tier, editable Agent Card (JSON), Restart button for offline/failed, peer list, delete with confirmation |
 | **Activity** | `ActivityTab` | Comprehensive activity log — A2A communications (with request/response bodies, duration), task updates, agent logs, errors. Type filters, auto-refresh (5s), expandable JSON details |
-| **Chat** | `ChatTab` | Send A2A `message/send` via platform proxy, markdown rendering (react-markdown + remark-gfm), session persistence (localStorage), user-friendly error messages for 502/503/timeout |
+| **Chat** | `ChatTab` | Send A2A `message/send` via platform proxy, markdown rendering for agent responses (react-markdown + remark-gfm + @tailwindcss/typography), plain text for user/system messages, session persistence (localStorage), user-friendly error messages for 502/503/timeout |
 | **Settings** | `SettingsTab` | Configure LLM provider + API keys per workspace via `/workspaces/:id/secrets`, quick-set rows for common keys |
 | **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
 | **Files** | `FilesTab` | VS Code-style file explorer with tree view, inline editor, create/delete files |
@@ -163,32 +163,17 @@ A floating "**+ New Workspace**" button appears in the bottom-right corner when 
 
 On submit, the dialog sends `POST /workspaces` with the form data and a random canvas position. The workspace node appears on the canvas once the platform broadcasts the creation event via WebSocket.
 
-### Template Palette (planned)
+### Template Palette
 
-A sidebar panel listing available workspace templates. Templates come from `workspace-configs-templates/` — each folder is a template. The platform serves them via `GET /templates`.
+Left sidebar panel toggled by the grid icon (top-left). Lists all available workspace templates from `GET /templates` with name, description, tier badge, and skill list. Click a template to deploy a new workspace. Includes "Import Agent Folder" button to upload any agent framework's folder as a new template.
 
 **Flow:**
-1. User opens the template palette (sidebar button or keyboard shortcut)
-2. Palette shows available templates with name, description, and tier
+1. User opens the template palette (sidebar button)
+2. Palette shows available templates with name, description, tier, and skills
 3. User clicks a template
-4. A quick config modal appears (pre-filled from template defaults):
-   - Workspace name
-   - Model selection (dropdown)
-   - Parent workspace (dropdown — defaults to root level)
-5. User confirms
-6. Canvas sends `POST /workspaces` with template ref + overrides:
-   ```json
-   {
-     "template": "seo-agent",
-     "name": "Reno Stars SEO Agent",
-     "model": "anthropic:claude-sonnet-4-6",
-     "tier": 1,
-     "parent_id": null,
-     "canvas": { "x": 240, "y": 180 }
-   }
-   ```
-7. Platform reads full config from `workspace-configs-templates/seo-agent/config.yaml`, applies overrides, provisions
-8. New node appears on canvas with spinner → green when online
+4. Canvas sends `POST /workspaces` with template ref
+5. Platform reads full config from `workspace-configs-templates/<template>/config.yaml`, provisions container
+6. New node appears on canvas with spinner → green when online
 
 Template-based creation (`POST /workspaces`) and bundle-based creation (`POST /bundles/import`) are separate endpoints — different shape, different logic.
 

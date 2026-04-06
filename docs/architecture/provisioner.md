@@ -17,7 +17,14 @@ The provisioner is the platform component that deploys workspace containers and 
 
 ## Docker Networking (Tier 1-3)
 
-All workspace containers join the `agent-molecule-net` Docker network. Containers are also given an ephemeral host port binding (`127.0.0.1:0→8000/tcp`) so the platform can reach them from the host.
+All workspace containers join the `agent-molecule-net` Docker network. Containers are named `ws-{id[:12]}` (first 12 chars of workspace UUID). Two exported helpers in `provisioner` package provide the canonical naming:
+
+- `provisioner.ContainerName(workspaceID)` → `ws-{id[:12]}`
+- `provisioner.InternalURL(workspaceID)` → `http://ws-{id[:12]}:8000`
+
+These are used by discovery, workspace provisioning, and terminal handlers — always use them instead of constructing names inline.
+
+Containers are also given an ephemeral host port binding (`127.0.0.1:0→8000/tcp`) so the platform can reach them from the host.
 
 After `ContainerStart`, the provisioner inspects the container to resolve the actual mapped port and stores the host-accessible URL:
 
@@ -28,6 +35,8 @@ http://127.0.0.1:{ephemeral_port}
 This URL is pre-stored in both Postgres and Redis before the agent registers. When the agent calls `POST /registry/register`, the register endpoint preserves the provisioner URL (any URL starting with `http://127.0.0.1`) instead of overwriting it with the agent's Docker-internal hostname.
 
 **Why not use Docker-internal URLs?** In local dev, the platform runs on the host (not in Docker), so it cannot resolve Docker container hostnames. The ephemeral port mapping lets the A2A proxy reach agents via localhost. In production (platform in Docker), the Docker-internal URL (`http://ws-{id}:8000`) would work directly.
+
+**Workspace-to-workspace discovery:** When a workspace discovers another workspace (via `X-Workspace-ID` header on `GET /registry/discover/:id`), the platform returns the Docker-internal URL (`http://ws-{first12chars}:8000`) so containers can reach each other directly on `agent-molecule-net`. The internal URL is cached in Redis at provision time and also synthesized as a fallback if the cache misses (only for online/degraded workspaces).
 
 For external HTTPS access (multi-host mode), Nginx on the host handles TLS termination and proxies to the container.
 
@@ -83,16 +92,16 @@ When provisioning fails:
 
 ## Docker Volume Mounts
 
-Each workspace gets a named Docker volume for memory persistence:
+Each workspace gets a named Docker volume for persistent workspace storage:
 
 ```
-docker volume: ws-{id}-memory
-  -> mounted at /memory inside the container
+docker volume: ws-{id}-workspace
+  -> mounted at /workspace inside the container
   -> persists across: container restart, re-provision, image update
   -> destroyed only when: user deletes workspace or runs nuke.sh
 ```
 
-The volume is named after the workspace ID, not the container name. So even when a container is destroyed and re-provisioned, the new container mounts the same volume.
+The volume is named after the workspace ID, not the container name. So even when a container is destroyed and re-provisioned, the new container mounts the same volume. Tier 1 workspaces skip the workspace volume for read-only isolation.
 
 See [Memory](./memory.md) for full memory backend details.
 
@@ -112,7 +121,7 @@ Structure events and agent card history are **never** deleted — only the conve
 
 | Tier | Flags |
 |------|-------|
-| 1 | `--read-only --network agent-molecule-net` (named volumes like `/memory` remain writable) |
+| 1 | `--network agent-molecule-net` no writable `/workspace` volume (config mount is read-only) |
 | 2 | `--network agent-molecule-net` + Playwright pre-installed |
 | 3 | `--network agent-molecule-net` + Xvfb + optional VNC |
 | 4 | N/A — EC2 VM, not Docker |
