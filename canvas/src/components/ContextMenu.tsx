@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { api } from "@/lib/api";
 import { showToast } from "./Toaster";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface MenuItem {
   label: string;
@@ -85,16 +86,24 @@ export function ContextMenu() {
     closeContextMenu();
   }, [contextMenu, updateNodeData, closeContextMenu]);
 
-  const handleDelete = useCallback(async () => {
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+
+  const handleDelete = useCallback(() => {
     if (!contextMenu) return;
+    setDeleteConfirm({ id: contextMenu.nodeId, name: contextMenu.nodeData.name });
+    closeContextMenu();
+  }, [contextMenu, closeContextMenu]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteConfirm) return;
     try {
-      await api.del(`/workspaces/${contextMenu.nodeId}`);
-      removeNode(contextMenu.nodeId);
-    } catch (e) {
+      await api.del(`/workspaces/${deleteConfirm.id}`);
+      removeNode(deleteConfirm.id);
+    } catch {
       showToast("Delete failed", "error");
     }
-    closeContextMenu();
-  }, [contextMenu, removeNode, closeContextMenu]);
+    setDeleteConfirm(null);
+  }, [deleteConfirm, removeNode]);
 
   const handleViewDetails = useCallback(() => {
     if (!contextMenu) return;
@@ -209,6 +218,17 @@ export function ContextMenu() {
           </button>
         );
       })}
+
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        open={!!deleteConfirm}
+        title="Delete Workspace"
+        message={`Permanently delete "${deleteConfirm?.name}"? This will stop the container and remove all configuration. This action cannot be undone.`}
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

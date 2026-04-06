@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useMemo, useEffect } from "react";
+import { useCallback, useRef, useMemo, useEffect, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -27,6 +27,7 @@ import { EmptyState } from "./EmptyState";
 import { SearchDialog } from "./SearchDialog";
 import { Toaster } from "./Toaster";
 import { Toolbar } from "./Toolbar";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const nodeTypes = {
   workspaceNode: WorkspaceNode,
@@ -79,24 +80,44 @@ function CanvasInner() {
     [getIntersectingNodes, isDescendant, setDragOverNode]
   );
 
+  // Confirmation dialog state for structure changes
+  const [pendingNest, setPendingNest] = useState<{ nodeId: string; targetId: string | null; nodeName: string; targetName: string } | null>(null);
+
   const onNodeDragStop: OnNodeDrag<Node<WorkspaceNodeData>> = useCallback(
     (_event, node) => {
-      const { dragOverNodeId } = useCanvasStore.getState();
+      const { dragOverNodeId, nodes: allNodes } = useCanvasStore.getState();
       setDragOverNode(null);
 
+      const nodeName = (node.data as WorkspaceNodeData).name;
+
       if (dragOverNodeId) {
-        nestNode(node.id, dragOverNodeId);
+        const targetNode = allNodes.find((n) => n.id === dragOverNodeId);
+        const targetName = targetNode?.data.name || "Unknown";
+        setPendingNest({ nodeId: node.id, targetId: dragOverNodeId, nodeName, targetName });
       } else {
         const currentParentId = (node.data as WorkspaceNodeData).parentId;
         if (currentParentId) {
-          nestNode(node.id, null);
+          const parentNode = allNodes.find((n) => n.id === currentParentId);
+          const parentName = parentNode?.data.name || "Unknown";
+          setPendingNest({ nodeId: node.id, targetId: null, nodeName, targetName: parentName });
         }
       }
 
       savePosition(node.id, node.position.x, node.position.y);
     },
-    [savePosition, setDragOverNode, nestNode]
+    [savePosition, setDragOverNode]
   );
+
+  const confirmNest = useCallback(() => {
+    if (pendingNest) {
+      nestNode(pendingNest.nodeId, pendingNest.targetId);
+      setPendingNest(null);
+    }
+  }, [pendingNest, nestNode]);
+
+  const cancelNest = useCallback(() => {
+    setPendingNest(null);
+  }, []);
 
   const onPaneClick = useCallback(() => {
     selectNode(null);
@@ -234,6 +255,20 @@ function CanvasInner() {
       <SearchDialog />
       <Toaster />
       {!selectedNodeId && <CreateWorkspaceButton />}
+
+      {/* Confirmation dialog for structure changes */}
+      <ConfirmDialog
+        open={!!pendingNest}
+        title={pendingNest?.targetId ? "Nest Workspace" : "Extract Workspace"}
+        message={
+          pendingNest?.targetId
+            ? `Move "${pendingNest.nodeName}" inside "${pendingNest.targetName}"? This changes the org hierarchy — ${pendingNest.nodeName} will become a sub-workspace of ${pendingNest.targetName}.`
+            : `Extract "${pendingNest?.nodeName}" from "${pendingNest?.targetName}"? This moves it to the root level.`
+        }
+        confirmLabel={pendingNest?.targetId ? "Nest" : "Extract"}
+        onConfirm={confirmNest}
+        onCancel={cancelNest}
+      />
     </div>
   );
 }
