@@ -19,6 +19,7 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 
 import httpx
 
@@ -54,7 +55,8 @@ async def delegate(target_id: str, task: str):
                 "params": {
                     "message": {
                         "role": "user",
-                        "parts": [{"type": "text", "text": task}],
+                        "messageId": str(uuid.uuid4()),
+                        "parts": [{"kind": "text", "text": task}],
                     }
                 },
             },

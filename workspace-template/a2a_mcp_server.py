@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 
 import httpx
 
@@ -55,7 +56,8 @@ async def send_a2a_message(target_url: str, message: str) -> str:
                     "params": {
                         "message": {
                             "role": "user",
-                            "parts": [{"type": "text", "text": message}],
+                            "messageId": str(uuid.uuid4()),
+                            "parts": [{"kind": "text", "text": message}],
                         }
                     },
                 },
