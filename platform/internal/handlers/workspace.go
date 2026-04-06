@@ -396,12 +396,19 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 			"error": err.Error(),
 		})
 	} else if url != "" {
-		// Pre-store the host-accessible URL so the A2A proxy can reach the container
+		// Pre-store the host-accessible URL (http://127.0.0.1:<port>) so the A2A proxy can reach the container.
+		// The registry's ON CONFLICT preserves URLs starting with http://127.0.0.1 when the agent self-registers.
 		if _, dbErr := db.DB.ExecContext(ctx, `UPDATE workspaces SET url = $1 WHERE id = $2`, url, workspaceID); dbErr != nil {
 			log.Printf("Provisioner: failed to store URL for %s: %v", workspaceID, dbErr)
 		}
 		if cacheErr := db.CacheURL(ctx, workspaceID, url); cacheErr != nil {
 			log.Printf("Provisioner: failed to cache URL for %s: %v", workspaceID, cacheErr)
+		}
+		// Also cache the Docker-internal URL for workspace-to-workspace discovery.
+		// Containers on agent-molecule-net can reach each other by container name.
+		internalURL := fmt.Sprintf("http://ws-%s:8000", workspaceID[:12])
+		if cacheErr := db.CacheInternalURL(ctx, workspaceID, internalURL); cacheErr != nil {
+			log.Printf("Provisioner: failed to cache internal URL for %s: %v", workspaceID, cacheErr)
 		}
 	}
 	// On success, the workspace will register via POST /registry/register
