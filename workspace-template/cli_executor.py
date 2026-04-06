@@ -141,6 +141,13 @@ class CLIAgentExecutor(AgentExecutor):
         os.chmod(helper_path, 0o700)
         return helper_path
 
+    def _get_system_prompt(self) -> str | None:
+        """Get system prompt — re-read from file each time (supports hot-reload)."""
+        prompt_file = Path(self.config_path) / "system-prompt.md"
+        if prompt_file.exists():
+            return prompt_file.read_text().strip()
+        return self.system_prompt  # fall back to init-time value
+
     def _build_command(self, message: str) -> list[str]:
         """Build the full CLI command from preset + config + message."""
         cmd = self.config.command or self.preset["command"]
@@ -155,10 +162,11 @@ class CLIAgentExecutor(AgentExecutor):
             # Ollama: model is positional after "run"
             args.append(model)
 
-        # System prompt
+        # System prompt — re-read each time for hot-reload
+        system_prompt = self._get_system_prompt()
         system_flag = self.preset.get("system_prompt_flag")
-        if self.system_prompt and system_flag:
-            args.extend([system_flag, self.system_prompt])
+        if system_prompt and system_flag:
+            args.extend([system_flag, system_prompt])
 
         # Auth (apiKeyHelper pattern for claude-code)
         if self._auth_helper_path and self.preset.get("auth_pattern") == "apiKeyHelper":
