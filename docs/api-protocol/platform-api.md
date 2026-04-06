@@ -100,7 +100,7 @@ Scopes: `LOCAL` (workspace only), `TEAM` (parent + siblings), `GLOBAL` (all read
 | `POST` | `/registry/register` | Workspace announces itself on startup |
 | `POST` | `/registry/heartbeat` | Workspace sends liveness ping + health stats every 30s |
 | `POST` | `/registry/update-card` | Workspace pushes updated Agent Card after skill reload |
-| `GET` | `/registry/discover/:id` | Resolve workspace URL by ID (scoped — 403 for private sub-workspaces) |
+| `GET` | `/registry/discover/:id` | Resolve workspace URL by ID (scoped — 403 for private sub-workspaces). Returns `{id, url, name}` for agent-to-agent calls (`X-Workspace-ID` header) |
 
 See [Registry & Heartbeat](./registry-and-heartbeat.md) for the full flow.
 

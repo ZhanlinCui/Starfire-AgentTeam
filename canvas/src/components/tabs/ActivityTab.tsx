@@ -287,6 +287,20 @@ function MessagePreview({ label, body }: { label: string; body: Record<string, u
   // Try to extract text from A2A message parts
   let text = "";
   try {
+    // Simple formats from MCP server: {task: "..."} or {result: "..."}
+    if (body.task && typeof body.task === "string") { text = body.task; }
+    if (!text && body.result && typeof body.result === "string") { text = body.result; }
+    if (text) {
+      return (
+        <div>
+          <div className="text-[8px] text-zinc-500 uppercase tracking-wider mb-1">{label}</div>
+          <div className="text-[10px] text-zinc-300 bg-zinc-900/60 rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words">
+            {text.slice(0, 2000)}
+          </div>
+        </div>
+      );
+    }
+
     // Request: params.message.parts[].text
     const params = body.params as Record<string, unknown> | undefined;
     const message = params?.message as Record<string, unknown> | undefined;

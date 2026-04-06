@@ -738,7 +738,12 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 		log.Printf("ProxyA2A forward error: %v", err)
 		// Log failed A2A attempt (detached context — request may be done)
 		errMsg := err.Error()
-		summary := "A2A request to " + workspaceID + " failed: " + errMsg
+		var errWsName string
+		db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&errWsName)
+		if errWsName == "" {
+			errWsName = workspaceID
+		}
+		summary := "A2A request to " + errWsName + " failed: " + errMsg
 		go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
 			WorkspaceID:  workspaceID,
 			ActivityType: "a2a_receive",
@@ -768,7 +773,13 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	if resp.StatusCode >= 400 {
 		logStatus = "error"
 	}
-	summary := a2aMethod + " → " + workspaceID
+	// Resolve workspace name for readable summary
+	var wsNameForLog string
+	db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsNameForLog)
+	if wsNameForLog == "" {
+		wsNameForLog = workspaceID
+	}
+	summary := a2aMethod + " → " + wsNameForLog
 	go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
 		WorkspaceID:  workspaceID,
 		ActivityType: "a2a_receive",

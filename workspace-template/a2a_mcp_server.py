@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "")
 PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
 
+# Cache workspace ID → name mappings (populated by list_peers calls)
+_peer_names: dict[str, str] = {}
+
 
 async def discover_peer(target_id: str) -> dict | None:
     """Discover a peer workspace's URL via the platform registry."""
@@ -167,7 +170,10 @@ TOOLS = [
 ]
 
 
-async def report_activity(activity_type: str, target_id: str = "", summary: str = "", status: str = "ok", task_text: str = ""):
+async def report_activity(
+    activity_type: str, target_id: str = "", summary: str = "", status: str = "ok",
+    task_text: str = "", response_text: str = "",
+):
     """Report activity to the platform for live progress tracking."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -181,6 +187,8 @@ async def report_activity(activity_type: str, target_id: str = "", summary: str 
             }
             if task_text:
                 payload["request_body"] = {"task": task_text}
+            if response_text:
+                payload["response_body"] = {"result": response_text}
             await client.post(
                 f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/activity",
                 json=payload,
@@ -220,11 +228,17 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
             return f"Error: workspace {target_id} has no URL (may be offline)"
 
         # Report delegation start — include the task text for traceability
-        peer_name = peer.get("name", target_id[:8])
+        peer_name = peer.get("name") or _peer_names.get(target_id) or target_id[:8]
+        _peer_names[target_id] = peer_name  # cache for future use
         await report_activity("a2a_send", target_id, f"Delegating to {peer_name}", task_text=task)
 
-        # Send A2A message
+        # Send A2A message and log the full round-trip
         result = await send_a2a_message(target_url, task)
+        await report_activity(
+            "a2a_receive", target_id,
+            f"{peer_name} responded ({len(result)} chars)",
+            task_text=task, response_text=result,
+        )
         return result
 
     elif name == "delegate_task_async":
@@ -324,6 +338,8 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
         for p in peers:
             status = p.get("status", "unknown")
             role = p.get("role", "")
+            # Cache name for use in delegate_task
+            _peer_names[p["id"]] = p["name"]
             lines.append(f"- {p['name']} (ID: {p['id']}, status: {status}, role: {role})")
         return "\n".join(lines)
 

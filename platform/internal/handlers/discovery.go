@@ -35,9 +35,12 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 	// Workspace-to-workspace: return Docker-internal URL (containers can't reach host ports)
 	// Canvas/external: return host-accessible URL
 	if callerID != "" {
+		// Look up workspace name for agent-to-agent discovery responses
+		var wsName string
+		db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, targetID).Scan(&wsName)
 		// Try cached internal URL first
 		if internalURL, err := db.GetCachedInternalURL(ctx, targetID); err == nil && internalURL != "" {
-			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL})
+			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL, "name": wsName})
 			return
 		}
 		// Fallback: only synthesize a URL if the workspace exists and is online/degraded
@@ -50,7 +53,7 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 			if cacheErr := db.CacheInternalURL(ctx, targetID, internalURL); cacheErr != nil {
 				log.Printf("Discovery: failed to cache internal URL for %s: %v", targetID, cacheErr)
 			}
-			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL})
+			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL, "name": wsName})
 			return
 		}
 		// Workspace is not reachable — don't fall through to host URL path

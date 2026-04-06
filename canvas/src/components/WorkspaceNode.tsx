@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
+import { Tooltip } from "@/components/Tooltip";
 import { useShallow } from "zustand/react/shallow";
 
 /** Stable selector: returns children, grandchild flag, and descendant count for a node */
@@ -177,10 +178,12 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
 
         {/* Current task */}
         {data.currentTask && (
-          <div className="flex items-center gap-1.5 mt-1 bg-amber-950/20 px-2 py-1 rounded-md border border-amber-800/20">
-            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-            <span className="text-[8px] text-amber-300/80 truncate">{data.currentTask}</span>
-          </div>
+          <Tooltip text={String(data.currentTask)}>
+            <div className="flex items-center gap-1.5 mt-1 bg-amber-950/20 px-2 py-1 rounded-md border border-amber-800/20 cursor-default">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              <span className="text-[8px] text-amber-300/80 truncate">{data.currentTask}</span>
+            </div>
+          </Tooltip>
         )}
 
         {/* Bottom row: status / active tasks */}
@@ -384,6 +387,16 @@ function TeamMemberChip({
             </div>
           )}
         </div>
+
+        {/* Current task banner for sub-agents */}
+        {data.currentTask && (
+          <Tooltip text={String(data.currentTask)}>
+            <div className="flex items-center gap-1 mt-0.5 px-1.5 py-0.5 bg-amber-950/20 rounded border border-amber-800/20 cursor-default">
+              <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              <span className="text-[7px] text-amber-300/70 truncate">{data.currentTask}</span>
+            </div>
+          </Tooltip>
+        )}
 
         {/* Recursive sub-children rendered inside this card */}
         {hasSubChildren && depth < MAX_NESTING_DEPTH && (

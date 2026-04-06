@@ -61,9 +61,11 @@ export function ChatTab({ workspaceId, data }: Props) {
   const [sessions, setSessions] = useState<ChatSession[]>(initData.sessions);
   const [activeSessionId, setActiveSessionId] = useState<string>(initData.activeId);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  // Resume processing indicator if agent has an active task (survives page refresh)
+  const [sending, setSending] = useState(!!data.currentTask);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const [activityLog, setActivityLog] = useState<string[]>([]);
+  const sendingFromAPIRef = useRef(false); // tracks whether WE initiated the send
   const [agentReachable, setAgentReachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -105,6 +107,15 @@ export function ChatTab({ workspaceId, data }: Props) {
   useEffect(() => {
     checkAgent();
   }, [checkAgent]);
+
+  // When the agent's current_task clears (via WebSocket/heartbeat) and we're in
+  // "resumed from refresh" mode, stop showing the processing indicator.
+  // If WE sent the request (sendingFromAPIRef), the finally{} block handles it.
+  useEffect(() => {
+    if (sending && !sendingFromAPIRef.current && !data.currentTask) {
+      setSending(false);
+    }
+  }, [data.currentTask, sending]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -227,6 +238,7 @@ export function ChatTab({ workspaceId, data }: Props) {
     setInput("");
     addMessage(createMessage("user", text));
     setSending(true);
+    sendingFromAPIRef.current = true;
     setError(null);
 
     try {
@@ -270,6 +282,7 @@ export function ChatTab({ workspaceId, data }: Props) {
       addMessage(createMessage("system", userMsg));
     } finally {
       setSending(false);
+      sendingFromAPIRef.current = false;
     }
   };
 

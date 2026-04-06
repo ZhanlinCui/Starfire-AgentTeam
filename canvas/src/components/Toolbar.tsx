@@ -1,13 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useCallback } from "react";
+import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
 
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
 
+  const [stopping, setStopping] = useState(false);
+
   const counts = useMemo(() => {
-    const c = { total: nodes.length, roots: 0, children: 0, online: 0, offline: 0, failed: 0, provisioning: 0 };
+    const c = { total: nodes.length, roots: 0, children: 0, online: 0, offline: 0, failed: 0, provisioning: 0, activeTasks: 0 };
     for (const n of nodes) {
       if (n.data.parentId) c.children++; else c.roots++;
       const s = n.data.status;
@@ -15,8 +18,20 @@ export function Toolbar() {
       else if (s === "offline") c.offline++;
       else if (s === "failed") c.failed++;
       else if (s === "provisioning") c.provisioning++;
+      if ((n.data.activeTasks as number) > 0) c.activeTasks++;
     }
     return c;
+  }, [nodes]);
+
+  const stopAll = useCallback(async () => {
+    setStopping(true);
+    const active = nodes.filter((n) => (n.data.activeTasks as number) > 0);
+    await Promise.all(
+      active.map((n) =>
+        api.post(`/workspaces/${n.id}/restart`).catch(() => {})
+      )
+    );
+    setStopping(false);
   }, [nodes]);
 
   return (
@@ -50,6 +65,23 @@ export function Toolbar() {
           {counts.children > 0 && <span className="text-zinc-600"> + {counts.children} sub</span>}
         </span>
       </div>
+
+      {/* Stop All — visible when agents have active tasks */}
+      {counts.activeTasks > 0 && (
+        <button
+          onClick={stopAll}
+          disabled={stopping}
+          className="flex items-center gap-1.5 px-2.5 py-1 bg-red-950/50 hover:bg-red-900/60 border border-red-800/40 rounded-lg transition-colors disabled:opacity-50"
+          title={`Stop all running tasks (${counts.activeTasks} active)`}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="text-red-400">
+            <rect x="2" y="2" width="12" height="12" rx="2" />
+          </svg>
+          <span className="text-[10px] text-red-300 font-medium">
+            {stopping ? "Stopping..." : `Stop All (${counts.activeTasks})`}
+          </span>
+        </button>
+      )}
 
       {/* Search shortcut */}
       <button

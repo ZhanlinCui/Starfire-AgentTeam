@@ -111,9 +111,12 @@ func (h *ActivityHandler) Report(c *gin.Context) {
 		Method       string      `json:"method"`
 		Summary      string      `json:"summary"`
 		TargetID     string      `json:"target_id"`
+		SourceID     string      `json:"source_id"`
 		Status       string      `json:"status"`
 		ErrorDetail  string      `json:"error_detail"`
 		DurationMs   *int        `json:"duration_ms"`
+		RequestBody  interface{} `json:"request_body"`
+		ResponseBody interface{} `json:"response_body"`
 		Metadata     interface{} `json:"metadata"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -135,14 +138,25 @@ func (h *ActivityHandler) Report(c *gin.Context) {
 		status = "ok"
 	}
 
+	// Resolve request/response body — prefer explicit fields, fall back to metadata
+	reqBody := body.RequestBody
+	if reqBody == nil {
+		reqBody = body.Metadata
+	}
+	sourceID := body.SourceID
+	if sourceID == "" {
+		sourceID = workspaceID
+	}
+
 	LogActivity(c.Request.Context(), h.broadcaster, ActivityParams{
 		WorkspaceID:  workspaceID,
 		ActivityType: body.ActivityType,
-		SourceID:     &workspaceID,
+		SourceID:     &sourceID,
 		TargetID:     nilIfEmpty(body.TargetID),
 		Method:       nilIfEmpty(body.Method),
 		Summary:      nilIfEmpty(body.Summary),
-		RequestBody:  body.Metadata,
+		RequestBody:  reqBody,
+		ResponseBody: body.ResponseBody,
 		DurationMs:   body.DurationMs,
 		Status:       status,
 		ErrorDetail:  nilIfEmpty(body.ErrorDetail),

@@ -2,6 +2,7 @@
 
 import { useCanvasStore, type PanelTab } from "@/store/canvas";
 import { StatusDot } from "./StatusDot";
+import { Tooltip } from "./Tooltip";
 import { DetailsTab } from "./tabs/DetailsTab";
 import { ChatTab } from "./tabs/ChatTab";
 import { ConfigTab } from "./tabs/ConfigTab";
@@ -95,12 +96,14 @@ export function SidePanel() {
 
       {/* Current Task Banner */}
       {node.data.currentTask && (
-        <div className="px-4 py-2 bg-amber-950/20 border-b border-amber-800/20 flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-          <span className="text-[10px] text-amber-300/90 truncate">
-            {node.data.currentTask}
-          </span>
-        </div>
+        <Tooltip text={node.data.currentTask as string}>
+          <div className="px-4 py-2 bg-amber-950/20 border-b border-amber-800/20 flex items-center gap-2 cursor-default">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="text-[10px] text-amber-300/90 truncate">
+              {node.data.currentTask}
+            </span>
+          </div>
+        </Tooltip>
       )}
 
       {/* Tab Content */}
