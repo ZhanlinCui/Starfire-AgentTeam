@@ -90,7 +90,7 @@ services:
       CONFIGS_HOST_DIR: "${CONFIGS_HOST_DIR:-${PWD}/workspace-configs-templates}"
       PLUGINS_HOST_DIR: "${PLUGINS_HOST_DIR:-${PWD}/plugins}"
     volumes:
-      - ./workspace-configs-templates:/configs:ro
+      - ./workspace-configs-templates:/configs
       - ./plugins:/plugins:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
