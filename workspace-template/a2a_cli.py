@@ -89,30 +89,58 @@ async def delegate(target_id: str, task: str, async_mode: bool = False):
                 }))
         return
 
-    # Sync: wait for full response
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        resp = await client.post(
-            target_url,
-            json={
-                "jsonrpc": "2.0",
-                "id": task_id,
-                "method": "message/send",
-                "params": {
-                    "message": {
-                        "role": "user",
-                        "messageId": str(uuid.uuid4()),
-                        "parts": [{"kind": "text", "text": task}],
-                    }
-                },
-            },
-        )
-        data = resp.json()
-        if "result" in data:
-            parts = data["result"].get("parts", [])
-            print(parts[0].get("text", "(no response)") if parts else "(no response)")
-        elif "error" in data:
-            print(f"Error: {data['error'].get('message', 'unknown')}", file=sys.stderr)
-            sys.exit(1)
+    # Sync: wait for full response with retry on rate limit
+    max_retries = 3
+    for attempt in range(max_retries):
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            try:
+                resp = await client.post(
+                    target_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": task_id,
+                        "method": "message/send",
+                        "params": {
+                            "message": {
+                                "role": "user",
+                                "messageId": str(uuid.uuid4()),
+                                "parts": [{"kind": "text", "text": task}],
+                            }
+                        },
+                    },
+                )
+                data = resp.json()
+                if "result" in data:
+                    parts = data["result"].get("parts", [])
+                    text = parts[0].get("text", "") if parts else ""
+                    if text and text != "(no response generated)":
+                        print(text)
+                        return
+                    # Empty or no-response — might be rate limited, retry
+                    if attempt < max_retries - 1:
+                        delay = 5 * (2 ** attempt)
+                        print(f"(empty response, retrying in {delay}s...)", file=sys.stderr)
+                        await asyncio.sleep(delay)
+                        continue
+                    print(text or "(no response after retries)")
+                elif "error" in data:
+                    error_msg = data['error'].get('message', 'unknown')
+                    if ("rate" in error_msg.lower() or "overloaded" in error_msg.lower()) and attempt < max_retries - 1:
+                        delay = 5 * (2 ** attempt)
+                        print(f"(rate limited, retrying in {delay}s...)", file=sys.stderr)
+                        await asyncio.sleep(delay)
+                        continue
+                    print(f"Error: {error_msg}", file=sys.stderr)
+                    sys.exit(1)
+                return
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    delay = 5 * (2 ** attempt)
+                    print(f"(timeout, retrying in {delay}s...)", file=sys.stderr)
+                    await asyncio.sleep(delay)
+                    continue
+                print("Error: request timed out after retries", file=sys.stderr)
+                sys.exit(1)
 
 
 async def check_status(target_id: str, task_id: str):

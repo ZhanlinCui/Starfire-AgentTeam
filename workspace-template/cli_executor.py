@@ -260,57 +260,80 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
         cmd = self._build_command(user_input)
         timeout = self.config.timeout or 300
+        max_retries = 3
+        base_delay = 5  # seconds
 
-        try:
-            # Build env — pass through auth env var if using env pattern
-            env = dict(os.environ)
-            if self._auth_token and self.preset.get("auth_pattern") == "env":
-                auth_env = self.config.auth_token_env or self.preset.get("default_auth_env", "")
-                if auth_env:
-                    env[auth_env] = self._auth_token
+        # Build env — pass through auth env var if using env pattern
+        env = dict(os.environ)
+        if self._auth_token and self.preset.get("auth_pattern") == "env":
+            auth_env = self.config.auth_token_env or self.preset.get("default_auth_env", "")
+            if auth_env:
+                env[auth_env] = self._auth_token
 
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
-
-            if proc.returncode == 0:
-                result = stdout.decode().strip()
-                if result:
-                    await event_queue.enqueue_event(
-                        new_agent_text_message(result)
-                    )
-                else:
-                    await event_queue.enqueue_event(
-                        new_agent_text_message("(no response generated)")
-                    )
-            else:
-                error_msg = stderr.decode().strip() or f"Exit code {proc.returncode}"
-                logger.error("CLI agent error [%s]: %s", self.runtime, error_msg[:500])
-                await event_queue.enqueue_event(
-                    new_agent_text_message(f"Agent error: {error_msg[:500]}")
+        for attempt in range(max_retries):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout
                 )
 
-        except asyncio.TimeoutError:
-            logger.error("CLI agent timeout [%s] after %ds", self.runtime, timeout)
-            try:
-                proc.kill()
-                await proc.wait()
-            except Exception:
-                pass
-            await event_queue.enqueue_event(
-                new_agent_text_message(f"Agent timed out after {timeout}s")
-            )
-        except Exception as e:
-            logger.error("CLI agent exception [%s]: %s", self.runtime, e)
-            await event_queue.enqueue_event(
-                new_agent_text_message(f"Agent error: {e}")
-            )
+                if proc.returncode == 0:
+                    result = stdout.decode().strip()
+                    if result:
+                        await event_queue.enqueue_event(
+                            new_agent_text_message(result)
+                        )
+                        return
+                    else:
+                        # Empty response — likely rate limited, retry with backoff
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning("CLI agent [%s] returned empty (attempt %d/%d), retrying in %ds",
+                                           self.runtime, attempt + 1, max_retries, delay)
+                            await asyncio.sleep(delay)
+                            continue
+                        await event_queue.enqueue_event(
+                            new_agent_text_message("(no response generated after retries)")
+                        )
+                        return
+                else:
+                    error_msg = stderr.decode().strip() or f"Exit code {proc.returncode}"
+                    # Check for rate limit errors
+                    if "rate" in error_msg.lower() or "429" in error_msg or "overloaded" in error_msg.lower():
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning("CLI agent [%s] rate limited (attempt %d/%d), retrying in %ds",
+                                           self.runtime, attempt + 1, max_retries, delay)
+                            await asyncio.sleep(delay)
+                            continue
+                    logger.error("CLI agent error [%s]: %s", self.runtime, error_msg[:500])
+                    await event_queue.enqueue_event(
+                        new_agent_text_message(f"Agent error: {error_msg[:500]}")
+                    )
+                    return
+
+            except asyncio.TimeoutError:
+                logger.error("CLI agent timeout [%s] after %ds", self.runtime, timeout)
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
+                await event_queue.enqueue_event(
+                    new_agent_text_message(f"Agent timed out after {timeout}s")
+                )
+                return
+            except Exception as e:
+                logger.error("CLI agent exception [%s]: %s", self.runtime, e)
+                await event_queue.enqueue_event(
+                    new_agent_text_message(f"Agent error: {e}")
+                )
+                return
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue):
         """Cancel a running task."""
