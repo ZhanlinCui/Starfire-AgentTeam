@@ -482,15 +482,15 @@ func findTemplateByName(configsDir, name string) string {
 }
 
 // ensureDefaultConfig creates a minimal config directory for workspaces without a template.
-// The config dir is created on the host filesystem so it can be mounted into the container.
+// Files are written to the container-side path (which is a volume mount from the host).
+// The host-side path is returned for the provisioner to mount into the workspace container.
 func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload models.CreateWorkspacePayload) string {
-	// Create a per-workspace config dir under the host configs directory
 	dirName := "ws-" + workspaceID[:12]
-	configPath := filepath.Join(h.configsHostDir, dirName)
-
-	// Also create on the container-side path (for reading templates list)
+	// Write to the container-side path (which IS the host volume mount)
 	containerPath := filepath.Join(h.configsDir, dirName)
 	os.MkdirAll(containerPath, 0o755)
+	// Return the host-side path for the provisioner to mount
+	configPath := filepath.Join(h.configsHostDir, dirName)
 
 	// Determine runtime
 	runtime := payload.Runtime
