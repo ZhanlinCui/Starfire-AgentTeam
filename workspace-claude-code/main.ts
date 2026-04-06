@@ -15,7 +15,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { execSync, spawn } from 'child_process';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 // --- Config ---
@@ -89,6 +89,23 @@ function loadSystemPrompt(): string | null {
 async function invokeClaudeCode(message: string, systemPrompt: string | null): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = ['--print', '--dangerously-skip-permissions'];
+
+    // Use --bare + apiKeyHelper for auth inside containers
+    // Token can come from: env var, or /configs/.auth-token file
+    let authToken = process.env.CLAUDE_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
+    if (!authToken) {
+      try {
+        authToken = readFileSync(join(CONFIG_PATH, '.auth-token'), 'utf-8').trim();
+      } catch {}
+    }
+    if (authToken) {
+      // Create auth helper script that outputs the token
+      const helperPath = '/tmp/claude-auth-helper.sh';
+      writeFileSync(helperPath, `#!/bin/sh\necho "${authToken}"\n`, { mode: 0o755 });
+      args.unshift('--bare');
+      args.push('--settings', JSON.stringify({ apiKeyHelper: helperPath }));
+    }
+
     if (CLAUDE_MODEL) {
       args.push('--model', CLAUDE_MODEL);
     }
