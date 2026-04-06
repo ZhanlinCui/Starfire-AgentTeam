@@ -48,6 +48,12 @@ func Export(ctx context.Context, workspaceID, configsDir string) (*Bundle, error
 		Version:     "1.0.0",
 	}
 
+	// Initialize slices/maps before loadFromConfigDir uses them
+	b.SubWorkspaces = []Bundle{}
+	b.Skills = []BundleSkill{}
+	b.Tools = []BundleTool{}
+	b.Prompts = map[string]string{}
+
 	// Try to find and read the config directory
 	// Look for a config that matches the workspace name
 	configPath := findConfigDir(configsDir, name)
@@ -69,19 +75,6 @@ func Export(ctx context.Context, workspaceID, configsDir string) (*Bundle, error
 				}
 			}
 		}
-	}
-
-	if b.SubWorkspaces == nil {
-		b.SubWorkspaces = []Bundle{}
-	}
-	if b.Skills == nil {
-		b.Skills = []BundleSkill{}
-	}
-	if b.Tools == nil {
-		b.Tools = []BundleTool{}
-	}
-	if b.Prompts == nil {
-		b.Prompts = map[string]string{}
 	}
 
 	return b, nil
