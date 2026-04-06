@@ -217,7 +217,7 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 		"status":     "replaced",
 		"workspace":  workspaceID,
 		"files":      len(body.Files),
-		"config_dir": dirName,
+		"config_dir": filepath.Base(destDir),
 	})
 }
 
