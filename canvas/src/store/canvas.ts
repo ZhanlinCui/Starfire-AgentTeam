@@ -20,9 +20,10 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   lastSampleError: string;
   url: string;
   parentId: string | null;
+  currentTask: string;
 }
 
-export type PanelTab = "details" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events";
+export type PanelTab = "details" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events" | "activity";
 
 export interface ContextMenuState {
   x: number;
@@ -78,6 +79,7 @@ function buildNodesAndEdges(workspaces: WorkspaceData[]) {
       lastSampleError: ws.last_sample_error,
       url: ws.url,
       parentId: ws.parent_id,
+      currentTask: ws.current_task || "",
     },
     // Hide child nodes from canvas — they render inside the parent WorkspaceNode
     hidden: !!ws.parent_id,
@@ -287,6 +289,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                   lastSampleError: "",
                   url: "",
                   parentId: null,
+                  currentTask: "",
                 },
               },
             ],
@@ -326,6 +329,19 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           nodes: nodes.map((n) =>
             n.id === msg.workspace_id
               ? { ...n, data: { ...n.data, agentCard } }
+              : n
+          ),
+        });
+        break;
+      }
+
+      case "TASK_UPDATED": {
+        const currentTask = (msg.payload.current_task as string) ?? "";
+        const activeTasks = (msg.payload.active_tasks as number) ?? 0;
+        set({
+          nodes: nodes.map((n) =>
+            n.id === msg.workspace_id
+              ? { ...n, data: { ...n.data, currentTask, activeTasks } }
               : n
           ),
         });

@@ -492,6 +492,24 @@ server.tool(
 );
 
 server.tool(
+  "list_activity",
+  "List activity logs for a workspace (A2A communications, tasks, errors)",
+  {
+    workspace_id: z.string(),
+    type: z.enum(["a2a_receive", "a2a_send", "task_update", "agent_log", "error"]).optional().describe("Filter by activity type"),
+    limit: z.number().optional().describe("Max entries to return (default 100, max 500)"),
+  },
+  async ({ workspace_id, type, limit }) => {
+    const params = new URLSearchParams();
+    if (type) params.set("type", type);
+    if (limit) params.set("limit", String(limit));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const data = await apiCall("GET", `/workspaces/${workspace_id}/activity${qs}`);
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
   "delete_memory",
   "Delete a specific memory entry",
   { workspace_id: z.string(), memory_id: z.string() },

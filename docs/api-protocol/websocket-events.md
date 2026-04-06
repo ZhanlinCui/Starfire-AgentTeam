@@ -253,6 +253,47 @@ Agent moved from one workspace to another.
 }
 ```
 
+### TASK_UPDATED
+
+Agent's current task changed (via heartbeat). WebSocket-only — not persisted to `structure_events`.
+
+```json
+{
+  "event": "TASK_UPDATED",
+  "workspace_id": "ws-abc-123",
+  "timestamp": "2026-03-30T12:00:00Z",
+  "payload": {
+    "current_task": "Analyzing quarterly report",
+    "active_tasks": 2
+  }
+}
+```
+
+Canvas shows the current task as an amber banner on the workspace node and side panel header. Only broadcast when the task actually changes (not on every heartbeat).
+
+### ACTIVITY_LOGGED
+
+New activity log entry created (A2A communication, agent log, error). WebSocket-only — not persisted to `structure_events` (stored in `activity_logs` table instead).
+
+```json
+{
+  "event": "ACTIVITY_LOGGED",
+  "workspace_id": "ws-abc-123",
+  "timestamp": "2026-03-30T12:00:00Z",
+  "payload": {
+    "activity_type": "a2a_receive",
+    "method": "message/send",
+    "summary": "message/send → ws-abc-123",
+    "status": "ok",
+    "source_id": "ws-def-456",
+    "target_id": "ws-abc-123",
+    "duration_ms": 1500
+  }
+}
+```
+
+Canvas ActivityTab uses this event as a refresh hint. The event is informational — the full activity details (request/response bodies) are fetched via `GET /workspaces/:id/activity`.
+
 ## Subscribers
 
 Both canvas clients and workspace agents subscribe to the same WebSocket endpoint (`/ws`):

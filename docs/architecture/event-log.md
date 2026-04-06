@@ -31,14 +31,18 @@ AGENT_MOVED                  agent moved between workspaces
 AGENT_CARD_UPDATED           capabilities changed
 ```
 
-### WebSocket only, NOT persisted
+### WebSocket only, NOT persisted to structure_events
 
 ```
+TASK_UPDATED                 current task changed — saved to workspaces.current_task
+ACTIVITY_LOGGED              activity log created — saved to activity_logs table
 Canvas node dragged          presentational — saved to canvas_layouts
 Canvas viewport changed      presentational — saved to canvas_viewport
 Node collapsed/expanded      presentational UI toggle — saved to canvas_layouts
   (different from WORKSPACE_EXPANDED which is a structural team expansion)
 ```
+
+`TASK_UPDATED` and `ACTIVITY_LOGGED` use `BroadcastOnly()` — they are sent over WebSocket but not recorded in `structure_events`. They have their own storage: `workspaces.current_task` column and `activity_logs` table respectively. This separation keeps `structure_events` focused on structural changes that define the org chart, while operational activity (A2A communications, task updates, agent logs) lives in `activity_logs` with its own retention policy.
 
 `WORKSPACE_MOVED` is the nuanced case: a workspace moved to a different parent (hierarchy change) is structural and persisted. A node dragged to a new canvas position is presentational and saved to `canvas_layouts` only.
 

@@ -37,11 +37,12 @@ type RegisterPayload struct {
 }
 
 type HeartbeatPayload struct {
-	WorkspaceID  string  `json:"workspace_id" binding:"required"`
-	ErrorRate    float64 `json:"error_rate"`
-	SampleError  string  `json:"sample_error"`
-	ActiveTasks  int     `json:"active_tasks"`
-	UptimeSeconds int    `json:"uptime_seconds"`
+	WorkspaceID   string  `json:"workspace_id" binding:"required"`
+	ErrorRate     float64 `json:"error_rate"`
+	SampleError   string  `json:"sample_error"`
+	ActiveTasks   int     `json:"active_tasks"`
+	UptimeSeconds int     `json:"uptime_seconds"`
+	CurrentTask   string  `json:"current_task"`
 }
 
 type UpdateCardPayload struct {

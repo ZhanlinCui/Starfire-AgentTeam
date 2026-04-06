@@ -139,6 +139,86 @@ check "Heartbeat (recovered)" '"status":"ok"' "$R"
 R=$(curl -s "$BASE/workspaces/$ECHO_ID")
 check "Status back online" '"status":"online"' "$R"
 
+# ---------- Activity Log Tests ----------
+echo ""
+echo "--- Activity Log Tests ---"
+
+# Test: Report activity log
+R=$(curl -s -X POST "$BASE/workspaces/$ECHO_ID/activity" -H "Content-Type: application/json" \
+  -d '{"activity_type":"agent_log","method":"inference","summary":"Processing user query"}')
+check "POST /workspaces/:id/activity (report)" '"status":"logged"' "$R"
+
+# Test: Report A2A activity
+R=$(curl -s -X POST "$BASE/workspaces/$ECHO_ID/activity" -H "Content-Type: application/json" \
+  -d "{\"activity_type\":\"a2a_send\",\"method\":\"message/send\",\"summary\":\"Sent to summarizer\",\"target_id\":\"$SUM_ID\",\"duration_ms\":150}")
+check "POST activity (a2a_send)" '"status":"logged"' "$R"
+
+# Test: Report error activity
+R=$(curl -s -X POST "$BASE/workspaces/$ECHO_ID/activity" -H "Content-Type: application/json" \
+  -d '{"activity_type":"error","summary":"Connection timeout","status":"error","error_detail":"dial tcp: timeout after 30s"}')
+check "POST activity (error)" '"status":"logged"' "$R"
+
+# Test: Report task update
+R=$(curl -s -X POST "$BASE/workspaces/$ECHO_ID/activity" -H "Content-Type: application/json" \
+  -d '{"activity_type":"task_update","method":"start","summary":"Started data analysis"}')
+check "POST activity (task_update)" '"status":"logged"' "$R"
+
+# Test: Invalid activity type rejected
+R=$(curl -s -X POST "$BASE/workspaces/$ECHO_ID/activity" -H "Content-Type: application/json" \
+  -d '{"activity_type":"bad_type","summary":"test"}')
+check "POST activity (invalid type → 400)" 'invalid activity_type' "$R"
+
+# Test: List all activities
+R=$(curl -s "$BASE/workspaces/$ECHO_ID/activity")
+COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+check "GET /workspaces/:id/activity (has entries)" "4" "$COUNT"
+
+# Test: List activities filtered by type
+R=$(curl -s "$BASE/workspaces/$ECHO_ID/activity?type=error")
+COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+check "GET activity?type=error (count=1)" "1" "$COUNT"
+check "GET activity?type=error (has error_detail)" 'dial tcp' "$R"
+
+R=$(curl -s "$BASE/workspaces/$ECHO_ID/activity?type=a2a_send")
+COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+check "GET activity?type=a2a_send (count=1)" "1" "$COUNT"
+check "GET activity?type=a2a_send (has target_id)" "$SUM_ID" "$R"
+
+# Test: List with custom limit
+R=$(curl -s "$BASE/workspaces/$ECHO_ID/activity?limit=2")
+COUNT=$(echo "$R" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+check "GET activity?limit=2 (capped)" "2" "$COUNT"
+
+# Test: Empty activity list for other workspace
+R=$(curl -s "$BASE/workspaces/$SUM_ID/activity")
+check "GET activity (empty for summarizer)" '[]' "$R"
+
+# ---------- Current Task Tests ----------
+echo ""
+echo "--- Current Task Tests ---"
+
+# Test: Heartbeat with current_task
+R=$(curl -s -X POST "$BASE/registry/heartbeat" -H "Content-Type: application/json" \
+  -d "{\"workspace_id\":\"$ECHO_ID\",\"error_rate\":0.0,\"sample_error\":\"\",\"active_tasks\":1,\"uptime_seconds\":400,\"current_task\":\"Analyzing document\"}")
+check "Heartbeat with current_task" '"status":"ok"' "$R"
+
+# Test: Verify current_task in GET /workspaces/:id
+R=$(curl -s "$BASE/workspaces/$ECHO_ID")
+check "current_task visible in workspace" '"current_task":"Analyzing document"' "$R"
+check "active_tasks updated" '"active_tasks":1' "$R"
+
+# Test: Clear current_task
+R=$(curl -s -X POST "$BASE/registry/heartbeat" -H "Content-Type: application/json" \
+  -d "{\"workspace_id\":\"$ECHO_ID\",\"error_rate\":0.0,\"sample_error\":\"\",\"active_tasks\":0,\"uptime_seconds\":500,\"current_task\":\"\"}")
+check "Heartbeat clear current_task" '"status":"ok"' "$R"
+
+R=$(curl -s "$BASE/workspaces/$ECHO_ID")
+check "current_task cleared" '"current_task":""' "$R"
+
+# Test: current_task in workspace list
+R=$(curl -s "$BASE/workspaces")
+check "current_task in list response" '"current_task"' "$R"
+
 # Test 21: Delete
 R=$(curl -s -X DELETE "$BASE/workspaces/$ECHO_ID")
 check "DELETE /workspaces/:id" '"status":"removed"' "$R"

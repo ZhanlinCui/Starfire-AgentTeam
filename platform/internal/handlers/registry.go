@@ -100,6 +100,10 @@ func (h *RegistryHandler) Heartbeat(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// Read previous current_task to detect changes (before the UPDATE)
+	var prevTask string
+	_ = db.DB.QueryRowContext(ctx, `SELECT COALESCE(current_task, '') FROM workspaces WHERE id = $1`, payload.WorkspaceID).Scan(&prevTask)
+
 	// Update heartbeat columns
 	_, err := db.DB.ExecContext(ctx, `
 		UPDATE workspaces SET
@@ -108,10 +112,11 @@ func (h *RegistryHandler) Heartbeat(c *gin.Context) {
 			last_sample_error = $3,
 			active_tasks      = $4,
 			uptime_seconds    = $5,
+			current_task      = $6,
 			updated_at        = now()
 		WHERE id = $1
 	`, payload.WorkspaceID, payload.ErrorRate, payload.SampleError,
-		payload.ActiveTasks, payload.UptimeSeconds)
+		payload.ActiveTasks, payload.UptimeSeconds, payload.CurrentTask)
 	if err != nil {
 		log.Printf("Heartbeat update error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update"})
@@ -125,6 +130,14 @@ func (h *RegistryHandler) Heartbeat(c *gin.Context) {
 
 	// Evaluate status transitions
 	h.evaluateStatus(c, payload)
+
+	// Broadcast current task update only when it changed (avoid spamming on every heartbeat)
+	if payload.CurrentTask != prevTask {
+		h.broadcaster.BroadcastOnly(payload.WorkspaceID, "TASK_UPDATED", map[string]interface{}{
+			"current_task": payload.CurrentTask,
+			"active_tasks": payload.ActiveTasks,
+		})
+	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

@@ -11,9 +11,11 @@ import { FilesTab } from "./tabs/FilesTab";
 import { MemoryTab } from "./tabs/MemoryTab";
 import { TracesTab } from "./tabs/TracesTab";
 import { EventsTab } from "./tabs/EventsTab";
+import { ActivityTab } from "./tabs/ActivityTab";
 
 const TABS: { id: PanelTab; label: string; icon: string }[] = [
   { id: "details", label: "Details", icon: "◉" },
+  { id: "activity", label: "Activity", icon: "⊙" },
   { id: "chat", label: "Chat", icon: "◈" },
   { id: "settings", label: "Settings", icon: "⚙" },
   { id: "terminal", label: "Terminal", icon: "▸" },
@@ -91,9 +93,20 @@ export function SidePanel() {
         ))}
       </div>
 
+      {/* Current Task Banner */}
+      {node.data.currentTask && (
+        <div className="px-4 py-2 bg-amber-950/20 border-b border-amber-800/20 flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+          <span className="text-[10px] text-amber-300/90 truncate">
+            {node.data.currentTask}
+          </span>
+        </div>
+      )}
+
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto">
         {panelTab === "details" && <DetailsTab workspaceId={selectedNodeId} data={node.data} />}
+        {panelTab === "activity" && <ActivityTab workspaceId={selectedNodeId} />}
         {panelTab === "chat" && <ChatTab workspaceId={selectedNodeId} data={node.data} />}
         {panelTab === "settings" && <SettingsTab workspaceId={selectedNodeId} />}
         {panelTab === "terminal" && <TerminalTab workspaceId={selectedNodeId} />}

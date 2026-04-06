@@ -50,9 +50,30 @@ The `parent_task_id` in the A2A message metadata links the child workspace's tra
 
 All workspaces report to a single unified Langfuse instance, giving you a cross-workspace view of all agent activity.
 
+## Activity Logs (Platform-Level)
+
+In addition to Langfuse traces (LLM-level), the platform maintains its own `activity_logs` table for operational observability:
+
+| Activity Type | What's Captured |
+|---------------|----------------|
+| `a2a_receive` | Every A2A proxy request/response — method, duration, request/response bodies, status |
+| `a2a_send` | Agent-reported outbound A2A calls |
+| `task_update` | Agent task lifecycle events (start, complete, fail) |
+| `agent_log` | Generic agent log entries with optional metadata |
+| `error` | Agent errors with detail messages |
+
+Activity logs are accessible via:
+- **Canvas UI**: ActivityTab in the side panel with type filters and auto-refresh
+- **API**: `GET /workspaces/:id/activity?type=&limit=`
+- **MCP**: `list_activity` tool
+
+Activity logs have a configurable retention policy (default 7 days, cleanup every 6 hours). Configure via env vars: `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`). This is separate from `structure_events` (which is append-only and never deleted).
+
+The current task description (`current_task` field in heartbeat) is displayed as an amber banner on workspace nodes and the side panel header, giving immediate visibility into what each agent is doing.
+
 ## Why This Matters
 
-Debugging distributed agents is hard. Without centralized observability, you cannot see what happened across multiple machines. Langfuse provides the unified trace view that makes this possible.
+Debugging distributed agents is hard. Without centralized observability, you cannot see what happened across multiple machines. Langfuse provides the unified trace view at the LLM call level. Activity logs provide the operational view at the inter-agent communication level. Together they give complete visibility into what happened, why, and how long it took.
 
 ## Local Stack
 

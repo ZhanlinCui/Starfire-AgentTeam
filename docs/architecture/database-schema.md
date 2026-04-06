@@ -45,6 +45,7 @@ CREATE TABLE workspaces (
 | `last_sample_error` | Latest sample error message (shown on canvas tooltip) |
 | `active_tasks` | Number of tasks currently running (shown as busy indicator on canvas) |
 | `uptime_seconds` | Seconds since container start |
+| `current_task` | Human-readable description of what the agent is currently working on (set via heartbeat) |
 
 ### agents — Agent Assignments
 
@@ -123,6 +124,42 @@ CREATE TABLE structure_events (
 ```
 
 **Append-only.** Never UPDATE or DELETE rows. See [Event Log](./event-log.md).
+
+### activity_logs — Operational Activity Log
+
+```sql
+CREATE TABLE activity_logs (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  activity_type TEXT NOT NULL,
+  source_id     UUID,
+  target_id     UUID,
+  method        TEXT,
+  summary       TEXT,
+  request_body  JSONB,
+  response_body JSONB,
+  duration_ms   INTEGER,
+  status        TEXT DEFAULT 'ok',
+  error_detail  TEXT,
+  created_at    TIMESTAMPTZ DEFAULT now()
+);
+```
+
+| Column | Purpose |
+|--------|---------|
+| `activity_type` | `a2a_send`, `a2a_receive`, `task_update`, `agent_log`, or `error` |
+| `source_id` | Workspace that initiated the action (nullable for canvas-originated) |
+| `target_id` | Workspace that received the action (for A2A communications) |
+| `method` | A2A method name (e.g. `message/send`) or task action |
+| `request_body` | Full request payload as JSONB (for A2A) |
+| `response_body` | Full response payload as JSONB (for A2A) |
+| `duration_ms` | Operation duration in milliseconds |
+| `status` | `ok`, `error`, or `timeout` |
+| `error_detail` | Error message when status is not `ok` |
+
+Separate from `structure_events` by design: structure_events tracks lifecycle/structural changes (append-only, never deleted), while activity_logs tracks operational activity (A2A communications, task updates, agent logs) and has a 7-day retention policy with automatic cleanup.
+
+Indexes: composite `(workspace_id, activity_type, created_at DESC)` for filtered queries, standalone `created_at` for retention cleanup.
 
 ## Redis Keys
 

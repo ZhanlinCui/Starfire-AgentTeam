@@ -167,6 +167,14 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
           <EmbeddedTeam members={children} depth={0} onSelect={selectNode} onExtract={handleExtract} />
         )}
 
+        {/* Current task */}
+        {data.currentTask && (
+          <div className="flex items-center gap-1.5 mt-1 bg-amber-950/20 px-2 py-1 rounded-md border border-amber-800/20">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="text-[8px] text-amber-300/80 truncate">{data.currentTask}</span>
+          </div>
+        )}
+
         {/* Bottom row: status / active tasks */}
         <div className="flex items-center justify-between mt-0.5">
           {data.status !== "online" ? (

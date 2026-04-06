@@ -89,6 +89,11 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/events", eh.List)
 	r.GET("/events/:workspaceId", eh.ListByWorkspace)
 
+	// Activity Logs
+	acth := handlers.NewActivityHandler(broadcaster)
+	r.GET("/workspaces/:id/activity", acth.List)
+	r.POST("/workspaces/:id/activity", acth.Report)
+
 	// Config
 	cfgh := handlers.NewConfigHandler()
 	r.GET("/workspaces/:id/config", cfgh.Get)

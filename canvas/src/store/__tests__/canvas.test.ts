@@ -22,6 +22,7 @@ function makeWS(overrides: Partial<WorkspaceData> & { id: string }): WorkspaceDa
     last_error_rate: 0,
     last_sample_error: "",
     uptime_seconds: 60,
+    current_task: "",
     x: 0,
     y: 0,
     collapsed: false,
@@ -134,6 +135,19 @@ describe("hydrate", () => {
     expect(data.lastErrorRate).toBe(0.75);
     expect(data.lastSampleError).toBe("timeout");
     expect(data.collapsed).toBe(true);
+  });
+
+  it("maps current_task into currentTask", () => {
+    const ws = makeWS({ id: "x", current_task: "Processing request" });
+    useCanvasStore.getState().hydrate([ws]);
+    expect(useCanvasStore.getState().nodes[0].data.currentTask).toBe("Processing request");
+  });
+
+  it("defaults currentTask to empty string when missing", () => {
+    const ws = makeWS({ id: "x" });
+    // current_task is "" from makeWS default
+    useCanvasStore.getState().hydrate([ws]);
+    expect(useCanvasStore.getState().nodes[0].data.currentTask).toBe("");
   });
 });
 
@@ -293,6 +307,51 @@ describe("applyEvent", () => {
     expect(node.data.agentCard).toBeNull();
   });
 
+  it("TASK_UPDATED sets currentTask and activeTasks", () => {
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "TASK_UPDATED",
+        workspace_id: "ws-1",
+        payload: { current_task: "Analyzing data", active_tasks: 2 },
+      })
+    );
+
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.currentTask).toBe("Analyzing data");
+    expect(node.data.activeTasks).toBe(2);
+  });
+
+  it("TASK_UPDATED clears currentTask when empty", () => {
+    // First set a task
+    useCanvasStore.getState().updateNodeData("ws-1", { currentTask: "Working" });
+
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "TASK_UPDATED",
+        workspace_id: "ws-1",
+        payload: { current_task: "", active_tasks: 0 },
+      })
+    );
+
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.currentTask).toBe("");
+    expect(node.data.activeTasks).toBe(0);
+  });
+
+  it("TASK_UPDATED is a no-op for unknown workspace", () => {
+    const nodesBefore = [...useCanvasStore.getState().nodes];
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "TASK_UPDATED",
+        workspace_id: "unknown",
+        payload: { current_task: "task", active_tasks: 1 },
+      })
+    );
+    // Nodes unchanged (same length, same data for ws-1)
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.currentTask).toBe("");
+  });
+
   it("unknown event is a no-op", () => {
     const nodesBefore = useCanvasStore.getState().nodes;
     useCanvasStore.getState().applyEvent(
@@ -428,6 +487,7 @@ describe("context menu", () => {
       lastSampleError: "",
       url: "",
       parentId: null,
+      currentTask: "",
     },
   };
 
@@ -580,5 +640,109 @@ describe("misc state setters", () => {
   it("setViewport", () => {
     useCanvasStore.getState().setViewport({ x: 5, y: 10, zoom: 2 });
     expect(useCanvasStore.getState().viewport).toEqual({ x: 5, y: 10, zoom: 2 });
+  });
+
+  it("setPanelTab to activity", () => {
+    useCanvasStore.getState().setPanelTab("activity");
+    expect(useCanvasStore.getState().panelTab).toBe("activity");
+  });
+});
+
+// ---------- ACTIVITY_LOGGED event ----------
+
+describe("ACTIVITY_LOGGED event", () => {
+  beforeEach(() => {
+    useCanvasStore.getState().hydrate([
+      makeWS({ id: "ws-1", name: "Agent" }),
+    ]);
+  });
+
+  it("does not crash the store (no-op)", () => {
+    // ACTIVITY_LOGGED is handled by ActivityTab polling, not the store
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "ACTIVITY_LOGGED",
+        workspace_id: "ws-1",
+        payload: { activity_type: "a2a_receive", method: "message/send" },
+      })
+    );
+
+    // Store unchanged
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.status).toBe("online");
+    expect(node.data.name).toBe("Agent");
+  });
+});
+
+// ---------- TASK_UPDATED edge cases ----------
+
+describe("TASK_UPDATED edge cases", () => {
+  beforeEach(() => {
+    useCanvasStore.getState().hydrate([
+      makeWS({ id: "ws-1", name: "Agent", current_task: "Initial task" }),
+    ]);
+  });
+
+  it("handles missing current_task in payload (defaults to empty)", () => {
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "TASK_UPDATED",
+        workspace_id: "ws-1",
+        payload: { active_tasks: 0 },
+      })
+    );
+
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.currentTask).toBe("");
+    expect(node.data.activeTasks).toBe(0);
+  });
+
+  it("handles missing active_tasks in payload (defaults to 0)", () => {
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "TASK_UPDATED",
+        workspace_id: "ws-1",
+        payload: { current_task: "New task" },
+      })
+    );
+
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.currentTask).toBe("New task");
+    expect(node.data.activeTasks).toBe(0);
+  });
+
+  it("preserves other node data when task changes", () => {
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "TASK_UPDATED",
+        workspace_id: "ws-1",
+        payload: { current_task: "New task", active_tasks: 3 },
+      })
+    );
+
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.name).toBe("Agent");
+    expect(node.data.status).toBe("online");
+    expect(node.data.currentTask).toBe("New task");
+  });
+
+  it("does not affect other nodes when task updates", () => {
+    useCanvasStore.getState().hydrate([
+      makeWS({ id: "ws-1", name: "A", current_task: "Task A" }),
+      makeWS({ id: "ws-2", name: "B", current_task: "Task B" }),
+    ]);
+
+    useCanvasStore.getState().applyEvent(
+      makeMsg({
+        event: "TASK_UPDATED",
+        workspace_id: "ws-1",
+        payload: { current_task: "Updated A", active_tasks: 1 },
+      })
+    );
+
+    const ws1 = useCanvasStore.getState().nodes.find((n) => n.id === "ws-1")!;
+    const ws2 = useCanvasStore.getState().nodes.find((n) => n.id === "ws-2")!;
+    expect(ws1.data.currentTask).toBe("Updated A");
+    expect(ws2.data.currentTask).toBe("Task B"); // unchanged
   });
 });

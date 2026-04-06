@@ -39,7 +39,7 @@ go run ./cmd/server          # Run server (requires Postgres + Redis running)
 go build -o molecli ./cmd/cli  # Build TUI dashboard
 ./molecli                    # Run TUI dashboard (requires platform running)
 ```
-Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`).
+Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`).
 
 `molecli` reads `MOLECLI_URL` (default http://localhost:8080) to locate the platform. Logs are written to `molecli.log` in the working directory (already covered by `*.log` in `.gitignore`).
 
@@ -54,19 +54,22 @@ Env vars: `NEXT_PUBLIC_PLATFORM_URL` (default http://localhost:8080), `NEXT_PUBL
 
 ### Unit Tests
 ```bash
-cd platform && go test ./...                    # 9 Go handler tests (sqlmock + miniredis)
-cd canvas && npm test                            # 47 Vitest store tests
+cd platform && go test ./...                    # 25 Go handler tests (sqlmock + miniredis)
+cd canvas && npm test                            # 58 Vitest store tests
 cd workspace-template && python -m pytest -v     # 45 pytest tests (config, heartbeat, prompt, skills, a2a)
 ```
 
 ### Integration Tests
 ```bash
-bash test_api.sh             # Runs 43 API tests against localhost:8080
+bash test_api.sh             # Runs 62 API tests against localhost:8080
 bash test_a2a_e2e.sh         # Runs 22 A2A end-to-end tests (requires 2 online agents)
+bash test_activity_e2e.sh    # Runs 25 activity/task E2E tests (requires 1 online agent)
 ```
-`test_api.sh` requires platform running. Tests full CRUD, registry, heartbeat, discovery, peers, access control, events, degraded/recovery lifecycle, bundle round-trip (export → delete → import → verify).
+`test_api.sh` requires platform running. Tests full CRUD, registry, heartbeat, discovery, peers, access control, events, degraded/recovery lifecycle, activity logging, current task tracking, bundle round-trip (export → delete → import → verify).
 
 `test_a2a_e2e.sh` requires platform + two provisioned agents (Echo Agent, SEO Agent) running with a valid `OPENROUTER_API_KEY`. Tests message/send, JSON-RPC wrapping, error handling, peer discovery, agent cards, heartbeat. Timeout configurable via `A2A_TIMEOUT` env var (default 120s).
+
+`test_activity_e2e.sh` requires platform + one online agent. Tests A2A communication logging (request/response capture, duration, method), agent self-reported activity, type filtering, current task visibility via heartbeat, cross-workspace activity isolation, edge cases.
 
 ### MCP Server
 ```bash
@@ -150,6 +153,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | POST/GET | /workspaces/:id/memories | memories.go |
 | DELETE | /workspaces/:id/memories/:id | memories.go |
 | GET | /workspaces/:id/traces | traces.go |
+| GET/POST | /workspaces/:id/activity | activity.go |
 | POST | /workspaces/:id/restart | workspace.go |
 | POST | /workspaces/:id/a2a | workspace.go |
 | GET | /workspaces/:id/shared-context | templates.go |
@@ -170,7 +174,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 
 ## Database
 
-6 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, agent_card JSONB, heartbeat columns), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `agents`, `workspace_secrets`.
+9 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, agent_card JSONB, heartbeat columns, current_task), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
 

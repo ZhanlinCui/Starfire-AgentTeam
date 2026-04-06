@@ -104,7 +104,7 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 
 // scanWorkspaceRow is a helper to scan workspace+layout rows into a clean JSON map.
 func scanWorkspaceRow(rows interface{ Scan(dest ...interface{}) error }) (map[string]interface{}, error) {
-	var id, name, role, status, url, sampleError string
+	var id, name, role, status, url, sampleError, currentTask string
 	var tier, activeTasks, uptimeSeconds int
 	var errorRate, x, y float64
 	var collapsed bool
@@ -113,7 +113,7 @@ func scanWorkspaceRow(rows interface{ Scan(dest ...interface{}) error }) (map[st
 
 	err := rows.Scan(&id, &name, &role, &tier, &status, &agentCard, &url,
 		&parentID, &activeTasks, &errorRate, &sampleError, &uptimeSeconds,
-		&x, &y, &collapsed)
+		&currentTask, &x, &y, &collapsed)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +129,7 @@ func scanWorkspaceRow(rows interface{ Scan(dest ...interface{}) error }) (map[st
 		"last_error_rate":   errorRate,
 		"last_sample_error": sampleError,
 		"uptime_seconds":    uptimeSeconds,
+		"current_task":      currentTask,
 		"x":                 x,
 		"y":                 y,
 		"collapsed":         collapsed,
@@ -156,6 +157,7 @@ const workspaceListQuery = `
 		   COALESCE(w.agent_card, 'null'::jsonb), COALESCE(w.url, ''),
 		   w.parent_id, w.active_tasks, w.last_error_rate,
 		   COALESCE(w.last_sample_error, ''), w.uptime_seconds,
+		   COALESCE(w.current_task, ''),
 		   COALESCE(cl.x, 0), COALESCE(cl.y, 0), COALESCE(cl.collapsed, false)
 	FROM workspaces w
 	LEFT JOIN canvas_layouts cl ON cl.workspace_id = w.id
@@ -194,6 +196,7 @@ func (h *WorkspaceHandler) Get(c *gin.Context) {
 			   COALESCE(w.agent_card, 'null'::jsonb), COALESCE(w.url, ''),
 			   w.parent_id, w.active_tasks, w.last_error_rate,
 			   COALESCE(w.last_sample_error, ''), w.uptime_seconds,
+			   COALESCE(w.current_task, ''),
 			   COALESCE(cl.x, 0), COALESCE(cl.y, 0), COALESCE(cl.collapsed, false)
 		FROM workspaces w
 		LEFT JOIN canvas_layouts cl ON cl.workspace_id = w.id
@@ -534,7 +537,17 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	}
 	body = marshaledBody
 
+	// Extract method for logging
+	var a2aMethod string
+	if m, ok := payload["method"].(string); ok {
+		a2aMethod = m
+	}
+
+	// Extract caller workspace ID from X-Workspace-ID header (if agent-to-agent)
+	callerID := c.GetHeader("X-Workspace-ID")
+
 	// Forward to the agent
+	startTime := time.Now()
 	req, err := http.NewRequestWithContext(ctx, "POST", agentURL, bytes.NewReader(body))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
@@ -543,8 +556,24 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a2aClient.Do(req)
+	durationMs := int(time.Since(startTime).Milliseconds())
 	if err != nil {
 		log.Printf("ProxyA2A forward error: %v", err)
+		// Log failed A2A attempt (detached context — request may be done)
+		errMsg := err.Error()
+		summary := "A2A request to " + workspaceID + " failed: " + errMsg
+		go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
+			WorkspaceID:  workspaceID,
+			ActivityType: "a2a_receive",
+			SourceID:     nilIfEmpty(callerID),
+			TargetID:     &workspaceID,
+			Method:       &a2aMethod,
+			Summary:      &summary,
+			RequestBody:  json.RawMessage(body),
+			DurationMs:   &durationMs,
+			Status:       "error",
+			ErrorDetail:  &errMsg,
+		})
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to reach workspace agent"})
 		return
 	}
@@ -557,5 +586,31 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 		return
 	}
 
+	// Log successful A2A communication
+	logStatus := "ok"
+	if resp.StatusCode >= 400 {
+		logStatus = "error"
+	}
+	summary := a2aMethod + " → " + workspaceID
+	go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
+		WorkspaceID:  workspaceID,
+		ActivityType: "a2a_receive",
+		SourceID:     nilIfEmpty(callerID),
+		TargetID:     &workspaceID,
+		Method:       &a2aMethod,
+		Summary:      &summary,
+		RequestBody:  json.RawMessage(body),
+		ResponseBody: json.RawMessage(respBody),
+		DurationMs:   &durationMs,
+		Status:       logStatus,
+	})
+
 	c.Data(resp.StatusCode, "application/json", respBody)
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

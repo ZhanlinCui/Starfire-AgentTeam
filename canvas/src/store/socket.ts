@@ -79,6 +79,7 @@ export interface WorkspaceData {
   last_error_rate: number;
   last_sample_error: string;
   uptime_seconds: number;
+  current_task: string;
   x: number;
   y: number;
   collapsed: boolean;

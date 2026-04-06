@@ -66,6 +66,8 @@ The canvas maintains a persistent WebSocket connection to the Go platform at `/w
 | `AGENT_REPLACED` | Node updates model info |
 | `AGENT_MOVED` | Source node clears agent, target node gains agent |
 | `AGENT_CARD_UPDATED` | Node updates skill badges |
+| `TASK_UPDATED` | Node shows current task banner (amber pulsing dot) |
+| `ACTIVITY_LOGGED` | No-op in store (ActivityTab polls for details) |
 
 The flow: Platform broadcasts event via Redis pub/sub -> WebSocket handler pushes to connected clients -> Canvas updates Zustand state -> React Flow re-renders.
 
@@ -73,18 +75,20 @@ See [WebSocket Events](../api-protocol/websocket-events.md) for the full JSON pa
 
 ## Side Panel
 
-Clicking a workspace node opens a **480px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. It contains seven tabs:
+Clicking a workspace node opens a **480px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. When the agent has an active task (`current_task` from heartbeat), an amber pulsing banner appears below the tab bar showing what the agent is currently working on. The panel contains eleven tabs:
 
 | Tab | Component | Description |
 |-----|-----------|-------------|
 | **Details** | `DetailsTab` | Inline editing of name/role/tier, editable Agent Card (JSON), Restart button for offline/failed, peer list, delete with confirmation |
+| **Activity** | `ActivityTab` | Comprehensive activity log — A2A communications (with request/response bodies, duration), task updates, agent logs, errors. Type filters, auto-refresh (5s), expandable JSON details |
 | **Chat** | `ChatTab` | Send A2A `message/send` via platform proxy (`POST /workspaces/:id/a2a`), handles JSON-RPC errors |
 | **Settings** | `SettingsTab` | Configure LLM provider + API keys per workspace via `/workspaces/:id/secrets`, quick-set rows for common keys |
 | **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
 | **Files** | `FilesTab` | VS Code-style file explorer with tree view, inline editor, create/delete files |
 | **Config** | `ConfigTab` | JSON editor for workspace config, load via `GET /workspaces/:id/config`, save changes |
 | **Memory** | `MemoryTab` | Browse key/value memory entries from `GET /workspaces/:id/memory`, add new entries with optional TTL |
-| **Events** | `EventsTab` | Workspace-scoped event log from `GET /events/:workspaceId`, color-coded by event type |
+| **Traces** | `TracesTab` | Langfuse LLM traces — name, latency, token usage, cost, expandable I/O |
+| **Events** | `EventsTab` | Workspace-scoped structure event log from `GET /events/:workspaceId`, color-coded by event type |
 
 Tab state is managed in the Zustand store via `panelTab` and `setPanelTab`. The panel closes when the user clicks the close button or clicks the canvas background.
 
@@ -277,6 +281,7 @@ function hydrate(workspaces: WorkspaceRow[]) {
       collapsed: ws.collapsed,
       url: ws.url,
       parentId: ws.parent_id,
+      currentTask: ws.current_task || "",
     }
   }))
   setNodes(nodes)
@@ -295,7 +300,7 @@ interface CanvasState {
 
   // Selection / panel state
   selectedNodeId: string | null;
-  panelTab: PanelTab; // "details" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events"
+  panelTab: PanelTab; // "details" | "activity" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events"
 
   // Actions
   hydrate(workspaces): void;

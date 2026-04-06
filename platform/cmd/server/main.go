@@ -68,6 +68,31 @@ func main() {
 		}
 	})
 
+	// Activity log retention — configurable via env vars
+	retentionDays := envOr("ACTIVITY_RETENTION_DAYS", "7")
+	cleanupHours := envOr("ACTIVITY_CLEANUP_INTERVAL_HOURS", "6")
+	cleanupInterval, _ := time.ParseDuration(cleanupHours + "h")
+	if cleanupInterval == 0 {
+		cleanupInterval = 6 * time.Hour
+	}
+	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				result, err := db.DB.ExecContext(ctx, `DELETE FROM activity_logs WHERE created_at < now() - ($1 || ' days')::interval`, retentionDays)
+				if err != nil {
+					log.Printf("Activity log cleanup error: %v", err)
+				} else if n, _ := result.RowsAffected(); n > 0 {
+					log.Printf("Activity log cleanup: purged %d old entries", n)
+				}
+			}
+		}
+	}()
+
 	// Provisioner (optional — gracefully degrades if Docker not available)
 	var prov *provisioner.Provisioner
 	if p, err := provisioner.New(); err != nil {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/agent-molecule/platform/internal/db"
@@ -109,9 +110,14 @@ func TestHeartbeatHandler_Normal(t *testing.T) {
 	broadcaster := newTestBroadcaster()
 	handler := NewRegistryHandler(broadcaster)
 
+	// Expect prevTask SELECT (before UPDATE)
+	mock.ExpectQuery("SELECT COALESCE\\(current_task").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"current_task"}).AddRow(""))
+
 	// Expect heartbeat UPDATE
 	mock.ExpectExec("UPDATE workspaces SET").
-		WithArgs("ws-123", 0.1, "", 2, 3600).
+		WithArgs("ws-123", 0.1, "", 2, 3600, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect evaluateStatus SELECT
@@ -143,9 +149,14 @@ func TestHeartbeatHandler_Degraded(t *testing.T) {
 	broadcaster := newTestBroadcaster()
 	handler := NewRegistryHandler(broadcaster)
 
+	// Expect prevTask SELECT (before UPDATE)
+	mock.ExpectQuery("SELECT COALESCE\\(current_task").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"current_task"}).AddRow(""))
+
 	// Expect heartbeat UPDATE
 	mock.ExpectExec("UPDATE workspaces SET").
-		WithArgs("ws-123", 0.8, "connection timeout", 0, 7200).
+		WithArgs("ws-123", 0.8, "connection timeout", 0, 7200, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect evaluateStatus SELECT — currently online
@@ -186,9 +197,14 @@ func TestHeartbeatHandler_Recovery(t *testing.T) {
 	broadcaster := newTestBroadcaster()
 	handler := NewRegistryHandler(broadcaster)
 
+	// Expect prevTask SELECT (before UPDATE)
+	mock.ExpectQuery("SELECT COALESCE\\(current_task").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"current_task"}).AddRow(""))
+
 	// Expect heartbeat UPDATE
 	mock.ExpectExec("UPDATE workspaces SET").
-		WithArgs("ws-123", 0.05, "", 1, 9000).
+		WithArgs("ws-123", 0.05, "", 1, 9000, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect evaluateStatus SELECT — currently degraded
@@ -285,13 +301,13 @@ func TestWorkspaceList(t *testing.T) {
 	columns := []string{
 		"id", "name", "role", "tier", "status", "agent_card", "url",
 		"parent_id", "active_tasks", "last_error_rate", "last_sample_error",
-		"uptime_seconds", "x", "y", "collapsed",
+		"uptime_seconds", "current_task", "x", "y", "collapsed",
 	}
 	rows := sqlmock.NewRows(columns).
 		AddRow("ws-1", "Agent One", "worker", 1, "online", []byte("null"), "http://localhost:8001",
-			nil, 0, 0.0, "", 100, 10.0, 20.0, false).
+			nil, 0, 0.0, "", 100, "", 10.0, 20.0, false).
 		AddRow("ws-2", "Agent Two", "manager", 2, "provisioning", []byte("null"), "",
-			nil, 0, 0.0, "", 0, 50.0, 60.0, false)
+			nil, 0, 0.0, "", 0, "", 50.0, 60.0, false)
 
 	mock.ExpectQuery("SELECT w.id, w.name").
 		WillReturnRows(rows)
@@ -346,6 +362,10 @@ func TestProxyA2A_JSONRPCWrapping(t *testing.T) {
 	// Cache the agent URL in Redis so the handler finds it
 	mr.Set(fmt.Sprintf("ws:%s:url", "ws-proxy"), agentServer.URL)
 
+	// Expect async activity log INSERT from the LogActivity goroutine
+	mock.ExpectExec("INSERT INTO activity_logs").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws-proxy"}}
@@ -356,6 +376,9 @@ func TestProxyA2A_JSONRPCWrapping(t *testing.T) {
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handler.ProxyA2A(c)
+
+	// Give the async LogActivity goroutine a moment to complete
+	time.Sleep(50 * time.Millisecond)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
@@ -498,6 +521,481 @@ func TestSharedContext(t *testing.T) {
 	}
 	if resp[0]["content"] != testContent {
 		t.Errorf("expected content %q, got %v", testContent, resp[0]["content"])
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// ---------- TestHeartbeatHandler_TaskChanged ----------
+
+func TestHeartbeatHandler_TaskChanged(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewRegistryHandler(broadcaster)
+
+	// Expect prevTask SELECT — currently "old task"
+	mock.ExpectQuery("SELECT COALESCE\\(current_task").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"current_task"}).AddRow("old task"))
+
+	// Expect heartbeat UPDATE with new task
+	mock.ExpectExec("UPDATE workspaces SET").
+		WithArgs("ws-123", 0.0, "", 1, 1000, "new task").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// Expect evaluateStatus SELECT
+	mock.ExpectQuery("SELECT status FROM workspaces WHERE id =").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("online"))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body := `{"workspace_id":"ws-123","error_rate":0.0,"sample_error":"","active_tasks":1,"uptime_seconds":1000,"current_task":"new task"}`
+	c.Request = httptest.NewRequest("POST", "/registry/heartbeat", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Heartbeat(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// ---------- TestActivityHandler ----------
+
+func TestActivityHandler_List(t *testing.T) {
+	mock := setupTestDB(t)
+
+	columns := []string{
+		"id", "workspace_id", "activity_type", "source_id", "target_id", "method",
+		"summary", "request_body", "response_body", "duration_ms", "status", "error_detail", "created_at",
+	}
+	rows := sqlmock.NewRows(columns).
+		AddRow("act-1", "ws-1", "a2a_receive", nil, "ws-1", "message/send",
+			"message/send → ws-1", []byte(`{"method":"message/send"}`), []byte(`{"result":"ok"}`),
+			150, "ok", nil, time.Date(2026, 4, 5, 10, 0, 0, 0, time.UTC)).
+		AddRow("act-2", "ws-1", "error", nil, nil, nil,
+			"connection failed", nil, nil,
+			nil, "error", "timeout after 120s", time.Date(2026, 4, 5, 9, 0, 0, 0, time.UTC))
+
+	mock.ExpectQuery("SELECT id, workspace_id, activity_type").
+		WithArgs("ws-1", 100).
+		WillReturnRows(rows)
+
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity", nil)
+
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if len(resp) != 2 {
+		t.Fatalf("expected 2 activities, got %d", len(resp))
+	}
+	if resp[0]["activity_type"] != "a2a_receive" {
+		t.Errorf("expected first activity type 'a2a_receive', got %v", resp[0]["activity_type"])
+	}
+	if resp[1]["status"] != "error" {
+		t.Errorf("expected second activity status 'error', got %v", resp[1]["status"])
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestActivityHandler_ListByType(t *testing.T) {
+	mock := setupTestDB(t)
+
+	columns := []string{
+		"id", "workspace_id", "activity_type", "source_id", "target_id", "method",
+		"summary", "request_body", "response_body", "duration_ms", "status", "error_detail", "created_at",
+	}
+	rows := sqlmock.NewRows(columns).
+		AddRow("act-1", "ws-1", "error", nil, nil, nil,
+			"connection failed", nil, nil,
+			nil, "error", "timeout", time.Date(2026, 4, 5, 9, 0, 0, 0, time.UTC))
+
+	mock.ExpectQuery("SELECT id, workspace_id, activity_type").
+		WithArgs("ws-1", "error", 100).
+		WillReturnRows(rows)
+
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity?type=error", nil)
+
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp []map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp) != 1 {
+		t.Fatalf("expected 1 activity, got %d", len(resp))
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestActivityHandler_Report(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	// Expect the INSERT into activity_logs
+	mock.ExpectExec("INSERT INTO activity_logs").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	body := `{"activity_type":"agent_log","summary":"Processing user request","method":"inference"}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-1/activity", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Report(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestActivityHandler_Report_InvalidType(t *testing.T) {
+	setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	body := `{"activity_type":"invalid_type","summary":"test"}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-1/activity", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Report(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- TestHeartbeatHandler_TaskUnchanged ----------
+
+func TestHeartbeatHandler_TaskUnchanged(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewRegistryHandler(broadcaster)
+
+	// Expect prevTask SELECT — task is already "doing work"
+	mock.ExpectQuery("SELECT COALESCE\\(current_task").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"current_task"}).AddRow("doing work"))
+
+	// Expect heartbeat UPDATE with same task
+	mock.ExpectExec("UPDATE workspaces SET").
+		WithArgs("ws-123", 0.0, "", 1, 500, "doing work").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// Expect evaluateStatus SELECT
+	mock.ExpectQuery("SELECT status FROM workspaces WHERE id =").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("online"))
+
+	// NO TASK_UPDATED broadcast expected — task didn't change
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body := `{"workspace_id":"ws-123","error_rate":0.0,"sample_error":"","active_tasks":1,"uptime_seconds":500,"current_task":"doing work"}`
+	c.Request = httptest.NewRequest("POST", "/registry/heartbeat", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Heartbeat(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// ---------- TestHeartbeatHandler_TaskCleared ----------
+
+func TestHeartbeatHandler_TaskCleared(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewRegistryHandler(broadcaster)
+
+	// Expect prevTask SELECT — was doing something
+	mock.ExpectQuery("SELECT COALESCE\\(current_task").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"current_task"}).AddRow("old task"))
+
+	// Expect heartbeat UPDATE with empty task
+	mock.ExpectExec("UPDATE workspaces SET").
+		WithArgs("ws-123", 0.0, "", 0, 600, "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// Expect evaluateStatus SELECT
+	mock.ExpectQuery("SELECT status FROM workspaces WHERE id =").
+		WithArgs("ws-123").
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("online"))
+
+	// TASK_UPDATED broadcast expected — changed from "old task" to ""
+	// (BroadcastOnly doesn't hit sqlmock, so no expectation needed)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	body := `{"workspace_id":"ws-123","error_rate":0.0,"sample_error":"","active_tasks":0,"uptime_seconds":600}`
+	c.Request = httptest.NewRequest("POST", "/registry/heartbeat", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Heartbeat(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// ---------- TestActivityHandler_ListEmpty ----------
+
+func TestActivityHandler_ListEmpty(t *testing.T) {
+	mock := setupTestDB(t)
+
+	columns := []string{
+		"id", "workspace_id", "activity_type", "source_id", "target_id", "method",
+		"summary", "request_body", "response_body", "duration_ms", "status", "error_detail", "created_at",
+	}
+	mock.ExpectQuery("SELECT id, workspace_id, activity_type").
+		WithArgs("ws-empty", 100).
+		WillReturnRows(sqlmock.NewRows(columns))
+
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-empty"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-empty/activity", nil)
+
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp []interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp) != 0 {
+		t.Errorf("expected empty array, got %d items", len(resp))
+	}
+}
+
+// ---------- TestActivityHandler_ListCustomLimit ----------
+
+func TestActivityHandler_ListCustomLimit(t *testing.T) {
+	mock := setupTestDB(t)
+
+	columns := []string{
+		"id", "workspace_id", "activity_type", "source_id", "target_id", "method",
+		"summary", "request_body", "response_body", "duration_ms", "status", "error_detail", "created_at",
+	}
+	mock.ExpectQuery("SELECT id, workspace_id, activity_type").
+		WithArgs("ws-1", 10).
+		WillReturnRows(sqlmock.NewRows(columns))
+
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity?limit=10", nil)
+
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// ---------- TestActivityHandler_ListMaxLimit ----------
+
+func TestActivityHandler_ListMaxLimit(t *testing.T) {
+	mock := setupTestDB(t)
+
+	columns := []string{
+		"id", "workspace_id", "activity_type", "source_id", "target_id", "method",
+		"summary", "request_body", "response_body", "duration_ms", "status", "error_detail", "created_at",
+	}
+	// Even though client requests 9999, server caps at 500
+	mock.ExpectQuery("SELECT id, workspace_id, activity_type").
+		WithArgs("ws-1", 500).
+		WillReturnRows(sqlmock.NewRows(columns))
+
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity?limit=9999", nil)
+
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// ---------- TestActivityHandler_ReportAllValidTypes ----------
+
+func TestActivityHandler_ReportAllValidTypes(t *testing.T) {
+	validTypes := []string{"a2a_send", "a2a_receive", "task_update", "agent_log", "error"}
+
+	for _, actType := range validTypes {
+		t.Run(actType, func(t *testing.T) {
+			mock := setupTestDB(t)
+			setupTestRedis(t)
+			broadcaster := newTestBroadcaster()
+			handler := NewActivityHandler(broadcaster)
+
+			mock.ExpectExec("INSERT INTO activity_logs").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+			body := fmt.Sprintf(`{"activity_type":"%s","summary":"test %s"}`, actType, actType)
+			c.Request = httptest.NewRequest("POST", "/workspaces/ws-1/activity", bytes.NewBufferString(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			handler.Report(c)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("expected 200 for type %s, got %d: %s", actType, w.Code, w.Body.String())
+			}
+
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unmet expectations for type %s: %v", actType, err)
+			}
+		})
+	}
+}
+
+// ---------- TestActivityHandler_ReportMissingBody ----------
+
+func TestActivityHandler_ReportMissingBody(t *testing.T) {
+	setupTestDB(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-1/activity", bytes.NewBufferString("{}"))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Report(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing activity_type, got %d", w.Code)
+	}
+}
+
+// ---------- TestWorkspaceGet_CurrentTask ----------
+
+func TestWorkspaceGet_CurrentTask(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp/configs")
+
+	columns := []string{
+		"id", "name", "role", "tier", "status", "agent_card", "url",
+		"parent_id", "active_tasks", "last_error_rate", "last_sample_error",
+		"uptime_seconds", "current_task", "x", "y", "collapsed",
+	}
+	mock.ExpectQuery("SELECT w.id, w.name").
+		WithArgs("ws-task").
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(
+			"ws-task", "Task Worker", "worker", 1, "online", []byte("null"), "http://localhost:9000",
+			nil, 2, 0.0, "", 300, "Analyzing document", 10.0, 20.0, false,
+		))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-task"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-task", nil)
+
+	handler.Get(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp["current_task"] != "Analyzing document" {
+		t.Errorf("expected current_task 'Analyzing document', got %v", resp["current_task"])
+	}
+	if resp["active_tasks"] != float64(2) {
+		t.Errorf("expected active_tasks 2, got %v", resp["active_tasks"])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

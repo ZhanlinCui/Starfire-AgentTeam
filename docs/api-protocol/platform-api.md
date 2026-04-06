@@ -113,6 +113,21 @@ See [Registry & Heartbeat](./registry-and-heartbeat.md) for the full flow.
 
 Communication topology is derived from the `parent_id` hierarchy — there is no manual connection wiring. See [Communication Rules](./communication-rules.md).
 
+### Activity Logs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/workspaces/:id/activity` | List activity logs (params: `type`, `limit`) |
+| `POST` | `/workspaces/:id/activity` | Agent self-reports activity (body: `{ activity_type, method?, summary?, target_id?, status?, error_detail?, duration_ms?, metadata? }`) |
+
+Activity types: `a2a_send`, `a2a_receive`, `task_update`, `agent_log`, `error`. Invalid types return 400. Limit defaults to 100, max 500. A2A proxy calls are logged automatically.
+
+### Traces (Langfuse)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/workspaces/:id/traces` | List recent LLM traces from Langfuse (proxied) |
+
 ### Events
 
 | Method | Path | Description |
@@ -173,7 +188,9 @@ Both canvas clients and workspace agents connect to the same WebSocket endpoint.
 DATABASE_URL=postgres://dev:dev@postgres:5432/agentmolecule
 REDIS_URL=redis://redis:6379
 PORT=8080
-SECRETS_ENCRYPTION_KEY=...   # AES-256 key for workspace_secrets table
+SECRETS_ENCRYPTION_KEY=...                # AES-256 key for workspace_secrets table
+ACTIVITY_RETENTION_DAYS=7                 # How long to keep activity logs (default: 7)
+ACTIVITY_CLEANUP_INTERVAL_HOURS=6         # How often to purge old logs (default: 6)
 ```
 
 ## Related Docs

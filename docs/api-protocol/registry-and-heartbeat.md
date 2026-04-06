@@ -34,12 +34,15 @@ await platform.post("/registry/heartbeat", json={
     # informational — shown on canvas node tooltip
     "active_tasks": task_counter.current,         # how many tasks running now
     "uptime_seconds": time.time() - START_TIME,   # how long since container start
+    "current_task": current_task_description,      # what the agent is working on
 })
 ```
 
-Four fields only. Memory usage, CPU, queue depth — those are infrastructure metrics for Prometheus/Grafana or CloudWatch. The platform registry is a service discovery layer, not a metrics store.
+Five fields. Memory usage, CPU, queue depth — those are infrastructure metrics for Prometheus/Grafana or CloudWatch. The platform registry is a service discovery layer, not a metrics store.
 
 `active_tasks` is included because the canvas uses it for a busy indicator on the node, and it sets up backpressure for Phase 2 without a schema change.
+
+`current_task` is a human-readable description of what the agent is currently working on. The platform stores it in `workspaces.current_task` and broadcasts a `TASK_UPDATED` WebSocket event only when the value changes (not on every heartbeat). The canvas shows it as an amber banner on the workspace node and side panel header.
 
 The platform:
 1. Overwrites heartbeat columns in Postgres (latest snapshot only — no history)
@@ -56,11 +59,13 @@ func HandleHeartbeat(workspaceID string, stats HeartbeatStats) {
             last_error_rate   = $2,
             last_sample_error = $3,
             active_tasks      = $4,
-            uptime_seconds    = $5
+            uptime_seconds    = $5,
+            current_task      = $6
         WHERE id = $1
     `, workspaceID,
        stats.ErrorRate, stats.SampleError,
        stats.ActiveTasks, stats.UptimeSeconds,
+       stats.CurrentTask,
     )
     redis.Refresh(workspaceID, 60*time.Second)
     evaluateStatusTransition(workspaceID, stats)

@@ -62,6 +62,25 @@ func (b *Broadcaster) RecordAndBroadcast(ctx context.Context, eventType string, 
 	return nil
 }
 
+// BroadcastOnly sends a WebSocket event without recording in structure_events.
+// Used for high-frequency events like activity logs that have their own table.
+func (b *Broadcaster) BroadcastOnly(workspaceID string, eventType string, payload interface{}) {
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("BroadcastOnly: marshal error: %v", err)
+		return
+	}
+
+	msg := models.WSMessage{
+		Event:       eventType,
+		WorkspaceID: workspaceID,
+		Timestamp:   time.Now().UTC(),
+		Payload:     payloadJSON,
+	}
+
+	b.hub.Broadcast(msg)
+}
+
 // Subscribe listens to Redis pub/sub and relays events to the WebSocket hub.
 func (b *Broadcaster) Subscribe(ctx context.Context) {
 	sub := db.RDB.Subscribe(ctx, broadcastChannel)
