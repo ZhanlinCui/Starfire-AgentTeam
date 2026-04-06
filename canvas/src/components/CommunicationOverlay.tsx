@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useCanvasStore } from "@/store/canvas";
 import { api } from "@/lib/api";
 
@@ -26,11 +26,13 @@ export function CommunicationOverlay() {
   const [visible, setVisible] = useState(true);
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
   const nodes = useCanvasStore((s) => s.nodes);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
 
   const fetchComms = useCallback(async () => {
     try {
       // Fetch activity from all online workspaces
-      const onlineNodes = nodes.filter((n) => n.data.status === "online");
+      const onlineNodes = nodesRef.current.filter((n) => n.data.status === "online");
       const allComms: Communication[] = [];
 
       for (const node of onlineNodes.slice(0, 6)) {
@@ -85,7 +87,7 @@ export function CommunicationOverlay() {
     } catch {
       // Silently handle API errors
     }
-  }, [nodes]);
+  }, []);
 
   useEffect(() => {
     fetchComms();

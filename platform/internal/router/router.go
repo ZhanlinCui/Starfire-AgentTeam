@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/events"
@@ -19,8 +20,13 @@ import (
 func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provisioner, platformURL, configsDir string) *gin.Engine {
 	r := gin.Default()
 
+	// CORS origins — configurable via CORS_ORIGINS env var (comma-separated)
+	corsOrigins := []string{"http://localhost:3000", "http://localhost:3001"}
+	if v := os.Getenv("CORS_ORIGINS"); v != "" {
+		corsOrigins = strings.Split(v, ",")
+	}
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001"},
+		AllowOrigins:     corsOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "X-Workspace-ID"},
 		AllowCredentials: true,

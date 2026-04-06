@@ -191,6 +191,8 @@ PORT=8080
 SECRETS_ENCRYPTION_KEY=...                # AES-256 key for workspace_secrets table
 ACTIVITY_RETENTION_DAYS=7                 # How long to keep activity logs (default: 7)
 ACTIVITY_CLEANUP_INTERVAL_HOURS=6         # How often to purge old logs (default: 6)
+CORS_ORIGINS=http://localhost:3000,http://localhost:3001  # Comma-separated allowed origins
+RATE_LIMIT=100                            # Requests per minute per IP (default: 100)
 ```
 
 ## Related Docs

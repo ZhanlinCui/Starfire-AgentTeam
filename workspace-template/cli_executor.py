@@ -121,10 +121,10 @@ class CLIAgentExecutor(AgentExecutor):
                 }
             })
             fd, self._mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="a2a-mcp-")
+            self._temp_files.append(self._mcp_config_path)  # Track immediately
             os.close(fd)
             with open(self._mcp_config_path, "w") as f:
                 f.write(mcp_config)
-            self._temp_files.append(self._mcp_config_path)
 
         # Verify command exists
         cmd = self.config.command or self.preset["command"]
@@ -152,6 +152,7 @@ class CLIAgentExecutor(AgentExecutor):
     def _create_auth_helper(self, token: str) -> str:
         """Create a shell script that outputs the auth token (for apiKeyHelper pattern)."""
         fd, helper_path = tempfile.mkstemp(suffix=".sh", prefix="agent-auth-")
+        self._temp_files.append(helper_path)  # Track immediately before any exception can leak
         os.close(fd)
         with open(helper_path, "w") as f:
             f.write(f"#!/bin/sh\necho {shlex.quote(token)}\n")
@@ -228,16 +229,16 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         if self._mcp_config_path:
             args.extend(["--mcp-config", self._mcp_config_path])
 
-        # Prompt
+        # Extra args from config (before prompt so flags are parsed correctly)
+        args.extend(self.config.args)
+
+        # Prompt (must be last — some CLIs treat final arg as the prompt)
         prompt_flag = self.preset.get("prompt_flag")
         if prompt_flag:
             args.extend([prompt_flag, message])
         else:
             # Positional prompt (ollama)
             args.append(message)
-
-        # Extra args from config
-        args.extend(self.config.args)
 
         return [cmd] + args
 

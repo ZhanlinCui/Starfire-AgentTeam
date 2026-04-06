@@ -317,7 +317,7 @@ async def main():
             chunk = await reader.read(65536)
             if not chunk:
                 break
-            buffer += chunk.decode()
+            buffer += chunk.decode(errors="replace")
 
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)

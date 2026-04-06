@@ -173,6 +173,11 @@ function CanvasInner() {
   const viewport = useCanvasStore((s) => s.viewport);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Cleanup debounced save timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(saveTimerRef.current);
+  }, []);
+
   const onMoveEnd = useCallback(
     (_event: unknown, vp: { x: number; y: number; zoom: number }) => {
       // Debounce viewport saves to avoid spamming the API

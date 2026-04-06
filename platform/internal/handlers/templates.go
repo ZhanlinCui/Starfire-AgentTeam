@@ -75,7 +75,7 @@ func writeFiles(destDir string, files map[string]string) error {
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", relPath, err)
 		}
-		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(fullPath, []byte(content), 0600); err != nil {
 			return fmt.Errorf("failed to write %s: %w", relPath, err)
 		}
 	}
@@ -160,7 +160,7 @@ func (h *TemplatesHandler) Import(c *gin.Context) {
 	// Auto-generate config.yaml if not provided
 	if _, exists := body.Files["config.yaml"]; !exists {
 		cfg := generateDefaultConfig(body.Name, body.Files)
-		if err := os.WriteFile(filepath.Join(destDir, "config.yaml"), []byte(cfg), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(destDir, "config.yaml"), []byte(cfg), 0600); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config.yaml"})
 			return
 		}
@@ -214,7 +214,7 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 	if _, exists := body.Files["config.yaml"]; !exists {
 		if _, err := os.Stat(configYamlPath); os.IsNotExist(err) {
 			cfg := generateDefaultConfig(wsName, body.Files)
-			if err := os.WriteFile(configYamlPath, []byte(cfg), 0644); err != nil {
+			if err := os.WriteFile(configYamlPath, []byte(cfg), 0600); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config.yaml"})
 				return
 			}
@@ -342,7 +342,7 @@ func (h *TemplatesHandler) WriteFile(c *gin.Context) {
 
 	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
-	if err := os.WriteFile(fullPath, []byte(body.Content), 0644); err != nil {
+	if err := os.WriteFile(fullPath, []byte(body.Content), 0600); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file"})
 		return
 	}

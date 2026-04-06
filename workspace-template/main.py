@@ -51,6 +51,9 @@ async def main():
     config = load_config(config_path)
     port = config.a2a.port
 
+    valid_runtimes = {"langgraph", "claude-code", "codex", "ollama", "custom"}
+    if config.runtime not in valid_runtimes:
+        print(f"WARNING: Unknown runtime '{config.runtime}', treating as custom CLI. Valid: {', '.join(sorted(valid_runtimes))}")
     is_cli_runtime = config.runtime != "langgraph"
     loaded_skills = []
     system_prompt = None

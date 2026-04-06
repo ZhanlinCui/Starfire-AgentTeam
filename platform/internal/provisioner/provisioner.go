@@ -140,6 +140,8 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	}
 
 	if err := p.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		// Clean up created container on start failure
+		_ = p.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return "", fmt.Errorf("failed to start container: %w", err)
 	}
 

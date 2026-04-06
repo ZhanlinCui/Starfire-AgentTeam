@@ -245,28 +245,36 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	if name, ok := body["name"]; ok {
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET name = $2, updated_at = now() WHERE id = $1`, id, name)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET name = $2, updated_at = now() WHERE id = $1`, id, name); err != nil {
+			log.Printf("Update name error for %s: %v", id, err)
+		}
 	}
 	if role, ok := body["role"]; ok {
-		// nil or null from JSON becomes nil interface → SQL NULL
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET role = $2, updated_at = now() WHERE id = $1`, id, role)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET role = $2, updated_at = now() WHERE id = $1`, id, role); err != nil {
+			log.Printf("Update role error for %s: %v", id, err)
+		}
 	}
 	if tier, ok := body["tier"]; ok {
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET tier = $2, updated_at = now() WHERE id = $1`, id, tier)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET tier = $2, updated_at = now() WHERE id = $1`, id, tier); err != nil {
+			log.Printf("Update tier error for %s: %v", id, err)
+		}
 	}
 	if parentID, ok := body["parent_id"]; ok {
-		// JSON null → Go nil → SQL NULL. JSON string → UUID text.
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET parent_id = $2, updated_at = now() WHERE id = $1`, id, parentID)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET parent_id = $2, updated_at = now() WHERE id = $1`, id, parentID); err != nil {
+			log.Printf("Update parent_id error for %s: %v", id, err)
+		}
 	}
 
 	// Update canvas position if both x and y provided
 	if x, xOk := body["x"]; xOk {
 		if y, yOk := body["y"]; yOk {
-			db.DB.ExecContext(ctx, `
+			if _, err := db.DB.ExecContext(ctx, `
 				INSERT INTO canvas_layouts (workspace_id, x, y)
 				VALUES ($1, $2, $3)
 				ON CONFLICT (workspace_id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y
-			`, id, x, y)
+			`, id, x, y); err != nil {
+				log.Printf("Update position error for %s: %v", id, err)
+			}
 		}
 	}
 
@@ -316,8 +324,12 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		if h.provisioner != nil {
 			h.provisioner.Stop(ctx, childID)
 		}
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, childID)
-		db.DB.ExecContext(ctx, `DELETE FROM canvas_layouts WHERE workspace_id = $1`, childID)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, childID); err != nil {
+			log.Printf("Delete child %s status update error: %v", childID, err)
+		}
+		if _, err := db.DB.ExecContext(ctx, `DELETE FROM canvas_layouts WHERE workspace_id = $1`, childID); err != nil {
+			log.Printf("Delete child %s layout error: %v", childID, err)
+		}
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", childID, map[string]interface{}{})
 	}
 
@@ -325,8 +337,12 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	if h.provisioner != nil {
 		h.provisioner.Stop(ctx, id)
 	}
-	db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, id)
-	db.DB.ExecContext(ctx, `DELETE FROM canvas_layouts WHERE workspace_id = $1`, id)
+	if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, id); err != nil {
+		log.Printf("Delete %s status update error: %v", id, err)
+	}
+	if _, err := db.DB.ExecContext(ctx, `DELETE FROM canvas_layouts WHERE workspace_id = $1`, id); err != nil {
+		log.Printf("Delete %s layout error: %v", id, err)
+	}
 
 	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", id, map[string]interface{}{
 		"cascade_deleted": len(children),

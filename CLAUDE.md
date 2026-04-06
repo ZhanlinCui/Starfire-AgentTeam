@@ -39,7 +39,7 @@ go run ./cmd/server          # Run server (requires Postgres + Redis running)
 go build -o molecli ./cmd/cli  # Build TUI dashboard
 ./molecli                    # Run TUI dashboard (requires platform running)
 ```
-Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`).
+Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`), `CORS_ORIGINS` (comma-separated, default `http://localhost:3000,http://localhost:3001`), `RATE_LIMIT` (requests/min, default `100`).
 
 `molecli` reads `MOLECLI_URL` (default http://localhost:8080) to locate the platform. Logs are written to `molecli.log` in the working directory (already covered by `*.log` in `.gitignore`).
 

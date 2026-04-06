@@ -26,6 +26,13 @@ export function ContextMenu() {
   const contextNodeId = contextMenu?.nodeId ?? null;
   const hasChildren = useCanvasStore((s) => contextNodeId ? s.nodes.some((n) => n.data.parentId === contextNodeId) : false);
   const ref = useRef<HTMLDivElement>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Clear orphaned dialog state when context menu closes
+  useEffect(() => {
+    if (!contextMenu) setDeleteConfirm(null);
+  }, [contextMenu]);
 
   // Close on click outside or Escape
   useEffect(() => {
@@ -47,7 +54,8 @@ export function ContextMenu() {
   }, [contextMenu, closeContextMenu]);
 
   const handleExportBundle = useCallback(async () => {
-    if (!contextMenu) return;
+    if (!contextMenu || actionLoading) return;
+    setActionLoading(true);
     try {
       const bundle = await api.get<Record<string, unknown>>(`/bundles/export/${contextMenu.nodeId}`);
       const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
@@ -60,20 +68,25 @@ export function ContextMenu() {
       showToast("Bundle exported", "success");
     } catch (e) {
       showToast("Export failed", "error");
+    } finally {
+      setActionLoading(false);
     }
     closeContextMenu();
-  }, [contextMenu, closeContextMenu]);
+  }, [contextMenu, closeContextMenu, actionLoading]);
 
   const handleDuplicate = useCallback(async () => {
-    if (!contextMenu) return;
+    if (!contextMenu || actionLoading) return;
+    setActionLoading(true);
     try {
       const bundle = await api.get<Record<string, unknown>>(`/bundles/export/${contextMenu.nodeId}`);
       await api.post("/bundles/import", bundle);
     } catch (e) {
       showToast("Duplicate failed", "error");
+    } finally {
+      setActionLoading(false);
     }
     closeContextMenu();
-  }, [contextMenu, closeContextMenu]);
+  }, [contextMenu, closeContextMenu, actionLoading]);
 
   const handleRestart = useCallback(async () => {
     if (!contextMenu) return;
@@ -85,8 +98,6 @@ export function ContextMenu() {
     }
     closeContextMenu();
   }, [contextMenu, updateNodeData, closeContextMenu]);
-
-  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
 
   const handleDelete = useCallback(() => {
     if (!contextMenu) return;

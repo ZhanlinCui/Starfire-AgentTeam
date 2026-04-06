@@ -51,11 +51,12 @@ function saveSessions(workspaceId: string, sessions: ChatSession[]) {
 }
 
 export function ChatTab({ workspaceId, data }: Props) {
-  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions(workspaceId));
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    const loaded = loadSessions(workspaceId);
-    return loaded.length > 0 ? loaded[loaded.length - 1].id : "";
+  const [initData] = useState(() => {
+    const s = loadSessions(workspaceId);
+    return { sessions: s, activeId: s.length > 0 ? s[s.length - 1].id : "" };
   });
+  const [sessions, setSessions] = useState<ChatSession[]>(initData.sessions);
+  const [activeSessionId, setActiveSessionId] = useState<string>(initData.activeId);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [thinkingStartTime, setThinkingStartTime] = useState<number>(0);
@@ -127,7 +128,7 @@ export function ChatTab({ workspaceId, data }: Props) {
     let statusIdx = 0;
     setThinkingStatus(statuses[0]);
     const timer = setInterval(() => {
-      setThinkingElapsed(Math.floor((Date.now() - Date.now() + thinkingStartTime) / 1000) || Math.floor((Date.now() - thinkingStartTime) / 1000));
+      setThinkingElapsed(Math.floor((Date.now() - thinkingStartTime) / 1000));
       statusIdx = Math.min(statusIdx + 1, statuses.length - 1);
       setThinkingStatus(statuses[statusIdx]);
     }, 3000);

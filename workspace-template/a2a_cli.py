@@ -80,13 +80,13 @@ async def delegate(target_id: str, task: str, async_mode: bool = False):
                     "target_url": target_url,
                 }))
             except httpx.TimeoutException:
-                # Task was sent but we didn't wait for completion
+                # Request was sent but we didn't get confirmation — task may or may not have been received
                 print(json.dumps({
                     "task_id": task_id,
                     "target": target_id,
-                    "status": "submitted_timeout",
-                    "note": "Task sent but response timed out. Use 'a2a status' to check later.",
-                }))
+                    "status": "uncertain",
+                    "note": "Request sent but response timed out — delivery unconfirmed. Use 'a2a status' to check.",
+                }), file=sys.stderr)
         return
 
     # Sync: wait for full response with retry on rate limit
@@ -109,7 +109,11 @@ async def delegate(target_id: str, task: str, async_mode: bool = False):
                         },
                     },
                 )
-                data = resp.json()
+                try:
+                    data = resp.json()
+                except Exception:
+                    print(f"Error: invalid JSON response (status {resp.status_code})", file=sys.stderr)
+                    sys.exit(1)
                 if "result" in data:
                     parts = data["result"].get("parts", [])
                     text = parts[0].get("text", "") if parts else ""
