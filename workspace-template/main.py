@@ -58,6 +58,9 @@ async def main():
     loaded_skills = []
     system_prompt = None
 
+    # Create heartbeat early so CLI executor can push task updates
+    heartbeat = HeartbeatLoop(platform_url, workspace_id)
+
     if is_cli_runtime:
         # CLI runtimes (claude-code, codex, ollama, custom)
         # Skip LangGraph-specific setup (plugins, skills, tools, coordinator)
@@ -75,6 +78,7 @@ async def main():
             runtime_config=config.runtime_config,
             system_prompt=system_prompt,
             config_path=config_path,
+            heartbeat=heartbeat,
         )
     else:
         # LangGraph runtime — full setup
@@ -209,8 +213,7 @@ async def main():
         except Exception as e:
             print(f"Warning: failed to register with platform: {e}")
 
-    # 5. Start heartbeat
-    heartbeat = HeartbeatLoop(platform_url, workspace_id)
+    # 5. Start heartbeat (created earlier for CLI executor task tracking)
     heartbeat.start()
 
     # 6. Run the A2A server

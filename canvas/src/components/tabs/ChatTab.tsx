@@ -441,10 +441,15 @@ export function ChatTab({ workspaceId, data }: Props) {
 
         {/* Input */}
         <div className="p-4 border-t border-zinc-700">
-          <div className="flex gap-2">
-            <input
+          <div className="flex gap-2 items-end">
+            <textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize: reset height then set to scrollHeight
+                e.target.style.height = "auto";
+                e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -455,14 +460,16 @@ export function ChatTab({ workspaceId, data }: Props) {
               placeholder={
                 !isOnline ? `Agent is ${data.status}` :
                 !agentReachable ? "Agent not responding — try restarting" :
-                "Send a message..."
+                "Send a message... (Shift+Enter for new line)"
               }
-              className="flex-1 bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              rows={1}
+              className="flex-1 bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 disabled:opacity-50 resize-none overflow-y-auto"
+              style={{ maxHeight: "200px" }}
             />
             <button
               onClick={sendMessage}
               disabled={!isOnline || !agentReachable || sending || !input.trim()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm text-white disabled:opacity-30 disabled:hover:bg-blue-600 transition-colors"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm text-white disabled:opacity-30 disabled:hover:bg-blue-600 transition-colors shrink-0"
             >
               Send
             </button>

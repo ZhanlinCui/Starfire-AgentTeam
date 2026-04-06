@@ -26,6 +26,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import httpx
+
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.utils import new_agent_text_message
@@ -81,11 +83,14 @@ class CLIAgentExecutor(AgentExecutor):
         runtime_config: RuntimeConfig,
         system_prompt: str | None = None,
         config_path: str = "/configs",
+        heartbeat: "HeartbeatLoop | None" = None,
     ):
         self.runtime = runtime
         self.config = runtime_config
+        self._session_id: str | None = None  # Claude Code session ID for conversation continuity
         self.system_prompt = system_prompt
         self.config_path = config_path
+        self._heartbeat = heartbeat
 
         # Resolve preset or use custom
         if runtime in RUNTIME_PRESETS:
@@ -188,6 +193,36 @@ You can delegate tasks to other workspaces using the a2a command:
 For quick questions, use sync delegate. For long tasks, use --async + status.
 Only delegate to peers listed by the peers command (access control enforced)."""
 
+    async def _set_current_task(self, task: str):
+        """Update current task on heartbeat and push immediately via platform API."""
+        if self._heartbeat:
+            self._heartbeat.current_task = task
+            self._heartbeat.active_tasks = 1 if task else 0
+        # Push immediately via platform API for real-time canvas update
+        workspace_id = os.environ.get("WORKSPACE_ID", "")
+        platform_url = os.environ.get("PLATFORM_URL", "")
+        if workspace_id and platform_url:
+            try:
+                await self._get_http_client().post(
+                    f"{platform_url}/registry/heartbeat",
+                    json={
+                        "workspace_id": workspace_id,
+                        "current_task": task,
+                        "active_tasks": 1 if task else 0,
+                        "error_rate": 0,
+                        "sample_error": "",
+                        "uptime_seconds": 0,
+                    },
+                )
+            except Exception:
+                pass  # Best-effort
+
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """Lazy-init a shared httpx client for platform API calls."""
+        if not hasattr(self, "_http_client") or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(timeout=5.0)
+        return self._http_client
+
     def _get_system_prompt(self) -> str | None:
         """Get system prompt — re-read from file each time (supports hot-reload)."""
         prompt_file = Path(self.config_path) / "system-prompt.md"
@@ -200,6 +235,11 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         cmd = self.config.command or self.preset["command"]
         args = list(self.preset.get("base_args", []))
 
+        # Session continuity — resume previous conversation if we have a session ID
+        # Only for claude-code which supports --resume
+        if self._session_id and self.runtime == "claude-code":
+            args.extend(["--resume", self._session_id])
+
         # Model
         model = self.config.model or None
         model_flag = self.preset.get("model_flag")
@@ -209,16 +249,16 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             # Ollama: model is positional after "run"
             args.append(model)
 
-        # System prompt — re-read each time for hot-reload
-        # Inject A2A delegation instructions into the system prompt
-        system_prompt = self._get_system_prompt() or ""
-        a2a_instructions = self._get_a2a_instructions()
-        if a2a_instructions:
-            system_prompt = f"{system_prompt}\n\n{a2a_instructions}" if system_prompt else a2a_instructions
+        # System prompt — only on first message (resumed sessions already have it)
+        if not self._session_id:
+            system_prompt = self._get_system_prompt() or ""
+            a2a_instructions = self._get_a2a_instructions()
+            if a2a_instructions:
+                system_prompt = f"{system_prompt}\n\n{a2a_instructions}" if system_prompt else a2a_instructions
 
-        system_flag = self.preset.get("system_prompt_flag")
-        if system_prompt and system_flag:
-            args.extend([system_flag, system_prompt])
+            system_flag = self.preset.get("system_prompt_flag")
+            if system_prompt and system_flag:
+                args.extend([system_flag, system_prompt])
 
         # Auth (apiKeyHelper pattern for claude-code)
         if self._auth_helper_path and self.preset.get("auth_pattern") == "apiKeyHelper":
@@ -228,6 +268,10 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         # A2A MCP server — inject for MCP-compatible runtimes (created once in __init__)
         if self._mcp_config_path:
             args.extend(["--mcp-config", self._mcp_config_path])
+
+        # JSON output for claude-code to capture session ID
+        if self.runtime == "claude-code":
+            args.extend(["--output-format", "json"])
 
         # Extra args from config (before prompt so flags are parsed correctly)
         args.extend(self.config.args)
@@ -260,8 +304,19 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             )
             return
 
+        # Show current task on canvas — truncate to a readable summary
+        task_summary = user_input[:80] + ("..." if len(user_input) > 80 else "")
+        await self._set_current_task(task_summary)
+
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
 
+        try:
+            await self._run_cli(user_input, event_queue)
+        finally:
+            await self._set_current_task("")
+
+    async def _run_cli(self, user_input: str, event_queue: EventQueue):
+        """Run the CLI subprocess and enqueue the result."""
         cmd = self._build_command(user_input)
         timeout = self.config.timeout or None  # None = no timeout (wait until agent finishes)
         max_retries = 3
@@ -298,6 +353,20 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                                  self.runtime, proc.returncode,
                                  stdout_text[:200] if stdout_text else "(empty)",
                                  stderr_text[:500] if stderr_text else "(empty)")
+
+                # Parse JSON output from claude-code to extract session_id and result text
+                if self.runtime == "claude-code" and stdout_text:
+                    try:
+                        out = json.loads(stdout_text)
+                        if isinstance(out, dict):
+                            # Capture session ID for conversation continuity
+                            sid = out.get("session_id")
+                            if sid:
+                                self._session_id = sid
+                            # Extract the text result
+                            stdout_text = out.get("result", "") or ""
+                    except json.JSONDecodeError:
+                        pass  # Not JSON — use raw output
 
                 if proc.returncode == 0 or stdout_text:
                     # Success, or non-zero exit but produced output (some CLIs exit 1 with valid output)

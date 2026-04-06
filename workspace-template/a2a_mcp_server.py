@@ -167,21 +167,37 @@ TOOLS = [
 ]
 
 
-async def report_activity(activity_type: str, target_id: str = "", summary: str = "", status: str = "ok"):
+async def report_activity(activity_type: str, target_id: str = "", summary: str = "", status: str = "ok", task_text: str = ""):
     """Report activity to the platform for live progress tracking."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
+            payload: dict = {
+                "activity_type": activity_type,
+                "source_id": WORKSPACE_ID,
+                "target_id": target_id,
+                "method": "message/send",
+                "summary": summary,
+                "status": status,
+            }
+            if task_text:
+                payload["request_body"] = {"task": task_text}
             await client.post(
                 f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/activity",
-                json={
-                    "activity_type": activity_type,
-                    "source_id": WORKSPACE_ID,
-                    "target_id": target_id,
-                    "method": "message/send",
-                    "summary": summary,
-                    "status": status,
-                },
+                json=payload,
             )
+            # Also push current_task via heartbeat for canvas card display
+            if summary:
+                await client.post(
+                    f"{PLATFORM_URL}/registry/heartbeat",
+                    json={
+                        "workspace_id": WORKSPACE_ID,
+                        "current_task": summary,
+                        "active_tasks": 1,
+                        "error_rate": 0,
+                        "sample_error": "",
+                        "uptime_seconds": 0,
+                    },
+                )
     except Exception:
         pass  # Best-effort — don't block delegation on activity reporting
 
@@ -203,9 +219,9 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
         if not target_url:
             return f"Error: workspace {target_id} has no URL (may be offline)"
 
-        # Report delegation start
+        # Report delegation start — include the task text for traceability
         peer_name = peer.get("name", target_id[:8])
-        await report_activity("a2a_send", target_id, f"Delegating to {peer_name}")
+        await report_activity("a2a_send", target_id, f"Delegating to {peer_name}", task_text=task)
 
         # Send A2A message
         result = await send_a2a_message(target_url, task)

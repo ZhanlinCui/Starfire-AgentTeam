@@ -80,8 +80,8 @@ Clicking a workspace node opens a **480px-wide side panel** on the right edge of
 | Tab | Component | Description |
 |-----|-----------|-------------|
 | **Details** | `DetailsTab` | Inline editing of name/role/tier, editable Agent Card (JSON), Restart button for offline/failed, peer list, delete with confirmation |
-| **Activity** | `ActivityTab` | Comprehensive activity log — A2A communications (with request/response bodies, duration), task updates, agent logs, errors. Type filters, auto-refresh (5s), expandable JSON details |
-| **Chat** | `ChatTab` | Send A2A `message/send` via platform proxy (no timeout), markdown rendering for agent responses (react-markdown + remark-gfm + @tailwindcss/typography), plain text for user/system messages, **live activity feed** showing delegation progress via WebSocket (`→ Delegating to...`, `← responded`), session persistence (localStorage), user-friendly error messages |
+| **Activity** | `ActivityTab` | Comprehensive activity log — A2A communications (with request/response bodies, duration), task updates, agent logs, errors. Type filters, auto-refresh (5s), expandable JSON details with message previews. Workspace names resolved from IDs. **Full Trace** button opens cross-workspace conversation timeline modal |
+| **Chat** | `ChatTab` | Send A2A `message/send` via platform proxy (no timeout), **session continuity** (Claude Code `--resume`), markdown rendering for agent responses, plain text for user/system, live activity feed via WebSocket, multi-line textarea input (Shift+Enter for newline), session persistence (localStorage) |
 | **Settings** | `SettingsTab` | Configure LLM provider + API keys per workspace via `/workspaces/:id/secrets`, quick-set rows for common keys |
 | **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
 | **Files** | `FilesTab` | VS Code-style file explorer with tree view, inline editor, create/delete files |

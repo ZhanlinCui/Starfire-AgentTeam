@@ -92,9 +92,19 @@ runtime_config:
 
 Invokes: `my-agent --flag1 --flag2 -p "<message>"`
 
+## Session Continuity (Claude Code)
+
+Claude Code workspaces maintain conversation state across messages using the `--resume` flag:
+
+1. **First message**: runs with `--output-format json` to capture the `session_id` from the response
+2. **Subsequent messages**: runs with `--resume <session_id>` to continue the same conversation
+3. **System prompt**: only injected on the first message — resumed sessions already have it
+
+Session state is stored inside the container at `~/.claude/` and persists across messages but resets on container restart. This means the PM remembers what you discussed earlier in the conversation.
+
 ## System Prompt
 
-CLI runtimes load `system-prompt.md` from the workspace's config directory (`/configs/system-prompt.md`). The prompt is **re-read on every A2A request** (not cached at startup), enabling hot-reload — update the file via the API and the next request uses the new prompt.
+CLI runtimes load `system-prompt.md` from the workspace's config directory (`/configs/system-prompt.md`). The prompt is injected on the **first message only** (subsequent messages resume the session). Hot-reload still works — restart the container to pick up prompt changes.
 
 For LangGraph runtimes, the system prompt is built from multiple sources (config, skills, plugins, peer capabilities) at startup.
 

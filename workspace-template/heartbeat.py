@@ -14,6 +14,7 @@ class HeartbeatLoop:
         self.error_count = 0
         self.request_count = 0
         self.active_tasks = 0
+        self.current_task = ""
         self.sample_error = ""
         self._task = None
 
@@ -53,6 +54,7 @@ class HeartbeatLoop:
                             "error_rate": self.error_rate,
                             "sample_error": self.sample_error,
                             "active_tasks": self.active_tasks,
+                            "current_task": self.current_task,
                             "uptime_seconds": int(time.time() - self.start_time),
                         },
                     )

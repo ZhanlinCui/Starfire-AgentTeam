@@ -2,25 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { ConversationTraceModal } from "@/components/ConversationTraceModal";
+import { type ActivityEntry } from "@/types/activity";
+import { useWorkspaceName } from "@/hooks/useWorkspaceName";
 
 interface Props {
   workspaceId: string;
-}
-
-interface ActivityEntry {
-  id: string;
-  workspace_id: string;
-  activity_type: string;
-  source_id: string | null;
-  target_id: string | null;
-  method: string | null;
-  summary: string | null;
-  request_body: Record<string, unknown> | null;
-  response_body: Record<string, unknown> | null;
-  duration_ms: number | null;
-  status: string;
-  error_detail: string | null;
-  created_at: string;
 }
 
 type FilterType = "all" | "a2a_receive" | "a2a_send" | "task_update" | "agent_log" | "error";
@@ -55,6 +42,8 @@ export function ActivityTab({ workspaceId }: Props) {
   const [filter, setFilter] = useState<FilterType>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const resolveName = useWorkspaceName();
 
   const loadActivities = useCallback(async () => {
     try {
@@ -109,6 +98,13 @@ export function ActivityTab({ workspaceId }: Props) {
               {autoRefresh ? "⟳ Live" : "⟳ Paused"}
             </button>
             <button
+              onClick={() => setTraceOpen(true)}
+              className="px-2 py-1 bg-blue-900/40 hover:bg-blue-800/50 text-[9px] rounded text-blue-300 border border-blue-800/30"
+              title="View full conversation trace across all workspaces"
+            >
+              Full Trace
+            </button>
+            <button
               onClick={loadActivities}
               className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-[9px] rounded text-zinc-300"
             >
@@ -148,9 +144,16 @@ export function ActivityTab({ workspaceId }: Props) {
             entry={entry}
             expanded={expanded === entry.id}
             onToggle={() => setExpanded(expanded === entry.id ? null : entry.id)}
+            resolveName={resolveName}
           />
         ))}
       </div>
+
+      <ConversationTraceModal
+        open={traceOpen}
+        workspaceId={workspaceId}
+        onClose={() => setTraceOpen(false)}
+      />
     </div>
   );
 }
@@ -159,10 +162,12 @@ function ActivityRow({
   entry,
   expanded,
   onToggle,
+  resolveName,
 }: {
   entry: ActivityEntry;
   expanded: boolean;
   onToggle: () => void;
+  resolveName: (id: string | null) => string;
 }) {
   const typeStyle = TYPE_COLORS[entry.activity_type] || TYPE_COLORS.agent_log;
   const statusStyle = STATUS_ICONS[entry.status] || STATUS_ICONS.ok;
@@ -209,10 +214,12 @@ function ActivityRow({
           </span>
         </div>
 
-        {/* Summary */}
+        {/* Summary — replace raw IDs with workspace names */}
         {entry.summary && (
           <div className="text-[10px] text-zinc-400 mt-1 truncate">
-            {entry.summary}
+            {entry.summary
+              .replace(entry.source_id || "", resolveName(entry.source_id))
+              .replace(entry.target_id || "", resolveName(entry.target_id))}
           </div>
         )}
 
@@ -220,14 +227,14 @@ function ActivityRow({
         {isA2A && (entry.source_id || entry.target_id) && (
           <div className="flex items-center gap-1 mt-1">
             {entry.source_id && (
-              <span className="text-[8px] font-mono text-cyan-400/60 truncate max-w-[120px]" title={entry.source_id}>
-                {entry.source_id.slice(0, 8)}
+              <span className="text-[9px] text-cyan-400/80 truncate max-w-[140px]" title={entry.source_id}>
+                {resolveName(entry.source_id)}
               </span>
             )}
-            <span className="text-[8px] text-zinc-600">→</span>
+            <span className="text-[9px] text-zinc-600">→</span>
             {entry.target_id && (
-              <span className="text-[8px] font-mono text-blue-400/60 truncate max-w-[120px]" title={entry.target_id}>
-                {entry.target_id.slice(0, 8)}
+              <span className="text-[9px] text-blue-400/80 truncate max-w-[140px]" title={entry.target_id}>
+                {resolveName(entry.target_id)}
               </span>
             )}
           </div>
@@ -245,16 +252,23 @@ function ActivityRow({
       {expanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-zinc-700/30 mt-1 pt-2">
           {entry.source_id && (
-            <Detail label="Source" value={entry.source_id} mono />
+            <Detail label="Source" value={`${resolveName(entry.source_id)} (${entry.source_id.slice(0, 8)})`} />
           )}
           {entry.target_id && (
-            <Detail label="Target" value={entry.target_id} mono />
+            <Detail label="Target" value={`${resolveName(entry.target_id)} (${entry.target_id.slice(0, 8)})`} />
+          )}
+          {/* Message preview — extract text from A2A request/response */}
+          {entry.request_body && (
+            <MessagePreview label="Message Sent" body={entry.request_body} />
+          )}
+          {entry.response_body && (
+            <MessagePreview label="Response" body={entry.response_body} />
           )}
           {entry.error_detail && (
             <Detail label="Error" value={entry.error_detail} error />
           )}
           {entry.request_body && (
-            <JsonBlock label="Request" data={entry.request_body} />
+            <JsonBlock label="Raw Request" data={entry.request_body} />
           )}
           {entry.response_body && (
             <JsonBlock label="Response" data={entry.response_body} />
@@ -264,6 +278,54 @@ function ActivityRow({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Extract human-readable text from A2A request/response JSON */
+function MessagePreview({ label, body }: { label: string; body: Record<string, unknown> }) {
+  // Try to extract text from A2A message parts
+  let text = "";
+  try {
+    // Request: params.message.parts[].text
+    const params = body.params as Record<string, unknown> | undefined;
+    const message = params?.message as Record<string, unknown> | undefined;
+    const parts = (message?.parts || []) as Array<Record<string, unknown>>;
+    text = parts
+      .map((p) => (p.text as string) || (p.kind === "text" ? (p.text as string) : ""))
+      .filter(Boolean)
+      .join("\n");
+
+    // Response: result.parts[].text
+    if (!text) {
+      const result = body.result as Record<string, unknown> | undefined;
+      const rParts = (result?.parts || []) as Array<Record<string, unknown>>;
+      text = rParts
+        .map((p) => {
+          if (p.text) return p.text as string;
+          const root = p.root as Record<string, unknown> | undefined;
+          return (root?.text as string) || "";
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+
+    // Fallback: result as string
+    if (!text && typeof body.result === "string") {
+      text = body.result;
+    }
+  } catch {
+    return null;
+  }
+
+  if (!text) return null;
+
+  return (
+    <div>
+      <div className="text-[8px] text-zinc-500 uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-[10px] text-zinc-300 bg-zinc-900/60 rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words">
+        {text.slice(0, 2000)}
+      </div>
     </div>
   );
 }
