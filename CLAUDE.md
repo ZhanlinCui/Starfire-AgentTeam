@@ -52,6 +52,14 @@ npm run build && npm start   # Production
 ```
 Env vars: `NEXT_PUBLIC_PLATFORM_URL` (default http://localhost:8080), `NEXT_PUBLIC_WS_URL` (default ws://localhost:8080/ws).
 
+### Workspace Image
+```bash
+docker build -t workspace-template:latest workspace-template/   # Build unified workspace image
+```
+The unified image supports both LangGraph (Python) and CLI runtimes (Claude Code, Codex, Ollama). Runtime is selected via `config.yaml` → `runtime:` field. See [CLI Runtime docs](./docs/agent-runtime/cli-runtime.md).
+
+For Claude Code runtime, write your OAuth token to `workspace-configs-templates/claude-code-default/.auth-token`.
+
 ### Unit Tests
 ```bash
 cd platform && go test ./...                    # 25 Go handler tests (sqlmock + miniredis)

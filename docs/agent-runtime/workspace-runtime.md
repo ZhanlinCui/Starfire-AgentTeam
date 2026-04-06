@@ -1,4 +1,6 @@
-# Workspace Runtime (Python)
+# Workspace Runtime (LangGraph / Python)
+
+> **New:** CLI runtimes (Claude Code, Codex, Ollama) are also supported. See [CLI Runtime](./cli-runtime.md).
 
 ## workspace-template/
 
