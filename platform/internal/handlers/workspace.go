@@ -435,27 +435,40 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&body)
 
-	template := body.Template
-	if template == "" {
-		// Try to find a config dir matching the workspace name
-		template = findTemplateByName(h.configsDir, wsName)
+	// Resolve config directory in priority order:
+	// 1. Workspace's own config dir (ws-<id>) — has uploaded files
+	// 2. Explicit template from request body
+	// 3. Name-based match
+	// 4. Auto-generate default config
+	idDirName := "ws-" + id
+	if len(idDirName) > 15 {
+		idDirName = idDirName[:15]
+	}
+	configPath := ""
+
+	// Check for workspace's own config dir first
+	ownDir := filepath.Join(h.configsDir, idDirName)
+	if info, err := os.Stat(ownDir); err == nil && info.IsDir() {
+		configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, idDirName))
 	}
 
-	if template == "" {
-		// No template found — revert to offline, can't provision without config
-		db.DB.ExecContext(ctx,
-			`UPDATE workspaces SET status = 'failed', updated_at = now() WHERE id = $1`, id)
-		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISION_FAILED", id, map[string]interface{}{
-			"error": "no matching template found for workspace",
-		})
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "no template found — provide a template name or create a matching config directory",
-			"name":  wsName,
-		})
-		return
+	// Fall back to explicit template or name-based match
+	if configPath == "" {
+		template := body.Template
+		if template == "" {
+			template = findTemplateByName(h.configsDir, wsName)
+		}
+		if template != "" {
+			configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, template))
+		}
 	}
 
-	configPath, _ := filepath.Abs(filepath.Join(h.configsHostDir, template))
+	// Last resort: auto-generate default config
+	if configPath == "" {
+		payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
+		configPath = h.ensureDefaultConfig(id, payload)
+	}
+
 	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
 	go h.provisionWorkspace(id, configPath, payload)
 
