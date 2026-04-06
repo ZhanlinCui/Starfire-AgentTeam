@@ -69,7 +69,7 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
         raise FileNotFoundError(f"Config file not found: {config_file}")
 
     with open(config_file) as f:
-        raw = yaml.safe_load(f)
+        raw = yaml.safe_load(f) or {}
 
     # Override model from env if provided
     model = os.environ.get("MODEL_PROVIDER", raw.get("model", "anthropic:claude-sonnet-4-6"))

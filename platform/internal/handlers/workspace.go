@@ -440,10 +440,7 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	// 2. Explicit template from request body
 	// 3. Name-based match
 	// 4. Auto-generate default config
-	idDirName := "ws-" + id
-	if len(idDirName) > 15 {
-		idDirName = idDirName[:15]
-	}
+	idDirName := configDirName(id)
 	configPath := ""
 
 	// Check for workspace's own config dir first
@@ -491,11 +488,21 @@ func findTemplateByName(configsDir, name string) string {
 	return ""
 }
 
+// configDirName returns the standard config directory name for a workspace ID.
+// Used by ensureDefaultConfig, ReplaceFiles, Restart — must be consistent everywhere.
+func configDirName(workspaceID string) string {
+	id := workspaceID
+	if len(id) > 12 {
+		id = id[:12]
+	}
+	return "ws-" + id
+}
+
 // ensureDefaultConfig creates a minimal config directory for workspaces without a template.
 // Files are written to the container-side path (which is a volume mount from the host).
 // The host-side path is returned for the provisioner to mount into the workspace container.
 func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload models.CreateWorkspacePayload) string {
-	dirName := "ws-" + workspaceID[:12]
+	dirName := configDirName(workspaceID)
 	// Write to the container-side path (which IS the host volume mount)
 	containerPath := filepath.Join(h.configsDir, dirName)
 	os.MkdirAll(containerPath, 0o755)
@@ -518,8 +525,11 @@ func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload model
 		}
 	}
 
+	// Sanitize name/role to prevent YAML injection (strip newlines)
+	safeName := strings.ReplaceAll(strings.ReplaceAll(payload.Name, "\n", " "), "\r", "")
+	safeRole := strings.ReplaceAll(strings.ReplaceAll(payload.Role, "\n", " "), "\r", "")
 	configYAML := fmt.Sprintf("name: %s\ndescription: %s\nversion: 1.0.0\ntier: %d\nruntime: %s\n",
-		payload.Name, payload.Role, payload.Tier, runtime)
+		safeName, safeRole, payload.Tier, runtime)
 
 	if runtime != "langgraph" {
 		configYAML += fmt.Sprintf("runtime_config:\n  model: %s\n  auth_token_file: .auth-token\n  timeout: 300\n", model)

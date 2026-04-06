@@ -50,7 +50,7 @@ async def delegate(target_id: str, task: str):
             target_url,
             json={
                 "jsonrpc": "2.0",
-                "id": f"cli-{WORKSPACE_ID[:8]}",
+                "id": str(uuid.uuid4()),
                 "method": "message/send",
                 "params": {
                     "message": {

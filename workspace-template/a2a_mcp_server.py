@@ -51,7 +51,7 @@ async def send_a2a_message(target_url: str, message: str) -> str:
                 target_url,
                 json={
                     "jsonrpc": "2.0",
-                    "id": f"delegate-{WORKSPACE_ID[:8]}",
+                    "id": str(uuid.uuid4()),
                     "method": "message/send",
                     "params": {
                         "message": {

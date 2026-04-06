@@ -136,7 +136,8 @@ class CLIAgentExecutor(AgentExecutor):
 
     def _create_auth_helper(self, token: str) -> str:
         """Create a shell script that outputs the auth token (for apiKeyHelper pattern)."""
-        helper_path = os.path.join(tempfile.gettempdir(), "agent-auth-helper.sh")
+        fd, helper_path = tempfile.mkstemp(suffix=".sh", prefix="agent-auth-")
+        os.close(fd)
         with open(helper_path, "w") as f:
             f.write(f"#!/bin/sh\necho {shlex.quote(token)}\n")
         os.chmod(helper_path, 0o700)
@@ -213,7 +214,8 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                     }
                 }
             })
-            mcp_config_path = os.path.join(tempfile.gettempdir(), "a2a-mcp.json")
+            fd, mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="a2a-mcp-")
+            os.close(fd)
             with open(mcp_config_path, "w") as f:
                 f.write(mcp_config)
             args.extend(["--mcp-config", mcp_config_path])
@@ -291,6 +293,11 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
         except asyncio.TimeoutError:
             logger.error("CLI agent timeout [%s] after %ds", self.runtime, timeout)
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
             await event_queue.enqueue_event(
                 new_agent_text_message(f"Agent timed out after {timeout}s")
             )

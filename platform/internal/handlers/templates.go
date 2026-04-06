@@ -194,10 +194,7 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 	}
 
 	// Resolve config directory: prefer ID-based dir (auto-provisioned), fall back to name-based
-	idDirName := "ws-" + workspaceID
-	if len(idDirName) > 15 {
-		idDirName = idDirName[:15]
-	}
+	idDirName := configDirName(workspaceID)
 	destDir := filepath.Join(h.configsDir, idDirName)
 	if _, err := os.Stat(destDir); os.IsNotExist(err) {
 		// Fall back to name-based dir
