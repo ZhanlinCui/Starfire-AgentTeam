@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
 import type { WorkspaceNodeData } from "@/store/canvas";
 
@@ -326,7 +328,13 @@ export function ChatTab({ workspaceId, data }: Props) {
                     : "bg-zinc-800 text-zinc-200"
                 }`}
               >
-                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                {msg.role === "user" ? (
+                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                ) : (
+                  <div className="prose prose-sm prose-invert max-w-none break-words [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&>li]:my-0.5 [&>h1]:text-base [&>h2]:text-sm [&>h3]:text-sm [&>pre]:bg-zinc-900 [&>pre]:text-xs [&>code]:text-xs [&>code]:bg-zinc-900/50 [&>code]:px-1 [&>code]:rounded">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  </div>
+                )}
                 <p className="text-[9px] mt-1 opacity-50">
                   {new Date(msg.timestamp).toLocaleTimeString()}
                 </p>
