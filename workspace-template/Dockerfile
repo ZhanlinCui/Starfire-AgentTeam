@@ -25,7 +25,7 @@ COPY tools/ ./tools/
 
 # Create CLI aliases (available to all runtimes)
 RUN ln -s /app/a2a_cli.py /usr/local/bin/a2a && chmod +x /app/a2a_cli.py /app/a2a_mcp_server.py && \
-    ln -s /app/starfire_status.py /usr/local/bin/starfire-status && chmod +x /app/starfire_status.py
+    ln -s /app/agent_molecule_status.py /usr/local/bin/agent-molecule-status && chmod +x /app/agent_molecule_status.py
 
 # Config is mounted at runtime
 VOLUME /configs

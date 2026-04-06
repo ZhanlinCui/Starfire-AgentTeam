@@ -4,14 +4,14 @@
 Usage (from any script, cron job, or shell inside the container):
 
   # Set current task (shows on canvas card)
-  python3 /app/starfire_status.py "Running weekly SEO audit..."
+  python3 /app/agent_molecule_status.py "Running weekly SEO audit..."
 
   # Clear task (removes banner from canvas)
-  python3 /app/starfire_status.py ""
+  python3 /app/agent_molecule_status.py ""
 
   # Or use the shell alias:
-  starfire-status "Analyzing competitor data..."
-  starfire-status ""
+  agent-molecule-status "Analyzing competitor data..."
+  agent-molecule-status ""
 
 The status appears as an amber banner on the workspace card in the canvas,
 visible to the project owner in real-time.
@@ -54,13 +54,13 @@ def set_status(task: str):
                 timeout=5.0,
             )
     except Exception as e:
-        print(f"starfire-status: failed to update: {e}", file=sys.stderr)
+        print(f"agent-molecule-status: failed to update: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: starfire-status 'task description'")
-        print("       starfire-status ''  # clear")
+        print("Usage: agent-molecule-status 'task description'")
+        print("       agent-molecule-status ''  # clear")
         sys.exit(1)
 
     set_status(sys.argv[1])
