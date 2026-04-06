@@ -113,16 +113,10 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	}
 
 	// Tier-based flags
+	// Note: ReadonlyRootfs is disabled because CLI runtimes (Claude Code, Codex)
+	// need writable filesystem for their runtime data (.claude/, .npm/, tmp files).
+	// Tier 1 still restricts the workspace volume (no writable /workspace).
 	if cfg.Tier == 1 {
-		hostCfg.ReadonlyRootfs = true
-		hostCfg.Tmpfs = map[string]string{
-			"/tmp":                "size=64m",
-			"/home/agent/.claude": "size=32m", // Claude Code needs writable .claude dir
-			"/home/agent/.config": "size=16m", // Node.js config
-			"/home/agent/.local":  "size=16m", // Claude Code local data
-			"/home/agent/.npm":    "size=32m", // npm cache
-		}
-		// Tier 1 doesn't get a writable workspace
 		tier1Binds := []string{fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath)}
 		if cfg.PluginsPath != "" {
 			tier1Binds = append(tier1Binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
