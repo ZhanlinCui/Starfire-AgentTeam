@@ -33,7 +33,7 @@ type WorkspaceConfig struct {
 	ConfigPath  string // Host path to workspace config directory
 	PluginsPath string // Host path to plugins directory (mounted at /plugins)
 	Tier        int
-	Runtime     string            // "python" (default) or "claude-code"
+	Runtime     string            // "langgraph" (default) or "claude-code", "codex", "ollama", "custom"
 	EnvVars     map[string]string // Additional env vars (API keys, etc.)
 	PlatformURL string
 }

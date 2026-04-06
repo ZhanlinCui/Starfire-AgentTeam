@@ -51,74 +51,85 @@ async def main():
     config = load_config(config_path)
     port = config.a2a.port
 
-    # 2. Load plugins (ECC, Superpowers, etc.)
-    plugins = load_plugins()
-    if plugins.plugin_names:
-        print(f"Plugins: {', '.join(plugins.plugin_names)}")
-
-    # 3. Load skills — workspace skills + plugin skills (deduplicated by ID)
-    loaded_skills = load_skills(config_path, config.skills)
-    seen_skill_ids = {s.metadata.id for s in loaded_skills}
-
-    for plugin_skills_dir in plugins.skill_dirs:
-        plugin_skill_names = [
-            d for d in os.listdir(plugin_skills_dir)
-            if os.path.isdir(os.path.join(plugin_skills_dir, d))
-        ]
-        for skill in load_skills(plugin_skills_dir, plugin_skill_names):
-            if skill.metadata.id not in seen_skill_ids:
-                loaded_skills.append(skill)
-                seen_skill_ids.add(skill.metadata.id)
-
-    print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
-
-    # 4. Gather tools from skills + built-in delegation tool
-    all_tools = [delegate_to_workspace, request_approval, commit_memory, search_memory, run_code]
-    for skill in loaded_skills:
-        all_tools.extend(skill.tools)
-
-    # 5. Check if this workspace is a team coordinator (has children)
-    children = await get_children()
-    is_coordinator = len(children) > 0
-    if is_coordinator:
-        print(f"Coordinator mode: {len(children)} children ({[c.get('name') for c in children]})")
-        all_tools.append(route_task_to_team)
-
-    # 6. Fetch parent's shared context (if this is a child workspace)
-    parent_context = await get_parent_context()
-    if parent_context:
-        print(f"Inherited {len(parent_context)} context files from parent")
-
-    # 7. Fetch peer capabilities and build system prompt
-    peers = await get_peer_capabilities(platform_url, workspace_id)
-
-    coordinator_prompt = build_children_description(children) if is_coordinator else ""
-    extra_prompts = list(plugins.prompt_fragments)
-    if coordinator_prompt:
-        extra_prompts.append(coordinator_prompt)
-
-    system_prompt = build_system_prompt(
-        config_path, workspace_id, loaded_skills, peers,
-        prompt_files=config.prompt_files,
-        plugin_rules=plugins.rules,
-        plugin_prompts=extra_prompts,
-        parent_context=parent_context,
-    )
-
-    # 7. Create the agent (runtime-dependent)
     is_cli_runtime = config.runtime != "langgraph"
+    loaded_skills = []
+    system_prompt = None
 
     if is_cli_runtime:
+        # CLI runtimes (claude-code, codex, ollama, custom)
+        # Skip LangGraph-specific setup (plugins, skills, tools, coordinator)
+        # Just load the system prompt if it exists
         print(f"Runtime: {config.runtime} (CLI-based)")
+
+        prompt_file = os.path.join(config_path, "system-prompt.md")
+        if os.path.exists(prompt_file):
+            with open(prompt_file) as f:
+                system_prompt = f.read()
+            print(f"System prompt: loaded ({len(system_prompt)} chars)")
+
         executor = CLIAgentExecutor(
             runtime=config.runtime,
             runtime_config=config.runtime_config,
             system_prompt=system_prompt,
             config_path=config_path,
         )
-        agent = None  # No LangGraph agent needed
     else:
+        # LangGraph runtime — full setup
         print("Runtime: langgraph")
+
+        # Load plugins
+        plugins = load_plugins()
+        if plugins.plugin_names:
+            print(f"Plugins: {', '.join(plugins.plugin_names)}")
+
+        # Load skills
+        loaded_skills = load_skills(config_path, config.skills)
+        seen_skill_ids = {s.metadata.id for s in loaded_skills}
+
+        for plugin_skills_dir in plugins.skill_dirs:
+            plugin_skill_names = [
+                d for d in os.listdir(plugin_skills_dir)
+                if os.path.isdir(os.path.join(plugin_skills_dir, d))
+            ]
+            for skill in load_skills(plugin_skills_dir, plugin_skill_names):
+                if skill.metadata.id not in seen_skill_ids:
+                    loaded_skills.append(skill)
+                    seen_skill_ids.add(skill.metadata.id)
+
+        print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
+
+        # Gather tools
+        all_tools = [delegate_to_workspace, request_approval, commit_memory, search_memory, run_code]
+        for skill in loaded_skills:
+            all_tools.extend(skill.tools)
+
+        # Coordinator check
+        children = await get_children()
+        is_coordinator = len(children) > 0
+        if is_coordinator:
+            print(f"Coordinator mode: {len(children)} children ({[c.get('name') for c in children]})")
+            all_tools.append(route_task_to_team)
+
+        # Parent context
+        parent_context = await get_parent_context()
+        if parent_context:
+            print(f"Inherited {len(parent_context)} context files from parent")
+
+        # Build system prompt
+        peers = await get_peer_capabilities(platform_url, workspace_id)
+        coordinator_prompt = build_children_description(children) if is_coordinator else ""
+        extra_prompts = list(plugins.prompt_fragments)
+        if coordinator_prompt:
+            extra_prompts.append(coordinator_prompt)
+
+        system_prompt = build_system_prompt(
+            config_path, workspace_id, loaded_skills, peers,
+            prompt_files=config.prompt_files,
+            plugin_rules=plugins.rules,
+            plugin_prompts=extra_prompts,
+            parent_context=parent_context,
+        )
+
         agent = create_agent(config.model, all_tools, system_prompt)
         executor = LangGraphA2AExecutor(agent)
 

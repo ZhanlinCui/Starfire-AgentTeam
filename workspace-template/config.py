@@ -32,7 +32,7 @@ class SandboxConfig:
 @dataclass
 class RuntimeConfig:
     """Configuration for CLI-based agent runtimes (claude-code, codex, ollama, custom)."""
-    command: str = ""          # e.g. "claude", "codex", "ollama run llama3"
+    command: str = ""          # e.g. "claude", "codex", "ollama" (model goes in model field)
     args: list[str] = field(default_factory=list)  # additional CLI args
     auth_token_env: str = ""   # env var name for auth token
     auth_token_file: str = ""  # file path for auth token (relative to config dir)

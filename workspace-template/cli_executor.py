@@ -18,12 +18,11 @@ The runtime is selected via config.yaml:
 """
 
 import asyncio
+import json
 import logging
 import os
 import shutil
-import stat
 import tempfile
-from pathlib import Path
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -92,7 +91,7 @@ class CLIAgentExecutor(AgentExecutor):
         elif runtime == "custom":
             self.preset = {
                 "command": runtime_config.command,
-                "base_args": runtime_config.args,
+                "base_args": [],  # args go in config.args, appended at end
                 "prompt_flag": "-p",
                 "model_flag": None,
                 "system_prompt_flag": None,
@@ -137,8 +136,8 @@ class CLIAgentExecutor(AgentExecutor):
         """Create a shell script that outputs the auth token (for apiKeyHelper pattern)."""
         helper_path = os.path.join(tempfile.gettempdir(), "agent-auth-helper.sh")
         with open(helper_path, "w") as f:
-            f.write(f"#!/bin/sh\necho \"{token}\"\n")
-        os.chmod(helper_path, stat.S_IRWXU)
+            f.write(f"#!/bin/sh\necho '{token}'\n")
+        os.chmod(helper_path, 0o700)
         return helper_path
 
     def _build_command(self, message: str) -> list[str]:
@@ -162,7 +161,6 @@ class CLIAgentExecutor(AgentExecutor):
 
         # Auth (apiKeyHelper pattern for claude-code)
         if self._auth_helper_path and self.preset.get("auth_pattern") == "apiKeyHelper":
-            import json
             settings = json.dumps({"apiKeyHelper": self._auth_helper_path})
             args.extend(["--settings", settings])
 
