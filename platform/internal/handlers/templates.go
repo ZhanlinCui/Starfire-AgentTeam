@@ -212,12 +212,15 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 		return
 	}
 
-	// Auto-generate config.yaml if not provided
+	// Auto-generate config.yaml only if not provided AND doesn't already exist on disk
+	configYamlPath := filepath.Join(destDir, "config.yaml")
 	if _, exists := body.Files["config.yaml"]; !exists {
-		cfg := generateDefaultConfig(wsName, body.Files)
-		if err := os.WriteFile(filepath.Join(destDir, "config.yaml"), []byte(cfg), 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config.yaml"})
-			return
+		if _, err := os.Stat(configYamlPath); os.IsNotExist(err) {
+			cfg := generateDefaultConfig(wsName, body.Files)
+			if err := os.WriteFile(configYamlPath, []byte(cfg), 0644); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config.yaml"})
+				return
+			}
 		}
 	}
 
