@@ -34,18 +34,26 @@ type templateSummary struct {
 }
 
 // normalizeName converts a display name to a directory-safe lowercase-hyphen string.
+// Only allows alphanumeric, hyphens, and underscores. Strips everything else.
 func normalizeName(name string) string {
 	var b strings.Builder
 	for _, r := range name {
-		if r == ' ' {
+		if r == ' ' || r == '-' {
 			b.WriteRune('-')
 		} else if r >= 'A' && r <= 'Z' {
 			b.WriteRune(r + 32)
-		} else {
+		} else if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
 			b.WriteRune(r)
 		}
+		// Skip all other characters (dots, slashes, etc.)
 	}
-	return b.String()
+	result := b.String()
+	// Prevent path traversal
+	result = strings.ReplaceAll(result, "..", "")
+	if result == "" {
+		result = "unnamed"
+	}
+	return result
 }
 
 // validateRelPath checks that a relative path doesn't escape the target directory.

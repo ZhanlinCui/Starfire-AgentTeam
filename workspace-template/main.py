@@ -133,7 +133,7 @@ async def main():
         agent = create_agent(config.model, all_tools, system_prompt)
         executor = LangGraphA2AExecutor(agent)
 
-    # 8. Build Agent Card
+    # 2. Build Agent Card
     machine_ip = os.environ.get("HOSTNAME", get_machine_ip())
     workspace_url = f"http://{machine_ip}:{port}"
 
@@ -160,7 +160,7 @@ async def main():
         defaultOutputModes=["text/plain", "application/json"],
     )
 
-    # 9. Wrap in A2A
+    # 3. Wrap in A2A
     handler = DefaultRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),
@@ -171,7 +171,7 @@ async def main():
         http_handler=handler,
     )
 
-    # 8. Register with platform
+    # 4. Register with platform
     agent_card_dict = {
         "name": config.name,
         "description": config.description,
@@ -206,11 +206,11 @@ async def main():
         except Exception as e:
             print(f"Warning: failed to register with platform: {e}")
 
-    # 9. Start heartbeat
+    # 5. Start heartbeat
     heartbeat = HeartbeatLoop(platform_url, workspace_id)
     heartbeat.start()
 
-    # 10. Run the A2A server
+    # 6. Run the A2A server
     print(f"Workspace {workspace_id} starting on port {port}")
     server_config = uvicorn.Config(
         app.build(),

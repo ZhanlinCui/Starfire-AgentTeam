@@ -46,3 +46,4 @@ venv/
 # Langfuse / ClickHouse volumes
 langfuse_data/
 clickhouse_data/
+.auth-token

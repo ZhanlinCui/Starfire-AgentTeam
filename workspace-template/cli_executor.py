@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import shutil
 import tempfile
 from pathlib import Path
@@ -137,7 +138,7 @@ class CLIAgentExecutor(AgentExecutor):
         """Create a shell script that outputs the auth token (for apiKeyHelper pattern)."""
         helper_path = os.path.join(tempfile.gettempdir(), "agent-auth-helper.sh")
         with open(helper_path, "w") as f:
-            f.write(f"#!/bin/sh\necho '{token}'\n")
+            f.write(f"#!/bin/sh\necho {shlex.quote(token)}\n")
         os.chmod(helper_path, 0o700)
         return helper_path
 

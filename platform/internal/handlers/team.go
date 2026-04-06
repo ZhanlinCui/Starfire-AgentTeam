@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"github.com/agent-molecule/platform/internal/db"
@@ -119,6 +121,8 @@ func (h *TeamHandler) Expand(c *gin.Context) {
 			if _, err := os.Stat(configPath); err == nil {
 				pluginsPath, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
 				go func(wID, cPath, pPath string, t int) {
+					provCtx, cancel := context.WithTimeout(context.Background(), provisioner.ProvisionTimeout)
+					defer cancel()
 					cfg := provisioner.WorkspaceConfig{
 						WorkspaceID: wID,
 						ConfigPath:  cPath,
@@ -127,7 +131,7 @@ func (h *TeamHandler) Expand(c *gin.Context) {
 						EnvVars:     map[string]string{"PARENT_ID": parentID},
 						PlatformURL: h.platformURL,
 					}
-					if _, err := h.provisioner.Start(ctx, cfg); err != nil {
+					if _, err := h.provisioner.Start(provCtx, cfg); err != nil {
 						log.Printf("Expand: provision failed for %s: %v", wID, err)
 					}
 				}(childID, configPath, pluginsPath, tier)
