@@ -23,8 +23,9 @@ COPY *.py ./
 COPY skills/ ./skills/
 COPY tools/ ./tools/
 
-# Create a2a CLI alias (available to all runtimes)
-RUN ln -s /app/a2a_cli.py /usr/local/bin/a2a && chmod +x /app/a2a_cli.py /app/a2a_mcp_server.py
+# Create CLI aliases (available to all runtimes)
+RUN ln -s /app/a2a_cli.py /usr/local/bin/a2a && chmod +x /app/a2a_cli.py /app/a2a_mcp_server.py && \
+    ln -s /app/starfire_status.py /usr/local/bin/starfire-status && chmod +x /app/starfire_status.py
 
 # Config is mounted at runtime
 VOLUME /configs
