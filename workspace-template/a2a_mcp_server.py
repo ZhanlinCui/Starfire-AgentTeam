@@ -45,7 +45,7 @@ async def discover_peer(target_id: str) -> dict | None:
 
 async def send_a2a_message(target_url: str, message: str) -> str:
     """Send an A2A message/send to a target workspace."""
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=None) as client:
         try:
             resp = await client.post(
                 target_url,
@@ -167,6 +167,25 @@ TOOLS = [
 ]
 
 
+async def report_activity(activity_type: str, target_id: str = "", summary: str = "", status: str = "ok"):
+    """Report activity to the platform for live progress tracking."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/activity",
+                json={
+                    "activity_type": activity_type,
+                    "source_id": WORKSPACE_ID,
+                    "target_id": target_id,
+                    "method": "message/send",
+                    "summary": summary,
+                    "status": status,
+                },
+            )
+    except Exception:
+        pass  # Best-effort — don't block delegation on activity reporting
+
+
 async def handle_tool_call(name: str, arguments: dict) -> str:
     """Handle a tool call and return the result as text."""
     if name == "delegate_task":
@@ -183,6 +202,10 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
         target_url = peer.get("url", "")
         if not target_url:
             return f"Error: workspace {target_id} has no URL (may be offline)"
+
+        # Report delegation start
+        peer_name = peer.get("name", target_id[:8])
+        await report_activity("a2a_send", target_id, f"Delegating to {peer_name}")
 
         # Send A2A message
         result = await send_a2a_message(target_url, task)

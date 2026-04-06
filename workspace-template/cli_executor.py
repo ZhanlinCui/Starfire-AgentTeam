@@ -263,7 +263,7 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
 
         cmd = self._build_command(user_input)
-        timeout = self.config.timeout or 300
+        timeout = self.config.timeout or None  # None = no timeout (wait until agent finishes)
         max_retries = 3
         base_delay = 5  # seconds
 
@@ -283,12 +283,25 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
                 )
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
-                )
+                if timeout:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=timeout
+                    )
+                else:
+                    stdout, stderr = await proc.communicate()
 
-                if proc.returncode == 0:
-                    result = stdout.decode().strip()
+                stdout_text = stdout.decode().strip()
+                stderr_text = stderr.decode().strip()
+
+                if proc.returncode != 0:
+                    logger.error("CLI agent [%s] exit=%d stdout=%s stderr=%s",
+                                 self.runtime, proc.returncode,
+                                 stdout_text[:200] if stdout_text else "(empty)",
+                                 stderr_text[:500] if stderr_text else "(empty)")
+
+                if proc.returncode == 0 or stdout_text:
+                    # Success, or non-zero exit but produced output (some CLIs exit 1 with valid output)
+                    result = stdout_text
                     if result:
                         await event_queue.enqueue_event(
                             new_agent_text_message(result)
@@ -307,7 +320,7 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                         )
                         return
                 else:
-                    error_msg = stderr.decode().strip() or f"Exit code {proc.returncode}"
+                    error_msg = stderr_text or f"Exit code {proc.returncode}"
                     # Check for rate limit errors
                     if "rate" in error_msg.lower() or "429" in error_msg or "overloaded" in error_msg.lower():
                         if attempt < max_retries - 1:

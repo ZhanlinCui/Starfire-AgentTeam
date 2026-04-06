@@ -11,7 +11,7 @@ runtime: claude-code    # or: codex, ollama, custom, langgraph (default)
 runtime_config:
   model: sonnet
   auth_token_file: .auth-token
-  timeout: 300
+  timeout: 0
 ```
 
 ## How It Works
@@ -46,7 +46,7 @@ runtime: claude-code
 runtime_config:
   model: sonnet          # or opus, haiku
   auth_token_file: .auth-token   # OAuth token file in /configs/
-  timeout: 300           # seconds
+  timeout: 0           # seconds
 ```
 
 Invokes: `claude --print --dangerously-skip-permissions --bare --model sonnet --system-prompt <prompt> --settings '{"apiKeyHelper":"/tmp/auth-helper.sh"}' -p "<message>"`

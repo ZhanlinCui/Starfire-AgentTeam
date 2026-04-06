@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
-import type { WorkspaceNodeData } from "@/store/canvas";
+import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
+import { WS_URL } from "@/store/socket";
 
 interface Props {
   workspaceId: string;
@@ -62,7 +63,7 @@ export function ChatTab({ workspaceId, data }: Props) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
-  const [thinkingStatus, setThinkingStatus] = useState("");
+  const [activityLog, setActivityLog] = useState<string[]>([]);
   const [agentReachable, setAgentReachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -109,32 +110,83 @@ export function ChatTab({ workspaceId, data }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Thinking timer + rotating status messages
+  // Resolve workspace ID → name for activity display
+  const resolveWorkspaceName = useCallback((id: string) => {
+    const nodes = useCanvasStore.getState().nodes;
+    const node = nodes.find((n) => n.id === id);
+    return (node?.data as WorkspaceNodeData)?.name || id.slice(0, 8);
+  }, []);
+
+  // Elapsed timer while sending
   useEffect(() => {
     if (!sending) {
       setThinkingElapsed(0);
-      setThinkingStatus("");
       return;
     }
     const startTime = Date.now();
-    const statuses = [
-      "Analyzing your request...",
-      "Checking workspace context...",
-      "Processing with Claude...",
-      "Running tools if needed...",
-      "Coordinating with peers...",
-      "Generating response...",
-      "Almost there...",
-    ];
-    let statusIdx = 0;
-    setThinkingStatus(statuses[0]);
     const timer = setInterval(() => {
       setThinkingElapsed(Math.floor((Date.now() - startTime) / 1000));
-      statusIdx = Math.min(statusIdx + 1, statuses.length - 1);
-      setThinkingStatus(statuses[statusIdx]);
-    }, 3000);
+    }, 1000);
     return () => clearInterval(timer);
   }, [sending]);
+
+  // Live activity feed via WebSocket — listen for ACTIVITY_LOGGED events while sending
+  useEffect(() => {
+    if (!sending) {
+      setActivityLog([]);
+      return;
+    }
+    setActivityLog(["Processing with Claude..."]);
+
+    const ws = new WebSocket(WS_URL);
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.event === "ACTIVITY_LOGGED") {
+          const p = msg.payload || {};
+          const type = p.activity_type as string;
+          const method = (p.method as string) || "";
+          const status = (p.status as string) || "";
+          const targetId = (p.target_id as string) || "";
+          const durationMs = p.duration_ms as number | undefined;
+
+          let line = "";
+          if (type === "a2a_receive" && method === "message/send") {
+            const targetName = resolveWorkspaceName(targetId || msg.workspace_id);
+            if (status === "ok" && durationMs) {
+              const sec = Math.round(durationMs / 1000);
+              line = `← ${targetName} responded (${sec}s)`;
+            } else if (status === "error") {
+              line = `⚠ ${targetName} error`;
+            }
+          } else if (type === "a2a_send") {
+            const targetName = resolveWorkspaceName(targetId);
+            line = `→ Delegating to ${targetName}...`;
+          } else if (type === "task_update") {
+            const summary = (p.summary as string) || "";
+            if (summary) line = `⟳ ${summary}`;
+          } else if (type === "agent_log") {
+            const summary = (p.summary as string) || "";
+            if (summary) line = summary.slice(0, 80);
+          }
+
+          if (line) {
+            setActivityLog((prev) => [...prev.slice(-8), line]); // Keep last 9 entries
+          }
+        } else if (msg.event === "TASK_UPDATED" && msg.workspace_id === workspaceId) {
+          const task = (msg.payload?.current_task as string) || "";
+          if (task) {
+            setActivityLog((prev) => [...prev.slice(-8), `⟳ ${task}`]);
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [sending, workspaceId, resolveWorkspaceName]);
 
   const createNewSession = useCallback(() => {
     const session: ChatSession = {
@@ -344,16 +396,31 @@ export function ChatTab({ workspaceId, data }: Props) {
           {sending && (
             <div className="flex justify-start">
               <div className="bg-zinc-800 text-zinc-300 rounded-lg px-3 py-2.5 text-sm max-w-[85%] border border-zinc-700/50">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1.5">
                   <div className="flex gap-0.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0ms" }} />
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "150ms" }} />
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "300ms" }} />
                   </div>
-                  <span className="text-[11px] font-medium text-zinc-300">{thinkingStatus || "Thinking..."}</span>
+                  <span className="text-[10px] text-zinc-500">
+                    {thinkingElapsed > 0 ? `${thinkingElapsed}s` : "..."}
+                  </span>
                 </div>
-                <div className="text-[9px] text-zinc-500">
-                  {thinkingElapsed > 0 ? `${thinkingElapsed}s elapsed` : "Starting..."}
+                <div className="space-y-0.5">
+                  {activityLog.map((line, i) => (
+                    <div
+                      key={`${i}-${line}`}
+                      className={`text-[11px] ${
+                        i === activityLog.length - 1
+                          ? "text-zinc-300"
+                          : "text-zinc-500"
+                      } ${line.startsWith("←") ? "text-green-400/80" : ""} ${
+                        line.startsWith("→") ? "text-blue-400/80" : ""
+                      } ${line.startsWith("⚠") ? "text-red-400/80" : ""}`}
+                    >
+                      {line}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>

@@ -142,7 +142,7 @@ async def main():
 
     agent_card = AgentCard(
         name=config.name,
-        description=config.description,
+        description=config.description or config.name,
         version=config.version,
         url=workspace_url,
         capabilities=AgentCapabilities(

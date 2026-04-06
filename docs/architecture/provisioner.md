@@ -92,7 +92,7 @@ When provisioning fails:
 
 ## Docker Volume Mounts
 
-Each workspace gets a named Docker volume for persistent workspace storage:
+By default, each workspace gets an isolated named Docker volume:
 
 ```
 docker volume: ws-{id}-workspace
@@ -102,6 +102,16 @@ docker volume: ws-{id}-workspace
 ```
 
 The volume is named after the workspace ID, not the container name. So even when a container is destroyed and re-provisioned, the new container mounts the same volume. Tier 1 workspaces skip the workspace volume for read-only isolation.
+
+### Shared Workspace (WORKSPACE_DIR)
+
+When the platform is started with `WORKSPACE_DIR=/path/to/repo`, all workspace containers bind-mount that host directory as `/workspace` instead of using isolated volumes. This gives all agents read/write access to the same codebase:
+
+```bash
+WORKSPACE_DIR=/Users/you/project go run ./cmd/server
+```
+
+All 15 agents then see the same files — the PM can read `CLAUDE.md`, the Backend Engineer can edit `platform/`, the Frontend Engineer can modify `canvas/`, etc. Changes made by one agent are immediately visible to all others.
 
 See [Memory](./memory.md) for full memory backend details.
 

@@ -37,6 +37,7 @@ DATABASE_URL=postgres://dev:dev@postgres:5432/agentmolecule
 REDIS_URL=redis://redis:6379
 PORT=8080
 SECRETS_ENCRYPTION_KEY=dev-key-change-in-production
+WORKSPACE_DIR=/path/to/Starfire-AgentTeam   # Optional: bind-mount host repo into all agent containers
 ```
 
 ### Canvas (Next.js)
@@ -113,6 +114,7 @@ GitHub Actions runs automatically on push to `main` and on PRs (`.github/workflo
 | `test_api.sh` | Run 62 platform API integration tests |
 | `test_a2a_e2e.sh` | Run 22 A2A end-to-end tests |
 | `test_activity_e2e.sh` | Run 25 activity/task E2E tests |
+| `setup-org.sh` | Create default 15-agent org hierarchy (PM + Marketing/Research/Dev teams, all Claude Code) |
 
 ## Related Docs
 

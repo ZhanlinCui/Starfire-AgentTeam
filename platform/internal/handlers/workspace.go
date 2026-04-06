@@ -30,7 +30,7 @@ const maxProxyRequestBody = 1 << 20
 const maxProxyResponseBody = 10 << 20
 
 // a2aClient is a shared HTTP client for proxying A2A requests to workspace agents.
-var a2aClient = &http.Client{Timeout: 300 * time.Second} // 5 min for delegation chains
+var a2aClient = &http.Client{} // No timeout — agent liveness is checked via heartbeat, not proxy deadline
 
 type WorkspaceHandler struct {
 	broadcaster    *events.Broadcaster
@@ -378,13 +378,14 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 
 	pluginsPath, _ := filepath.Abs(filepath.Join(h.configsHostDir, "..", "plugins"))
 	cfg := provisioner.WorkspaceConfig{
-		WorkspaceID: workspaceID,
-		ConfigPath:  configPath,
-		PluginsPath: pluginsPath,
-		Tier:        payload.Tier,
-		Runtime:     payload.Runtime,
-		EnvVars:     envVars,
-		PlatformURL: h.platformURL,
+		WorkspaceID:   workspaceID,
+		ConfigPath:    configPath,
+		PluginsPath:   pluginsPath,
+		WorkspacePath: os.Getenv("WORKSPACE_DIR"), // If set, bind-mount host dir as /workspace
+		Tier:          payload.Tier,
+		Runtime:       payload.Runtime,
+		EnvVars:       envVars,
+		PlatformURL:   h.platformURL,
 	}
 
 	url, err := h.provisioner.Start(ctx, cfg)
@@ -466,10 +467,21 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	idDirName := configDirName(id)
 	configPath := ""
 
-	// Check for workspace's own config dir first
+	// Check for workspace's own config dir — only use it if it has meaningful content
+	// (system-prompt.md, uploaded files, etc.), not just an auto-generated config.yaml stub
 	ownDir := filepath.Join(h.configsDir, idDirName)
 	if info, err := os.Stat(ownDir); err == nil && info.IsDir() {
-		configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, idDirName))
+		entries, _ := os.ReadDir(ownDir)
+		hasCustomContent := false
+		for _, e := range entries {
+			if e.Name() != "config.yaml" {
+				hasCustomContent = true
+				break
+			}
+		}
+		if hasCustomContent {
+			configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, idDirName))
+		}
 	}
 
 	// Fall back to explicit template or name-based match
@@ -485,8 +497,11 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 
 	// Last resort: auto-generate default config
 	if configPath == "" {
+		log.Printf("Restart: no config found for %s (%s), auto-generating", wsName, id)
 		payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
 		configPath = h.ensureDefaultConfig(id, payload)
+	} else {
+		log.Printf("Restart: using config %s for %s (%s)", configPath, wsName, id)
 	}
 
 	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
@@ -506,6 +521,28 @@ func findTemplateByName(configsDir, name string) string {
 	for _, e := range entries {
 		if e.IsDir() && e.Name() == normalized {
 			return e.Name()
+		}
+	}
+	// Also search by config.yaml name field (for templates like org-pm where dir name != workspace name)
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), "ws-") {
+			continue
+		}
+		cfgPath := filepath.Join(configsDir, e.Name(), "config.yaml")
+		data, err := os.ReadFile(cfgPath)
+		if err != nil {
+			continue
+		}
+		// Quick YAML name extraction (avoids importing yaml parser)
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "name:") {
+				cfgName := strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+				if strings.EqualFold(cfgName, name) {
+					return e.Name()
+				}
+				break
+			}
 		}
 	}
 	return ""
@@ -683,9 +720,12 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	// Extract caller workspace ID from X-Workspace-ID header (if agent-to-agent)
 	callerID := c.GetHeader("X-Workspace-ID")
 
-	// Forward to the agent
+	// Forward to the agent — no timeout. Agent liveness is monitored via heartbeat;
+	// if the agent dies, the TCP connection drops and the proxy returns an error.
+	// Delegation chains (PM → Lead → Agent) can take arbitrarily long.
+	// WithoutCancel: survives client disconnect but still cancels on server shutdown.
 	startTime := time.Now()
-	req, err := http.NewRequestWithContext(ctx, "POST", agentURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), "POST", agentURL, bytes.NewReader(body))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
 		return

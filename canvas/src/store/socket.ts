@@ -1,6 +1,6 @@
 import { useCanvasStore } from "./canvas";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080/ws";
+export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080/ws";
 
 export interface WSMessage {
   event: string;
@@ -13,6 +13,8 @@ class ReconnectingSocket {
   private ws: WebSocket | null = null;
   private attempt = 0;
   private url: string;
+  private lastEventTime = 0;
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -24,10 +26,13 @@ class ReconnectingSocket {
     this.ws.onopen = () => {
       console.log("WebSocket connected");
       this.attempt = 0;
+      this.lastEventTime = Date.now();
       this.rehydrate();
+      this.startHealthCheck();
     };
 
     this.ws.onmessage = (event) => {
+      this.lastEventTime = Date.now();
       try {
         const msg: WSMessage = JSON.parse(event.data);
         useCanvasStore.getState().applyEvent(msg);
@@ -38,6 +43,7 @@ class ReconnectingSocket {
 
     this.ws.onclose = () => {
       console.log("WebSocket disconnected, reconnecting...");
+      this.stopHealthCheck();
       const delay = Math.min(1000 * 2 ** this.attempt, 30000);
       this.attempt++;
       setTimeout(() => this.connect(), delay);
@@ -46,6 +52,27 @@ class ReconnectingSocket {
     this.ws.onerror = (error) => {
       console.error("WebSocket error:", error);
     };
+  }
+
+  /** Periodically re-fetch state in case WebSocket events were missed (e.g. agent
+   *  status changed while the socket stayed open but no event was emitted). */
+  private startHealthCheck() {
+    this.stopHealthCheck();
+    this.healthCheckTimer = setInterval(() => {
+      const silenceSec = (Date.now() - this.lastEventTime) / 1000;
+      // If no events for 30s, re-hydrate to catch missed status changes
+      if (silenceSec > 30) {
+        this.rehydrate();
+        this.lastEventTime = Date.now(); // prevent rapid re-fetches
+      }
+    }, 30_000);
+  }
+
+  private stopHealthCheck() {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
   }
 
   private async rehydrate() {
@@ -59,6 +86,7 @@ class ReconnectingSocket {
   }
 
   disconnect() {
+    this.stopHealthCheck();
     if (this.ws) {
       this.ws.close();
       this.ws = null;

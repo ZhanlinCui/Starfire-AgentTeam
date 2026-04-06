@@ -73,3 +73,6 @@ workspace-configs-templates/ws-*
 
 # Exported bundles (may contain env vars / secrets)
 *.bundle.json
+
+# Backups
+backups/

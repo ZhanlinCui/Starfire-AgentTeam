@@ -29,13 +29,14 @@ const (
 
 // WorkspaceConfig holds the parameters needed to provision a workspace container.
 type WorkspaceConfig struct {
-	WorkspaceID string
-	ConfigPath  string // Host path to workspace config directory
-	PluginsPath string // Host path to plugins directory (mounted at /plugins)
-	Tier        int
-	Runtime     string            // "langgraph" (default) or "claude-code", "codex", "ollama", "custom"
-	EnvVars     map[string]string // Additional env vars (API keys, etc.)
-	PlatformURL string
+	WorkspaceID   string
+	ConfigPath    string // Host path to workspace config directory
+	PluginsPath   string // Host path to plugins directory (mounted at /plugins)
+	WorkspacePath string // Host path to bind-mount as /workspace (if empty, uses Docker named volume)
+	Tier          int
+	Runtime       string            // "langgraph" (default) or "claude-code", "codex", "ollama", "custom"
+	EnvVars       map[string]string // Additional env vars (API keys, etc.)
+	PlatformURL   string
 }
 
 // Provisioner manages Docker containers for workspace agents.
@@ -92,11 +93,20 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	}
 
 	// Host config with volume mounts
-	volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
-	log.Printf("Provisioner: workspace volume %s (created by Docker if new)", volumeName)
+	var workspaceMount string
+	if cfg.WorkspacePath != "" {
+		// Bind-mount host directory — all agents share the same codebase
+		workspaceMount = fmt.Sprintf("%s:/workspace", cfg.WorkspacePath)
+		log.Printf("Provisioner: bind-mounting host %s as /workspace", cfg.WorkspacePath)
+	} else {
+		// Isolated Docker named volume per workspace
+		volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
+		workspaceMount = fmt.Sprintf("%s:/workspace", volumeName)
+		log.Printf("Provisioner: workspace volume %s (created by Docker if new)", volumeName)
+	}
 	binds := []string{
 		fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),
-		fmt.Sprintf("%s:/workspace", volumeName),
+		workspaceMount,
 	}
 	if cfg.PluginsPath != "" {
 		binds = append(binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
