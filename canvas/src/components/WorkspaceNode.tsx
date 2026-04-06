@@ -134,10 +134,10 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
         </div>
 
         {/* Runtime badge */}
-        {data.agentCard && (data.agentCard as Record<string, unknown>).runtime && (
+        {data.agentCard && typeof (data.agentCard as Record<string, unknown>).runtime === "string" && (
           <div className="mb-1">
             <span className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-zinc-400 bg-zinc-800/60 border border-zinc-700/30">
-              {String((data.agentCard as Record<string, unknown>).runtime)}
+              {(data.agentCard as Record<string, string>).runtime}
             </span>
           </div>
         )}

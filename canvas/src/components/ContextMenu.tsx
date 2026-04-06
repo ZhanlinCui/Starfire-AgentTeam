@@ -90,9 +90,9 @@ export function ContextMenu() {
 
   const handleDelete = useCallback(() => {
     if (!contextMenu) return;
+    // Don't close context menu yet — keep it mounted so ConfirmDialog renders
     setDeleteConfirm({ id: contextMenu.nodeId, name: contextMenu.nodeData.name });
-    closeContextMenu();
-  }, [contextMenu, closeContextMenu]);
+  }, [contextMenu]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteConfirm) return;
@@ -103,7 +103,8 @@ export function ContextMenu() {
       showToast("Delete failed", "error");
     }
     setDeleteConfirm(null);
-  }, [deleteConfirm, removeNode]);
+    closeContextMenu();
+  }, [deleteConfirm, removeNode, closeContextMenu]);
 
   const handleViewDetails = useCallback(() => {
     if (!contextMenu) return;
@@ -227,7 +228,7 @@ export function ContextMenu() {
         confirmLabel="Delete"
         confirmVariant="danger"
         onConfirm={confirmDelete}
-        onCancel={() => setDeleteConfirm(null)}
+        onCancel={() => { setDeleteConfirm(null); closeContextMenu(); }}
       />
     </div>
   );
