@@ -472,7 +472,7 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
 	go h.provisionWorkspace(id, configPath, payload)
 
-	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "template": template})
+	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "config_dir": filepath.Base(configPath)})
 }
 
 // findTemplateByName looks for a workspace-configs-templates directory matching a name.

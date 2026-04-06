@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
-	"os"
 )
 
 type TeamHandler struct {
