@@ -108,14 +108,18 @@ export function ChatTab({ workspaceId, data }: Props) {
     checkAgent();
   }, [checkAgent]);
 
-  // When the agent's current_task clears (via WebSocket/heartbeat) and we're in
-  // "resumed from refresh" mode, stop showing the processing indicator.
-  // If WE sent the request (sendingFromAPIRef), the finally{} block handles it.
+  // On page load/refresh: if agent has an active task, start polling for the response.
+  // This picks up results from requests that were in-flight when the page was refreshed.
   useEffect(() => {
-    if (sending && !sendingFromAPIRef.current && !data.currentTask) {
-      setSending(false);
-    }
-  }, [data.currentTask, sending]);
+    if (!sending || sendingFromAPIRef.current) return;
+    // We're in "resumed from refresh" mode — poll for the response
+    const lastMsgTime = messages.length > 0
+      ? messages[messages.length - 1].timestamp
+      : new Date(Date.now() - 600_000).toISOString(); // 10 min ago fallback
+    const pollTimer = pollForResponse(lastMsgTime);
+    return () => clearInterval(pollTimer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -231,6 +235,72 @@ export function ChatTab({ workspaceId, data }: Props) {
     [activeSessionId]
   );
 
+  // Poll activity log for agent response — survives page refresh, tab switches, etc.
+  const pollForResponse = useCallback(
+    (sentAfter: string) => {
+      const pollInterval = setInterval(async () => {
+        try {
+          const activities = await api.get<Array<{
+            activity_type: string;
+            status: string;
+            created_at: string;
+            response_body: Record<string, unknown> | null;
+            error_detail: string | null;
+          }>>(`/workspaces/${workspaceId}/activity?type=a2a_receive&limit=3`);
+
+          // Find a response that came after we sent the message
+          for (const a of activities) {
+            if (a.created_at <= sentAfter) continue;
+            if (!a.response_body) continue;
+
+            // Found it — extract text
+            const text = extractResponseText(a.response_body);
+            if (!text) continue;
+
+            clearInterval(pollInterval);
+            if (a.status === "error" || text.toLowerCase().startsWith("agent error")) {
+              addMessage(createMessage("system", text));
+            } else {
+              addMessage(createMessage("agent", text));
+            }
+            setSending(false);
+            sendingFromAPIRef.current = false;
+            return;
+          }
+        } catch {
+          // Poll failed — keep trying
+        }
+
+        // Also check if agent stopped working (no more current_task)
+        // but only after giving it time to start (30s grace period)
+        const elapsed = (Date.now() - new Date(sentAfter).getTime()) / 1000;
+        if (elapsed > 30 && !data.currentTask) {
+          // Agent finished but we didn't find a response — check one more time
+          try {
+            const activities = await api.get<Array<{
+              activity_type: string;
+              created_at: string;
+              response_body: Record<string, unknown> | null;
+            }>>(`/workspaces/${workspaceId}/activity?type=a2a_receive&limit=1`);
+            if (activities[0]?.created_at > sentAfter && activities[0]?.response_body) {
+              const text = extractResponseText(activities[0].response_body);
+              if (text) {
+                clearInterval(pollInterval);
+                addMessage(createMessage("agent", text));
+                setSending(false);
+                sendingFromAPIRef.current = false;
+                return;
+              }
+            }
+          } catch { /* ignore */ }
+        }
+      }, 3000);
+
+      return pollInterval;
+    },
+    [workspaceId, addMessage, data.currentTask]
+  );
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || !agentReachable || sending) return;
@@ -241,49 +311,39 @@ export function ChatTab({ workspaceId, data }: Props) {
     sendingFromAPIRef.current = true;
     setError(null);
 
-    try {
-      const res = await api.post<{
-        result?: Record<string, unknown>;
-        error?: { code: number; message: string };
-      }>(`/workspaces/${workspaceId}/a2a`, {
-        method: "message/send",
-        params: {
-          message: {
-            role: "user",
-            messageId: crypto.randomUUID(),
-            parts: [{ kind: "text", text }],
-          },
-        },
-      });
+    const sentAt = new Date().toISOString();
 
-      if (res.error) {
-        addMessage(createMessage("system", `Agent error: ${res.error.message}`));
-      } else if (res.result) {
-        const agentText = extractAgentText(res.result);
-        addMessage(createMessage("agent", agentText || "(empty response)"));
-      } else {
-        addMessage(createMessage("system", "No response from agent"));
+    // Fire the A2A request — don't wait for the response.
+    // The poll loop picks up the result from the activity log.
+    const controller = new AbortController();
+    fetch(
+      `${process.env.NEXT_PUBLIC_PLATFORM_URL || "http://localhost:8080"}/workspaces/${workspaceId}/a2a`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          method: "message/send",
+          params: {
+            message: {
+              role: "user",
+              messageId: crypto.randomUUID(),
+              parts: [{ kind: "text", text }],
+            },
+          },
+        }),
+        signal: controller.signal,
       }
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : "Unknown error";
-      // Parse user-friendly messages from common errors
-      let userMsg: string;
-      if (errMsg.includes("502") || errMsg.includes("failed to reach")) {
-        userMsg = `${data.name} is not responding. The agent container may not be running. Try restarting the workspace.`;
-        setAgentReachable(false);
-      } else if (errMsg.includes("503") || errMsg.includes("no URL")) {
-        userMsg = `${data.name} has no agent endpoint configured. Deploy an agent first.`;
-        setAgentReachable(false);
-      } else if (errMsg.includes("timeout") || errMsg.includes("504")) {
-        userMsg = `Request to ${data.name} timed out. The agent may be overloaded.`;
-      } else {
-        userMsg = `Could not reach ${data.name}: ${errMsg}`;
-      }
-      addMessage(createMessage("system", userMsg));
-    } finally {
-      setSending(false);
-      sendingFromAPIRef.current = false;
-    }
+    ).catch(() => {}); // Ignore — we poll for the result instead
+
+    // Start polling for the response
+    const pollTimer = pollForResponse(sentAt);
+
+    // Store cleanup so if component unmounts, we stop polling
+    // (but the response is still stored server-side)
+    return () => {
+      clearInterval(pollTimer);
+      controller.abort();
+    };
   };
 
   const deleteSession = (sessionId: string) => {
@@ -525,4 +585,28 @@ function extractTextsFromParts(parts: unknown): string | null {
     .map((p: Record<string, unknown>) => String(p.text || ""))
     .filter(Boolean);
   return texts.length > 0 ? texts.join("\n") : null;
+}
+
+/** Extract text from an activity log response_body (multiple possible formats) */
+function extractResponseText(body: Record<string, unknown>): string {
+  try {
+    // {result: "text"} — from MCP server delegation logs
+    if (typeof body.result === "string") return body.result;
+
+    // A2A JSON-RPC response: {result: {parts: [{kind: "text", text: "..."}]}}
+    const result = body.result as Record<string, unknown> | undefined;
+    if (result) {
+      const parts = (result.parts || []) as Array<Record<string, unknown>>;
+      for (const p of parts) {
+        const t = (p.text as string) || "";
+        if (t) return t;
+        const root = p.root as Record<string, unknown> | undefined;
+        if (root?.text) return root.text as string;
+      }
+    }
+
+    // {task: "text"} — request body format, shouldn't be in response but handle it
+    if (typeof body.task === "string") return body.task;
+  } catch { /* ignore */ }
+  return "";
 }
