@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import { Canvas } from "@/components/Canvas";
+import { Legend } from "@/components/Legend";
+import { CommunicationOverlay } from "@/components/CommunicationOverlay";
 import { connectSocket, disconnectSocket } from "@/store/socket";
 import { useCanvasStore } from "@/store/canvas";
 import { api } from "@/lib/api";
@@ -29,5 +31,11 @@ export default function Home() {
     };
   }, []);
 
-  return <Canvas />;
+  return (
+    <>
+      <Canvas />
+      <Legend />
+      <CommunicationOverlay />
+    </>
+  );
 }
