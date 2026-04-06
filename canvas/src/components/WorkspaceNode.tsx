@@ -6,24 +6,15 @@ import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 
 /** Stable selector: returns children, grandchild flag, and descendant count for a node */
 function useHierarchyInfo(parentId: string) {
-  const result = useCanvasStore((s) => {
-    const children = s.nodes.filter((n) => n.data.parentId === parentId);
-    if (children.length === 0) return { children, hasGrandchildren: false, descendantCount: 0 };
-    const hasGrandchildren = children.some((c) => s.nodes.some((n) => n.data.parentId === c.id));
-    const descendantCount = countDescendants(parentId, s.nodes);
-    return { children, hasGrandchildren, descendantCount };
-  });
-  const prev = useRef(result);
-  // Only update reference if the children IDs/data or derived values actually changed
-  if (
-    prev.current.hasGrandchildren !== result.hasGrandchildren ||
-    prev.current.descendantCount !== result.descendantCount ||
-    prev.current.children.length !== result.children.length ||
-    prev.current.children.some((n, i) => n.id !== result.children[i].id || n.data !== result.children[i].data)
-  ) {
-    prev.current = result;
-  }
-  return prev.current;
+  const children = useCanvasStore((s) => s.nodes.filter((n) => n.data.parentId === parentId));
+  const childIds = children.map((c) => c.id).join(",");
+  const hasGrandchildren = useCanvasStore(
+    useCallback((s) => children.some((c) => s.nodes.some((n) => n.data.parentId === c.id)), [childIds])
+  );
+  const descendantCount = useCanvasStore(
+    useCallback((s) => countDescendants(parentId, s.nodes), [parentId])
+  );
+  return { children, hasGrandchildren, descendantCount };
 }
 
 const STATUS_CONFIG: Record<string, { dot: string; glow: string; label: string; bar: string }> = {
