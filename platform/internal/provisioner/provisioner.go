@@ -14,11 +14,8 @@ import (
 )
 
 const (
-	// DefaultImage is the workspace runtime Docker image.
+	// DefaultImage is the workspace runtime Docker image (unified — handles all runtimes).
 	DefaultImage = "workspace-template:latest"
-
-	// ClaudeCodeImage is the Docker image for Claude Code workspaces.
-	ClaudeCodeImage = "workspace-claude-code:latest"
 
 	// DefaultNetwork is the Docker network workspaces join.
 	DefaultNetwork = "agent-molecule-net"
@@ -85,15 +82,9 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Select image based on runtime
-	image := DefaultImage
-	if cfg.Runtime == "claude-code" {
-		image = ClaudeCodeImage
-	}
-
-	// Container config
+	// Container config — single unified image handles all runtimes via config.yaml
 	containerCfg := &container.Config{
-		Image: image,
+		Image: DefaultImage,
 		Env:   env,
 		ExposedPorts: nat.PortSet{
 			nat.Port(DefaultPort + "/tcp"): {},

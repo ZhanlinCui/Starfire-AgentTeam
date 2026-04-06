@@ -17,6 +17,7 @@ from a2a.types import AgentCard, AgentCapabilities, AgentSkill
 
 from a2a_executor import LangGraphA2AExecutor
 from agent import create_agent
+from cli_executor import CLIAgentExecutor
 from config import load_config
 from coordinator import get_children, get_parent_context, build_children_description, route_task_to_team
 from heartbeat import HeartbeatLoop
@@ -104,10 +105,24 @@ async def main():
         parent_context=parent_context,
     )
 
-    # 7. Create the agent
-    agent = create_agent(config.model, all_tools, system_prompt)
+    # 7. Create the agent (runtime-dependent)
+    is_cli_runtime = config.runtime != "langgraph"
 
-    # 6. Build Agent Card
+    if is_cli_runtime:
+        print(f"Runtime: {config.runtime} (CLI-based)")
+        executor = CLIAgentExecutor(
+            runtime=config.runtime,
+            runtime_config=config.runtime_config,
+            system_prompt=system_prompt,
+            config_path=config_path,
+        )
+        agent = None  # No LangGraph agent needed
+    else:
+        print("Runtime: langgraph")
+        agent = create_agent(config.model, all_tools, system_prompt)
+        executor = LangGraphA2AExecutor(agent)
+
+    # 8. Build Agent Card
     machine_ip = os.environ.get("HOSTNAME", get_machine_ip())
     workspace_url = f"http://{machine_ip}:{port}"
 
@@ -134,8 +149,7 @@ async def main():
         defaultOutputModes=["text/plain", "application/json"],
     )
 
-    # 7. Wrap in A2A
-    executor = LangGraphA2AExecutor(agent)
+    # 9. Wrap in A2A
     handler = DefaultRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),

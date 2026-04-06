@@ -30,12 +30,25 @@ class SandboxConfig:
     timeout: int = 30
 
 @dataclass
+class RuntimeConfig:
+    """Configuration for CLI-based agent runtimes (claude-code, codex, ollama, custom)."""
+    command: str = ""          # e.g. "claude", "codex", "ollama run llama3"
+    args: list[str] = field(default_factory=list)  # additional CLI args
+    auth_token_env: str = ""   # env var name for auth token
+    auth_token_file: str = ""  # file path for auth token (relative to config dir)
+    timeout: int = 300         # seconds
+    model: str = ""            # model override for the CLI
+
+
+@dataclass
 class WorkspaceConfig:
     name: str = "Workspace"
     description: str = ""
     version: str = "1.0.0"
     tier: int = 1
     model: str = "anthropic:claude-sonnet-4-6"
+    runtime: str = "langgraph"  # langgraph | claude-code | codex | ollama | custom
+    runtime_config: RuntimeConfig = field(default_factory=RuntimeConfig)
     skills: list[str] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
     prompt_files: list[str] = field(default_factory=list)
@@ -61,6 +74,9 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
     # Override model from env if provided
     model = os.environ.get("MODEL_PROVIDER", raw.get("model", "anthropic:claude-sonnet-4-6"))
 
+    runtime = raw.get("runtime", "langgraph")
+    runtime_raw = raw.get("runtime_config", {})
+
     a2a_raw = raw.get("a2a", {})
     delegation_raw = raw.get("delegation", {})
     sandbox_raw = raw.get("sandbox", {})
@@ -71,6 +87,15 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
         version=raw.get("version", "1.0.0"),
         tier=int(raw.get("tier", 1)),
         model=model,
+        runtime=runtime,
+        runtime_config=RuntimeConfig(
+            command=runtime_raw.get("command", ""),
+            args=runtime_raw.get("args", []),
+            auth_token_env=runtime_raw.get("auth_token_env", ""),
+            auth_token_file=runtime_raw.get("auth_token_file", ""),
+            timeout=runtime_raw.get("timeout", 300),
+            model=runtime_raw.get("model", ""),
+        ),
         skills=raw.get("skills", []),
         tools=raw.get("tools", []),
         prompt_files=raw.get("prompt_files", []),
