@@ -102,7 +102,7 @@ async def get_workspace_info() -> dict:
 TOOLS = [
     {
         "name": "delegate_task",
-        "description": "Delegate a task to another workspace via A2A protocol. The target must be a peer (sibling or parent/child). Use list_peers to find available targets.",
+        "description": "Delegate a task to another workspace via A2A protocol and WAIT for the response. Use for quick tasks. The target must be a peer (sibling or parent/child). Use list_peers to find available targets.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -116,6 +116,42 @@ TOOLS = [
                 },
             },
             "required": ["workspace_id", "task"],
+        },
+    },
+    {
+        "name": "delegate_task_async",
+        "description": "Delegate a task to another workspace WITHOUT waiting for the response. Returns a task_id immediately. Use check_task_status to poll for results later. Best for long-running tasks.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Target workspace ID (from list_peers)",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "The task description to send to the target workspace",
+                },
+            },
+            "required": ["workspace_id", "task"],
+        },
+    },
+    {
+        "name": "check_task_status",
+        "description": "Check the status of a previously submitted async task. Returns 'working', 'completed' (with result), or 'failed'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": "The workspace ID the task was sent to",
+                },
+                "task_id": {
+                    "type": "string",
+                    "description": "The task_id returned by delegate_task_async",
+                },
+            },
+            "required": ["workspace_id", "task_id"],
         },
     },
     {
@@ -151,6 +187,95 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
         # Send A2A message
         result = await send_a2a_message(target_url, task)
         return result
+
+    elif name == "delegate_task_async":
+        target_id = arguments.get("workspace_id", "")
+        task = arguments.get("task", "")
+        if not target_id or not task:
+            return "Error: workspace_id and task are required"
+
+        peer = await discover_peer(target_id)
+        if not peer:
+            return f"Error: workspace {target_id} not found or not accessible"
+
+        target_url = peer.get("url", "")
+        if not target_url:
+            return f"Error: workspace {target_id} has no URL (may be offline)"
+
+        # Send with short timeout — just confirm receipt
+        task_id = str(uuid.uuid4())
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                await client.post(
+                    target_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": task_id,
+                        "method": "message/send",
+                        "params": {
+                            "message": {
+                                "role": "user",
+                                "messageId": str(uuid.uuid4()),
+                                "parts": [{"kind": "text", "text": task}],
+                            }
+                        },
+                    },
+                )
+                return json.dumps({
+                    "task_id": task_id,
+                    "workspace_id": target_id,
+                    "status": "submitted",
+                    "note": "Task submitted. Use check_task_status to poll for results.",
+                })
+            except httpx.TimeoutException:
+                return json.dumps({
+                    "task_id": task_id,
+                    "workspace_id": target_id,
+                    "status": "submitted_timeout",
+                    "note": "Task sent but confirmation timed out. The target may still be processing. Check status later.",
+                })
+
+    elif name == "check_task_status":
+        target_id = arguments.get("workspace_id", "")
+        task_id = arguments.get("task_id", "")
+        if not target_id or not task_id:
+            return "Error: workspace_id and task_id are required"
+
+        peer = await discover_peer(target_id)
+        if not peer:
+            return f"Error: workspace {target_id} not found"
+
+        target_url = peer.get("url", "")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                resp = await client.post(
+                    target_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": str(uuid.uuid4()),
+                        "method": "tasks/get",
+                        "params": {"id": task_id},
+                    },
+                )
+                data = resp.json()
+                if "result" in data:
+                    task_data = data["result"]
+                    status = task_data.get("status", {}).get("state", "unknown")
+                    result_text = ""
+                    if status == "completed":
+                        for artifact in task_data.get("artifacts", []):
+                            for part in artifact.get("parts", []):
+                                if part.get("text"):
+                                    result_text += part["text"] + "\n"
+                    return json.dumps({
+                        "task_id": task_id,
+                        "status": status,
+                        "result": result_text.strip() if result_text else None,
+                    })
+                elif "error" in data:
+                    return f"Error: {data['error'].get('message', 'unknown')}"
+            except Exception as e:
+                return f"Error checking status: {e}"
 
     elif name == "list_peers":
         peers = await get_peers()

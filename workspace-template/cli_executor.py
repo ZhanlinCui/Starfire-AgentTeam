@@ -150,21 +150,26 @@ class CLIAgentExecutor(AgentExecutor):
             return """## Inter-Agent Communication
 You have MCP tools for communicating with other workspaces:
 - list_peers: discover available peer workspaces (name, ID, status, role)
-- delegate_task: send a task to a peer workspace and get their response
+- delegate_task: send a task and WAIT for the response (for quick tasks)
+- delegate_task_async: send a task and return immediately with a task_id (for long tasks)
+- check_task_status: poll an async task's status and get results when done
 - get_workspace_info: get your own workspace info
 
-When asked to get information from another team, use delegate_task.
+For quick questions, use delegate_task (synchronous).
+For long-running work (building pages, running audits), use delegate_task_async + check_task_status.
 Always use list_peers first to discover available workspace IDs.
 Access control is enforced — you can only reach siblings and parent/children."""
 
         # For non-MCP runtimes (ollama, custom), provide CLI instructions
         return """## Inter-Agent Communication
 You can delegate tasks to other workspaces using the a2a command:
-  python3 /app/a2a_cli.py peers                          # List available peers
-  python3 /app/a2a_cli.py delegate <workspace_id> <task>  # Send task to a peer
-  python3 /app/a2a_cli.py info                            # Your workspace info
+  python3 /app/a2a_cli.py peers                                  # List available peers
+  python3 /app/a2a_cli.py delegate <workspace_id> <task>          # Sync: wait for response
+  python3 /app/a2a_cli.py delegate --async <workspace_id> <task>  # Async: return task_id
+  python3 /app/a2a_cli.py status <workspace_id> <task_id>         # Check async task
+  python3 /app/a2a_cli.py info                                    # Your workspace info
 
-When asked to get information from another team, use the delegate command.
+For quick questions, use sync delegate. For long tasks, use --async + status.
 Only delegate to peers listed by the peers command (access control enforced)."""
 
     def _get_system_prompt(self) -> str | None:
