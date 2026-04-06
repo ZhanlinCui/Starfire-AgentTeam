@@ -124,6 +124,15 @@ R=$(curl -s -X POST "$BASE/registry/update-card" -H "Content-Type: application/j
 check "POST /registry/update-card" '"status":"updated"' "$R"
 
 # Test 19: Degraded status transition
+# First, ensure workspace is online (Redis TTL may have expired during test)
+curl -s -X POST "$BASE/registry/heartbeat" -H "Content-Type: application/json" \
+  -d "{\"workspace_id\":\"$ECHO_ID\",\"error_rate\":0.0,\"sample_error\":\"\",\"active_tasks\":0,\"uptime_seconds\":180}" > /dev/null
+
+# Re-register to force online status in case liveness expired
+curl -s -X POST "$BASE/registry/register" -H "Content-Type: application/json" \
+  -d "{\"id\":\"$ECHO_ID\",\"url\":\"http://localhost:8001\",\"agent_card\":{\"name\":\"Echo Agent v2\",\"skills\":[{\"id\":\"echo\",\"name\":\"Echo\"},{\"id\":\"repeat\",\"name\":\"Repeat\"}]}}" > /dev/null
+
+# Now send high error rate to trigger degraded
 R=$(curl -s -X POST "$BASE/registry/heartbeat" -H "Content-Type: application/json" \
   -d "{\"workspace_id\":\"$ECHO_ID\",\"error_rate\":0.8,\"sample_error\":\"API rate limit\",\"active_tasks\":0,\"uptime_seconds\":200}")
 check "Heartbeat (high error_rate)" '"status":"ok"' "$R"

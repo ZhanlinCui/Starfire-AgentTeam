@@ -201,7 +201,20 @@ export function ChatTab({ workspaceId, data }: Props) {
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : "Unknown error";
-      addMessage(createMessage("system", `Error: ${errMsg}`));
+      // Parse user-friendly messages from common errors
+      let userMsg: string;
+      if (errMsg.includes("502") || errMsg.includes("failed to reach")) {
+        userMsg = `${data.name} is not responding. The agent container may not be running. Try restarting the workspace.`;
+        setAgentReachable(false);
+      } else if (errMsg.includes("503") || errMsg.includes("no URL")) {
+        userMsg = `${data.name} has no agent endpoint configured. Deploy an agent first.`;
+        setAgentReachable(false);
+      } else if (errMsg.includes("timeout") || errMsg.includes("504")) {
+        userMsg = `Request to ${data.name} timed out. The agent may be overloaded.`;
+      } else {
+        userMsg = `Could not reach ${data.name}: ${errMsg}`;
+      }
+      addMessage(createMessage("system", userMsg));
     } finally {
       setSending(false);
     }
@@ -285,10 +298,17 @@ export function ChatTab({ workspaceId, data }: Props) {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.length === 0 && (
-            <div className="text-center text-zinc-500 text-xs py-8">
-              {isOnline
-                ? `Send a message to ${data.name}`
-                : `${data.name} is ${data.status} — chat unavailable`}
+            <div className="text-center py-8">
+              {isOnline && agentReachable ? (
+                <div className="text-zinc-500 text-xs">Send a message to {data.name}</div>
+              ) : isOnline && !agentReachable ? (
+                <div>
+                  <div className="text-amber-400 text-xs">{data.name} is registered but not responding</div>
+                  <div className="text-zinc-600 text-[10px] mt-1">The agent container may not be running. Try restarting.</div>
+                </div>
+              ) : (
+                <div className="text-zinc-500 text-xs">{data.name} is {data.status} — chat unavailable</div>
+              )}
             </div>
           )}
 
@@ -359,7 +379,9 @@ export function ChatTab({ workspaceId, data }: Props) {
               }}
               disabled={!isOnline || !agentReachable || sending}
               placeholder={
-                isOnline ? "Send a message..." : `Agent is ${data.status}`
+                !isOnline ? `Agent is ${data.status}` :
+                !agentReachable ? "Agent not responding — try restarting" :
+                "Send a message..."
               }
               className="flex-1 bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
             />

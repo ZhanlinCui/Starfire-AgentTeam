@@ -91,7 +91,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
       }}
       className={`
         group relative rounded-xl
-        ${hasGrandchildren ? "min-w-[400px] max-w-[560px]" : hasChildren ? "min-w-[320px] max-w-[450px]" : "min-w-[210px] max-w-[280px]"}
+        ${hasGrandchildren ? "min-w-[720px] max-w-[960px]" : hasChildren ? "min-w-[320px] max-w-[450px]" : "min-w-[210px] max-w-[280px]"}
         cursor-pointer overflow-hidden
         transition-all duration-200 ease-out
         ${isDragTarget
@@ -248,10 +248,15 @@ function EmbeddedTeam({ members, depth, onSelect, onExtract }: {
   onExtract: (id: string) => void;
 }) {
   const allNodes = useCanvasStore((s) => s.nodes);
+  // Use grid layout at depth 0 when there are multiple members (departments side-by-side)
+  const useGrid = depth === 0 && members.length >= 2;
   return (
     <div className="mt-2 pt-2 border-t border-zinc-700/30">
       <div className="text-[8px] text-zinc-500 uppercase tracking-widest mb-1.5">Team Members</div>
-      <div className="space-y-1.5">
+      <div className={useGrid
+        ? "grid grid-cols-2 gap-1.5 lg:grid-cols-3"
+        : "space-y-1.5"
+      }>
         {members.map((child) => (
           <TeamMemberChip key={child.id} node={child} allNodes={allNodes} depth={depth} onSelect={onSelect} onExtract={onExtract} />
         ))}
@@ -384,7 +389,7 @@ function TeamMemberChip({
         {hasSubChildren && depth < MAX_NESTING_DEPTH && (
           <div className="mt-1.5 pt-1.5 border-t border-zinc-700/20">
             <div className="text-[7px] text-zinc-600 uppercase tracking-widest mb-1">Team</div>
-            <div className="space-y-1">
+            <div className={subChildren.length >= 2 ? "grid grid-cols-2 gap-1" : "space-y-1"}>
               {subChildren.map((sub) => (
                 <TeamMemberChip key={sub.id} node={sub} allNodes={allNodes} depth={depth + 1} onSelect={onSelect} onExtract={onExtract} />
               ))}
