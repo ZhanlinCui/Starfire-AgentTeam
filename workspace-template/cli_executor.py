@@ -144,16 +144,27 @@ class CLIAgentExecutor(AgentExecutor):
 
     def _get_a2a_instructions(self) -> str:
         """Generate A2A delegation instructions injected into every system prompt."""
+        if self.preset.get("auth_pattern") in ("apiKeyHelper", "env"):
+            # MCP-compatible runtime — use MCP tools for delegation
+            return """## Inter-Agent Communication
+You have MCP tools for communicating with other workspaces:
+- list_peers: discover available peer workspaces (name, ID, status, role)
+- delegate_task: send a task to a peer workspace and get their response
+- get_workspace_info: get your own workspace info
+
+When asked to get information from another team, use delegate_task.
+Always use list_peers first to discover available workspace IDs.
+Access control is enforced — you can only reach siblings and parent/children."""
+
+        # For non-MCP runtimes (ollama, custom), provide CLI instructions
         return """## Inter-Agent Communication
 You can delegate tasks to other workspaces using the a2a command:
-
   python3 /app/a2a_cli.py peers                          # List available peers
   python3 /app/a2a_cli.py delegate <workspace_id> <task>  # Send task to a peer
   python3 /app/a2a_cli.py info                            # Your workspace info
 
 When asked to get information from another team, use the delegate command.
-Only delegate to peers listed by the peers command (access control enforced).
-Always run peers first to discover available workspace IDs."""
+Only delegate to peers listed by the peers command (access control enforced)."""
 
     def _get_system_prompt(self) -> str | None:
         """Get system prompt — re-read from file each time (supports hot-reload)."""
@@ -191,6 +202,21 @@ Always run peers first to discover available workspace IDs."""
         if self._auth_helper_path and self.preset.get("auth_pattern") == "apiKeyHelper":
             settings = json.dumps({"apiKeyHelper": self._auth_helper_path})
             args.extend(["--settings", settings])
+
+        # A2A MCP server — inject for MCP-compatible runtimes
+        if self.preset.get("auth_pattern") in ("apiKeyHelper", "env"):
+            mcp_config = json.dumps({
+                "mcpServers": {
+                    "a2a": {
+                        "command": "python3",
+                        "args": ["/app/a2a_mcp_server.py"],
+                    }
+                }
+            })
+            mcp_config_path = os.path.join(tempfile.gettempdir(), "a2a-mcp.json")
+            with open(mcp_config_path, "w") as f:
+                f.write(mcp_config)
+            args.extend(["--mcp-config", mcp_config_path])
 
         # Prompt
         prompt_flag = self.preset.get("prompt_flag")
