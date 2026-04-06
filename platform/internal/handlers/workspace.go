@@ -30,7 +30,7 @@ const maxProxyRequestBody = 1 << 20
 const maxProxyResponseBody = 10 << 20
 
 // a2aClient is a shared HTTP client for proxying A2A requests to workspace agents.
-var a2aClient = &http.Client{Timeout: 120 * time.Second}
+var a2aClient = &http.Client{Timeout: 300 * time.Second} // 5 min for delegation chains
 
 type WorkspaceHandler struct {
 	broadcaster    *events.Broadcaster
