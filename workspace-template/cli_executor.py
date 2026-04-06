@@ -305,7 +305,7 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             return
 
         # Show current task on canvas — truncate to a readable summary
-        task_summary = user_input[:80] + ("..." if len(user_input) > 80 else "")
+        task_summary = user_input[:500] + ("..." if len(user_input) > 500 else "")
         await self._set_current_task(task_summary)
 
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])

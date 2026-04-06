@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   text: string;
@@ -9,28 +10,40 @@ interface Props {
 
 export function Tooltip({ text, children }: Props) {
   const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
-  // Clean up timer on unmount
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
-  const enter = () => {
-    timerRef.current = setTimeout(() => setShow(true), 400);
-  };
-  const leave = () => {
+  const enter = useCallback(() => {
+    timerRef.current = setTimeout(() => {
+      if (triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        setPos({ x: rect.left, y: rect.top });
+      }
+      setShow(true);
+    }, 400);
+  }, []);
+
+  const leave = useCallback(() => {
     clearTimeout(timerRef.current);
     setShow(false);
-  };
+  }, []);
 
   return (
-    <div className="relative" onMouseEnter={enter} onMouseLeave={leave}>
+    <div ref={triggerRef} onMouseEnter={enter} onMouseLeave={leave}>
       {children}
-      {show && text && (
-        <div className="absolute z-[100] bottom-full left-0 mb-1 max-w-[350px] max-h-[200px] overflow-y-auto px-3 py-2 bg-zinc-800 border border-zinc-600 rounded-lg shadow-xl shadow-black/40 pointer-events-none">
-          <div className="text-[10px] text-zinc-200 whitespace-pre-wrap break-words leading-relaxed">
+      {show && text && createPortal(
+        <div
+          className="fixed z-[9999] max-w-[400px] max-h-[300px] overflow-y-auto px-3 py-2 bg-zinc-800 border border-zinc-600 rounded-lg shadow-2xl shadow-black/60 pointer-events-none"
+          style={{ left: pos.x, top: Math.max(8, pos.y - 8), transform: "translateY(-100%)" }}
+        >
+          <div className="text-[11px] text-zinc-200 whitespace-pre-wrap break-words leading-relaxed">
             {text}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
