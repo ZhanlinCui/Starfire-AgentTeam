@@ -187,15 +187,29 @@ Both approaches use the same backend: platform registry for discovery, A2A proto
 | File | Role |
 |------|------|
 | `cli_executor.py` | Generic CLI agent executor with runtime presets |
-| `a2a_mcp_server.py` | MCP server exposing A2A delegation tools (list_peers, delegate_task) |
+| `a2a_mcp_server.py` | MCP server exposing A2A delegation tools (list_peers, delegate_task, delegate_task_async, check_task_status) |
 | `a2a_cli.py` | CLI tool for A2A delegation (all runtimes) |
 | `config.py` | `RuntimeConfig` dataclass, `runtime` field in `WorkspaceConfig` |
 | `main.py` | Runtime selector — creates `CLIAgentExecutor` or `LangGraphA2AExecutor` |
 
+## Rate Limit Handling
+
+The CLI executor includes built-in retry logic with exponential backoff:
+- Empty responses (common rate limit signal) → retry up to 3 times (5s, 10s, 20s)
+- Rate limit errors (429, "overloaded") → retry with same backoff
+- Timeouts → kill subprocess and report (no retry)
+
+The A2A CLI (`a2a_cli.py`) also retries delegation calls on rate limits.
+
+For production with many concurrent agents, consider:
+- Using different auth tokens per workspace (separate subscriptions)
+- Staggering agent invocations
+- Using `delegate_task_async` for long-running tasks
+
 ## Known Limitations
 
 - **Tier 1 (sandboxed)**: Read-only root filesystem is disabled for CLI runtimes because Claude Code needs writable directories (`.claude/`, `.npm/`, `/tmp`). Tier 1 still restricts the `/workspace` volume.
-- **Rate limits**: All workspaces share the same Claude subscription, so rapid testing across many agents can hit rate limits. Space out requests in production.
+- **Rate limits**: All workspaces share the same Claude subscription. Retry logic handles transient rate limits, but sustained high volume needs separate tokens.
 - **Auth token lifecycle**: OAuth tokens expire and need refreshing. Use `claude setup-token` for long-lived tokens in production.
 
 ## Extending with New Runtimes
