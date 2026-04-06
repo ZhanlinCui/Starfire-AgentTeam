@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -101,9 +102,15 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		"tier": payload.Tier,
 	})
 
-	// Auto-provision if a template is specified and provisioner is available
-	if payload.Template != "" && h.provisioner != nil {
-		configPath, _ := filepath.Abs(filepath.Join(h.configsHostDir, payload.Template))
+	// Auto-provision — always start a container
+	if h.provisioner != nil {
+		var configPath string
+		if payload.Template != "" {
+			configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, payload.Template))
+		} else {
+			// No template — generate a minimal config directory
+			configPath = h.ensureDefaultConfig(id, payload)
+		}
 		go h.provisionWorkspace(id, configPath, payload)
 	}
 
@@ -472,6 +479,56 @@ func findTemplateByName(configsDir, name string) string {
 		}
 	}
 	return ""
+}
+
+// ensureDefaultConfig creates a minimal config directory for workspaces without a template.
+// The config dir is created on the host filesystem so it can be mounted into the container.
+func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload models.CreateWorkspacePayload) string {
+	// Create a per-workspace config dir under the host configs directory
+	dirName := "ws-" + workspaceID[:12]
+	configPath := filepath.Join(h.configsHostDir, dirName)
+
+	// Also create on the container-side path (for reading templates list)
+	containerPath := filepath.Join(h.configsDir, dirName)
+	os.MkdirAll(containerPath, 0o755)
+
+	// Determine runtime
+	runtime := payload.Runtime
+	if runtime == "" {
+		runtime = "langgraph"
+	}
+
+	// Generate a minimal config.yaml
+	model := payload.Model
+	if model == "" {
+		if runtime == "claude-code" {
+			model = "sonnet"
+		} else {
+			model = "anthropic:claude-sonnet-4-6"
+		}
+	}
+
+	configYAML := fmt.Sprintf("name: %s\ndescription: %s\nversion: 1.0.0\ntier: %d\nruntime: %s\n",
+		payload.Name, payload.Role, payload.Tier, runtime)
+
+	if runtime != "langgraph" {
+		configYAML += fmt.Sprintf("runtime_config:\n  model: %s\n  auth_token_file: .auth-token\n  timeout: 300\n", model)
+	} else {
+		configYAML += fmt.Sprintf("model: %s\n", model)
+	}
+
+	os.WriteFile(filepath.Join(containerPath, "config.yaml"), []byte(configYAML), 0o644)
+
+	// Copy auth token from the default template if it exists (for CLI runtimes)
+	if runtime != "langgraph" {
+		defaultTokenPath := filepath.Join(h.configsDir, "claude-code-default", ".auth-token")
+		if tokenData, err := os.ReadFile(defaultTokenPath); err == nil {
+			os.WriteFile(filepath.Join(containerPath, ".auth-token"), tokenData, 0o600)
+		}
+	}
+
+	log.Printf("Provisioner: generated default config at %s for workspace %s (runtime: %s)", configPath, workspaceID, runtime)
+	return configPath
 }
 
 // ProxyA2A handles POST /workspaces/:id/a2a
