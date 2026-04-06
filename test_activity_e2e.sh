@@ -239,7 +239,7 @@ check "Activity on missing workspace returns empty" '[]' "$R"
 # Test 25: Report requires activity_type
 R=$(curl -s -X POST "$BASE/workspaces/$AGENT_ID/activity" -H "Content-Type: application/json" \
   -d '{"summary":"missing type"}')
-check "Missing activity_type → 400" 'activity_type' "$R"
+check "Missing activity_type → 400" 'ActivityType' "$R"
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
