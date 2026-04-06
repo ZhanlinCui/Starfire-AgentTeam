@@ -164,6 +164,12 @@ func (h *RegistryHandler) evaluateStatus(c *gin.Context, payload models.Heartbea
 		db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, payload.WorkspaceID)
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.WorkspaceID, map[string]interface{}{})
 	}
+
+	// Recovery: if workspace was offline but is now sending heartbeats, bring it back online
+	if currentStatus == "offline" {
+		db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, payload.WorkspaceID)
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.WorkspaceID, map[string]interface{}{})
+	}
 }
 
 // UpdateCard handles POST /registry/update-card
