@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 RUNTIME_PRESETS: dict[str, dict] = {
     "claude-code": {
         "command": "claude",
-        "base_args": ["--print", "--dangerously-skip-permissions"],
+        "base_args": ["--print", "--dangerously-skip-permissions", "--bare", "--tools", "Bash,Read,Write,Edit,Glob,Grep"],
         "prompt_flag": "-p",
         "model_flag": "--model",
         "system_prompt_flag": "--system-prompt",
