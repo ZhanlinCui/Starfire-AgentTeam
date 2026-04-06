@@ -3,13 +3,21 @@
 import { useCallback, useMemo, useRef } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
+import { useShallow } from "zustand/react/shallow";
 
 /** Stable selector: returns children, grandchild flag, and descendant count for a node */
 function useHierarchyInfo(parentId: string) {
-  const children = useCanvasStore((s) => s.nodes.filter((n) => n.data.parentId === parentId));
-  const childIds = children.map((c) => c.id).join(",");
+  const childIds = useCanvasStore(
+    useCallback((s) => s.nodes.filter((n) => n.data.parentId === parentId).map((n) => n.id).join(","), [parentId])
+  );
+  const children = useCanvasStore(
+    useShallow((s) => s.nodes.filter((n) => n.data.parentId === parentId))
+  );
   const hasGrandchildren = useCanvasStore(
-    useCallback((s) => children.some((c) => s.nodes.some((n) => n.data.parentId === c.id)), [childIds])
+    useCallback((s) => {
+      const ids = childIds.split(",").filter(Boolean);
+      return ids.length > 0 && ids.some((cid) => s.nodes.some((n) => n.data.parentId === cid));
+    }, [childIds])
   );
   const descendantCount = useCanvasStore(
     useCallback((s) => countDescendants(parentId, s.nodes), [parentId])
