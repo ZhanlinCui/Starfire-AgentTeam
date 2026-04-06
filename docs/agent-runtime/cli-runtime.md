@@ -152,13 +152,51 @@ USER agent
 CMD ["python", "main.py"]
 ```
 
+## Inter-Agent Communication (A2A Delegation)
+
+CLI-based workspaces can communicate with other workspaces via two mechanisms:
+
+### MCP Tools (Claude Code, Codex)
+
+For MCP-compatible runtimes, an A2A MCP server (`a2a_mcp_server.py`) is automatically injected via `--mcp-config`. This gives the agent three MCP tools:
+
+| Tool | Description |
+|------|-------------|
+| `list_peers` | Discover sibling/parent/child workspaces (name, ID, status, role) |
+| `delegate_task` | Send a task to a peer and get their response via A2A |
+| `get_workspace_info` | Get this workspace's own metadata |
+
+The agent uses these tools naturally — no special instructions needed. Access control is enforced by the platform registry.
+
+Example flow: Marketing uses `delegate_task(seo_id, "What is your status?")` → A2A message to SEO → SEO responds → result returned to Marketing.
+
+### CLI Commands (Ollama, Custom)
+
+For non-MCP runtimes, A2A instructions are injected into the system prompt. The agent uses bash commands:
+
+```bash
+a2a peers                          # List available peers
+a2a delegate <workspace_id> <task>  # Send task to a peer
+a2a info                           # Show workspace info
+```
+
+Both approaches use the same backend: platform registry for discovery, A2A protocol for messaging, and access control enforcement (parent↔child, siblings only).
+
 ## Key Files
 
 | File | Role |
 |------|------|
 | `cli_executor.py` | Generic CLI agent executor with runtime presets |
+| `a2a_mcp_server.py` | MCP server exposing A2A delegation tools (list_peers, delegate_task) |
+| `a2a_cli.py` | CLI tool for A2A delegation (all runtimes) |
 | `config.py` | `RuntimeConfig` dataclass, `runtime` field in `WorkspaceConfig` |
 | `main.py` | Runtime selector — creates `CLIAgentExecutor` or `LangGraphA2AExecutor` |
+
+## Known Limitations
+
+- **Tier 1 (sandboxed)**: Read-only root filesystem is disabled for CLI runtimes because Claude Code needs writable directories (`.claude/`, `.npm/`, `/tmp`). Tier 1 still restricts the `/workspace` volume.
+- **Rate limits**: All workspaces share the same Claude subscription, so rapid testing across many agents can hit rate limits. Space out requests in production.
+- **Auth token lifecycle**: OAuth tokens expire and need refreshing. Use `claude setup-token` for long-lived tokens in production.
 
 ## Extending with New Runtimes
 
