@@ -30,7 +30,7 @@ RUN ln -s /app/a2a_cli.py /usr/local/bin/a2a && chmod +x /app/a2a_cli.py /app/a2
 VOLUME /configs
 
 # Workspace directory for coding agents (mounted at runtime)
-RUN mkdir -p /workspace /plugins /home/agent/.claude && \
+RUN mkdir -p /workspace /plugins /home/agent/.claude /home/agent/.config /home/agent/.local && \
     chown -R agent:agent /app /home/agent /workspace
 VOLUME /workspace
 VOLUME /plugins

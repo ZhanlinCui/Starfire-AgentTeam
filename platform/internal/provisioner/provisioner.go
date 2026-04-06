@@ -116,9 +116,11 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	if cfg.Tier == 1 {
 		hostCfg.ReadonlyRootfs = true
 		hostCfg.Tmpfs = map[string]string{
-			"/tmp":               "size=64m",
+			"/tmp":                "size=64m",
 			"/home/agent/.claude": "size=32m", // Claude Code needs writable .claude dir
 			"/home/agent/.config": "size=16m", // Node.js config
+			"/home/agent/.local":  "size=16m", // Claude Code local data
+			"/home/agent/.npm":    "size=32m", // npm cache
 		}
 		// Tier 1 doesn't get a writable workspace
 		tier1Binds := []string{fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath)}
