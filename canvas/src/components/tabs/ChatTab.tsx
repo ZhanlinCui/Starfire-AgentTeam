@@ -58,6 +58,9 @@ export function ChatTab({ workspaceId, data }: Props) {
   });
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [thinkingStartTime, setThinkingStartTime] = useState<number>(0);
+  const [thinkingElapsed, setThinkingElapsed] = useState(0);
+  const [thinkingStatus, setThinkingStatus] = useState("");
   const [agentReachable, setAgentReachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -103,6 +106,33 @@ export function ChatTab({ workspaceId, data }: Props) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Thinking timer + rotating status messages
+  useEffect(() => {
+    if (!sending) {
+      setThinkingElapsed(0);
+      setThinkingStatus("");
+      return;
+    }
+    setThinkingStartTime(Date.now());
+    const statuses = [
+      "Analyzing your request...",
+      "Checking workspace context...",
+      "Processing with Claude...",
+      "Running tools if needed...",
+      "Coordinating with peers...",
+      "Generating response...",
+      "Almost there...",
+    ];
+    let statusIdx = 0;
+    setThinkingStatus(statuses[0]);
+    const timer = setInterval(() => {
+      setThinkingElapsed(Math.floor((Date.now() - Date.now() + thinkingStartTime) / 1000) || Math.floor((Date.now() - thinkingStartTime) / 1000));
+      statusIdx = Math.min(statusIdx + 1, statuses.length - 1);
+      setThinkingStatus(statuses[statusIdx]);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [sending, thinkingStartTime]);
 
   const createNewSession = useCallback(() => {
     const session: ChatSession = {
@@ -285,8 +315,18 @@ export function ChatTab({ workspaceId, data }: Props) {
 
           {sending && (
             <div className="flex justify-start">
-              <div className="bg-zinc-800 text-zinc-400 rounded-lg px-3 py-2 text-sm">
-                <span className="animate-pulse">Thinking...</span>
+              <div className="bg-zinc-800 text-zinc-300 rounded-lg px-3 py-2.5 text-sm max-w-[85%] border border-zinc-700/50">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="flex gap-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                  <span className="text-[11px] font-medium text-zinc-300">{thinkingStatus || "Thinking..."}</span>
+                </div>
+                <div className="text-[9px] text-zinc-500">
+                  {thinkingElapsed > 0 ? `${thinkingElapsed}s elapsed` : "Starting..."}
+                </div>
               </div>
             </div>
           )}
