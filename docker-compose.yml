@@ -86,8 +86,11 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@postgres:5432/${POSTGRES_DB:-agentmolecule}?sslmode=disable
       REDIS_URL: redis://redis:6379
       PORT: "8080"
+      PLATFORM_URL: "http://platform:8080"
       RATE_LIMIT: "${RATE_LIMIT:-1000}"
       CONFIGS_DIR: /configs
+      CONFIGS_HOST_DIR: "${CONFIGS_HOST_DIR:-${PWD}/workspace-configs-templates}"
+      PLUGINS_HOST_DIR: "${PLUGINS_HOST_DIR:-${PWD}/plugins}"
     volumes:
       - ./workspace-configs-templates:/configs:ro
       - ./plugins:/plugins:ro

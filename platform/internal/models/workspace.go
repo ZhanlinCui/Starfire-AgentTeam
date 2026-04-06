@@ -56,6 +56,7 @@ type CreateWorkspacePayload struct {
 	Template string  `json:"template"` // workspace-configs-templates folder name
 	Tier     int     `json:"tier"`
 	Model    string  `json:"model"`
+	Runtime  string  `json:"runtime"` // "python" (default) or "claude-code"
 	ParentID *string `json:"parent_id"`
 	Canvas   struct {
 		X float64 `json:"x"`

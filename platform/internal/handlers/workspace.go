@@ -32,18 +32,26 @@ const maxProxyResponseBody = 10 << 20
 var a2aClient = &http.Client{Timeout: 120 * time.Second}
 
 type WorkspaceHandler struct {
-	broadcaster *events.Broadcaster
-	provisioner *provisioner.Provisioner
-	platformURL string
-	configsDir  string // path to workspace-configs-templates/
+	broadcaster    *events.Broadcaster
+	provisioner    *provisioner.Provisioner
+	platformURL    string
+	configsDir     string // path to workspace-configs-templates/ (container-side for reading)
+	configsHostDir string // host-side path for Docker volume mounts
 }
 
 func NewWorkspaceHandler(b *events.Broadcaster, p *provisioner.Provisioner, platformURL, configsDir string) *WorkspaceHandler {
+	// When running inside Docker, CONFIGS_HOST_DIR provides the host-side path
+	// for volume mounts. Falls back to configsDir for local dev.
+	hostDir := os.Getenv("CONFIGS_HOST_DIR")
+	if hostDir == "" {
+		hostDir = configsDir
+	}
 	return &WorkspaceHandler{
-		broadcaster: b,
-		provisioner: p,
-		platformURL: platformURL,
-		configsDir:  configsDir,
+		broadcaster:    b,
+		provisioner:    p,
+		platformURL:    platformURL,
+		configsDir:     configsDir,
+		configsHostDir: hostDir,
 	}
 }
 
@@ -95,7 +103,7 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 
 	// Auto-provision if a template is specified and provisioner is available
 	if payload.Template != "" && h.provisioner != nil {
-		configPath, _ := filepath.Abs(filepath.Join(h.configsDir, payload.Template))
+		configPath, _ := filepath.Abs(filepath.Join(h.configsHostDir, payload.Template))
 		go h.provisionWorkspace(id, configPath, payload)
 	}
 
@@ -345,12 +353,13 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 		}
 	}
 
-	pluginsPath, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
+	pluginsPath, _ := filepath.Abs(filepath.Join(h.configsHostDir, "..", "plugins"))
 	cfg := provisioner.WorkspaceConfig{
 		WorkspaceID: workspaceID,
 		ConfigPath:  configPath,
 		PluginsPath: pluginsPath,
 		Tier:        payload.Tier,
+		Runtime:     payload.Runtime,
 		EnvVars:     envVars,
 		PlatformURL: h.platformURL,
 	}
@@ -442,7 +451,7 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		return
 	}
 
-	configPath, _ := filepath.Abs(filepath.Join(h.configsDir, template))
+	configPath, _ := filepath.Abs(filepath.Join(h.configsHostDir, template))
 	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
 	go h.provisionWorkspace(id, configPath, payload)
 

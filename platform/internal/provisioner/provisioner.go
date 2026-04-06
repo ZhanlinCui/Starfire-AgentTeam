@@ -17,6 +17,9 @@ const (
 	// DefaultImage is the workspace runtime Docker image.
 	DefaultImage = "workspace-template:latest"
 
+	// ClaudeCodeImage is the Docker image for Claude Code workspaces.
+	ClaudeCodeImage = "workspace-claude-code:latest"
+
 	// DefaultNetwork is the Docker network workspaces join.
 	DefaultNetwork = "agent-molecule-net"
 
@@ -33,6 +36,7 @@ type WorkspaceConfig struct {
 	ConfigPath  string // Host path to workspace config directory
 	PluginsPath string // Host path to plugins directory (mounted at /plugins)
 	Tier        int
+	Runtime     string            // "python" (default) or "claude-code"
 	EnvVars     map[string]string // Additional env vars (API keys, etc.)
 	PlatformURL string
 }
@@ -81,9 +85,15 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// Select image based on runtime
+	image := DefaultImage
+	if cfg.Runtime == "claude-code" {
+		image = ClaudeCodeImage
+	}
+
 	// Container config
 	containerCfg := &container.Config{
-		Image: DefaultImage,
+		Image: image,
 		Env:   env,
 		ExposedPorts: nat.PortSet{
 			nat.Port(DefaultPort + "/tcp"): {},
@@ -144,15 +154,8 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		return "", fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Resolve the ephemeral host port for the A2A proxy
+	// Use Docker-internal URL for platform-to-workspace communication
 	url := internalURL(cfg.WorkspaceID)
-	info, inspectErr := p.cli.ContainerInspect(ctx, resp.ID)
-	if inspectErr == nil {
-		if bindings, ok := info.NetworkSettings.Ports[nat.Port(DefaultPort+"/tcp")]; ok && len(bindings) > 0 {
-			url = fmt.Sprintf("http://127.0.0.1:%s", bindings[0].HostPort)
-		}
-	}
-
 	log.Printf("Provisioner: started container %s for workspace %s at %s", name, cfg.WorkspaceID, url)
 	return url, nil
 }
