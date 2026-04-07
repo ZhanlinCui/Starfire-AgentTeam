@@ -1,0 +1,24 @@
+name: OpenClaw Agent
+description: OpenClaw framework — multi-file prompt system with SOUL, BOOTSTRAP, AGENTS, TOOLS, and HEARTBEAT modules
+version: 1.0.0
+tier: 2
+
+runtime: openclaw
+model: openrouter:google/gemini-2.5-flash
+
+prompt_files:
+  - SOUL.md
+  - BOOTSTRAP.md
+  - AGENTS.md
+  - HEARTBEAT.md
+  - TOOLS.md
+  - USER.md
+
+a2a:
+  port: 8000
+  streaming: true
+  push_notifications: true
+
+env:
+  required:
+    - OPENROUTER_API_KEY
