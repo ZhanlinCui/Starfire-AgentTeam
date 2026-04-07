@@ -57,8 +57,8 @@ func normalizeName(name string) string {
 }
 
 // resolveConfigDir finds the config directory for a workspace.
-// Checks ID-based dir (ws-{id[:12]}) first, then name-based dir.
-// If neither exists, defaults to ID-based dir (matching provisioner convention).
+// Priority: ID-based dir (ws-{id[:12]}) → name-based dir → template match by config.yaml name field.
+// If none exist, defaults to ID-based dir (matching provisioner convention for writes).
 func (h *TemplatesHandler) resolveConfigDir(workspaceID, wsName string) string {
 	idDir := filepath.Join(h.configsDir, configDirName(workspaceID))
 	if _, err := os.Stat(idDir); err == nil {
@@ -68,8 +68,11 @@ func (h *TemplatesHandler) resolveConfigDir(workspaceID, wsName string) string {
 	if _, err := os.Stat(nameDir); err == nil {
 		return nameDir
 	}
-	// Neither exists — default to ID-based dir so writes land in the
-	// same location the provisioner uses.
+	// Search templates by config.yaml name field (e.g., org-pm has name: "PM")
+	if tmpl := findTemplateByName(h.configsDir, wsName); tmpl != "" {
+		return filepath.Join(h.configsDir, tmpl)
+	}
+	// Nothing found — default to ID-based dir for writes
 	return idDir
 }
 
