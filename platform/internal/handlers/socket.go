@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/agent-molecule/platform/internal/metrics"
 	"github.com/agent-molecule/platform/internal/ws"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -42,7 +43,13 @@ func (h *SocketHandler) HandleConnect(c *gin.Context) {
 	}
 
 	h.hub.Register <- client
+	metrics.TrackWSConnect()
 
-	go ws.WritePump(client)
+	// Wrap WritePump and ReadPump so the gauge is decremented exactly once
+	// when the client's write goroutine exits (WritePump owns conn lifetime).
+	go func() {
+		ws.WritePump(client)
+		metrics.TrackWSDisconnect()
+	}()
 	go ws.ReadPump(client, h.hub)
 }

@@ -66,11 +66,18 @@ delegation:
   escalate: true       # return failure to LLM on exhaustion
 
 # Code sandbox config (tier 3+ only)
-# sandbox:
-#   backend: docker       # docker | firecracker | e2b
-#   memory_limit: 256m
-#   network: false
-#   timeout: 30s
+# Three backends are available — choose based on your deployment:
+#
+#   subprocess  — local process, no isolation (dev/trusted envs only)
+#   docker      — Docker-in-Docker throwaway container (on-prem, default for tier 3)
+#   e2b         — E2B cloud microVM (hosted/cloud deployments, no Docker needed)
+#
+# For the e2b backend, add E2B_API_KEY as a workspace secret.
+# Obtain a key at https://e2b.dev
+sandbox:
+  backend: docker           # subprocess | docker | e2b
+  memory_limit: 256m        # Docker/E2B memory cap per execution
+  timeout: 30               # seconds before the sandbox is killed
 
 # Sub-workspaces -- empty = single agent, populated = team
 # Each entry references another config in workspace-configs-templates/

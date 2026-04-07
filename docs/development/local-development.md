@@ -28,6 +28,13 @@ To start just Postgres, Redis, and Langfuse (no application code):
 docker compose -f docker-compose.infra.yml up
 ```
 
+### Optional Profiles
+
+```bash
+docker compose --profile multi-provider up  # Add LiteLLM proxy (unified LLM API)
+docker compose --profile local-models up    # Add Ollama (local LLM models)
+```
+
 ## Environment Variables
 
 ### Platform (Go)

@@ -143,6 +143,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | Method | Path | Handler |
 |--------|------|---------|
 | GET | /health | inline |
+| GET | /metrics | metrics.Handler() — Prometheus text format (v0.0.4); no auth, scrape-safe |
 | POST/GET/PATCH/DELETE | /workspaces[/:id] | workspace.go |
 | GET/PATCH | /workspaces/:id/config | workspace.go |
 | GET/POST | /workspaces/:id/memory | workspace.go |

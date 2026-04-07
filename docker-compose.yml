@@ -124,6 +124,66 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- Optional: LiteLLM Proxy (unified OpenAI-compatible API for all providers) ---
+  # Start with: docker compose --profile multi-provider up
+  #
+  # Workspace agents then set:
+  #   OPENAI_BASE_URL=http://litellm:4000
+  #   OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-starfire}
+  #
+  # And use model names from infra/litellm_config.yml (e.g. "claude-opus-4-5",
+  # "gpt-4o", "openrouter/deepseek-r1", "ollama/llama3.2").
+  # Edit infra/litellm_config.yml to add/remove providers and models.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    profiles:
+      - multi-provider
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./infra/litellm_config.yml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
+    environment:
+      # Pass provider API keys through — only the ones you have are needed
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-starfire}
+    networks:
+      - agent-molecule-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # --- Optional: Local LLM Models via Ollama ---
+  # Start with: docker compose --profile local-models up
+  # After first start, pull a model:
+  #   docker compose exec ollama ollama pull llama3.2
+  #   docker compose exec ollama ollama pull qwen2.5-coder:7b
+  # Then set MODEL_PROVIDER=ollama:llama3.2 in your workspace config.yaml
+  # Workspace agents reach Ollama at http://ollama:11434 (internal Docker network).
+  ollama:
+    image: ollama/ollama:latest
+    profiles:
+      - local-models
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollamadata:/root/.ollama
+    networks:
+      - agent-molecule-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 networks:
   agent-molecule-net:
     name: agent-molecule-net
@@ -132,3 +192,4 @@ volumes:
   pgdata:
   redisdata:
   clickhousedata:
+  ollamadata:

@@ -71,6 +71,24 @@ Activity logs have a configurable retention policy (default 7 days, cleanup ever
 
 The current task description (`current_task` field in heartbeat) is displayed as an amber banner on workspace nodes and the side panel header, giving immediate visibility into what each agent is doing.
 
+## Prometheus Metrics
+
+The platform exposes a `GET /metrics` endpoint in Prometheus text exposition format (v0.0.4). No external dependencies — implemented in `platform/internal/metrics/metrics.go`.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `starfire_http_requests_total{method,path,status}` | counter | Total HTTP requests by route |
+| `starfire_http_request_duration_seconds_total{method,path}` | counter | Cumulative request latency |
+| `starfire_websocket_connections_active` | gauge | Current WebSocket connections |
+| `go_goroutines` | gauge | Go runtime goroutine count |
+| `go_memstats_alloc_bytes` | gauge | Heap allocated bytes |
+| `go_memstats_sys_bytes` | gauge | Total OS memory |
+| `go_gc_duration_seconds_total` | counter | Cumulative GC pause time |
+
+Scrape with: `curl http://localhost:8080/metrics`
+
+Uses matched route patterns (e.g. `/workspaces/:id`) to avoid high-cardinality label explosion from workspace UUIDs.
+
 ## Why This Matters
 
 Debugging distributed agents is hard. Without centralized observability, you cannot see what happened across multiple machines. Langfuse provides the unified trace view at the LLM call level. Activity logs provide the operational view at the inter-agent communication level. Together they give complete visibility into what happened, why, and how long it took.

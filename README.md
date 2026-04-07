@@ -14,6 +14,21 @@
 [Communication Protocol](./docs/api-protocol/a2a-protocol.md) • 
 [Agent Runtime](./docs/agent-runtime/workspace-runtime.md)
 
+---
+
+**Deploy in one click:**
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/yourusername/starfire)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/yourusername/starfire)
+
+> Replace `yourusername/starfire` in the button URLs above with your actual GitHub repo path.
+
+<!-- 
+  DEMO GIF — INSERT HERE
+  Recommended: 800×500px, max 5MB, recorded at the steps in docs/demo/fractal-expansion-script.md
+  Format: ![Starfire fractal expansion demo](./docs/demo/fractal-expansion.gif)
+-->
+
 </div>
 
 ---
@@ -108,6 +123,101 @@ Starfire is a thoroughly distributed system:
 3. **Workspace Runtime (Python):** The execution engine for individual agents. Powered by Deep Agents + LangGraph, wrapped in a standardized A2A SDK.
 
 > *Workspaces talk directly to one another via JSON-RPC 2.0. The platform is never in the data path of an agent conversation.*
+
+---
+
+## ☁️ One-Click Cloud Deployment
+
+Starfire ships `railway.toml` and `render.yaml` for zero-config cloud deployment. Both platforms provision managed Postgres and Redis automatically.
+
+### Railway
+```bash
+# Option A: Click the deploy button in the README
+# Option B: CLI deploy
+railway login
+railway init
+railway up
+```
+
+### Render
+```bash
+# Option A: Click the deploy button in the README
+# Option B: Blueprint deploy from the Render dashboard
+#   New → Blueprint → point at your GitHub repo
+```
+
+### Required Environment Variables
+
+| Variable | Required | Description | Example |
+|---|---|---|---|
+| `DATABASE_URL` | ✅ | Postgres connection string | auto-injected by Railway/Render |
+| `REDIS_URL` | ✅ | Redis connection string | auto-injected by Railway/Render |
+| `SECRETS_ENCRYPTION_KEY` | ✅ | AES-256 key for workspace secrets | `openssl rand -base64 32` |
+| `PLATFORM_URL` | ✅ | Public URL of the platform service | `https://starfire-platform.up.railway.app` |
+| `CORS_ORIGINS` | ✅ | Comma-separated allowed origins | `https://starfire-canvas.up.railway.app` |
+| `PORT` | — | API server port (default `8080`) | auto-set by Railway/Render |
+| `RATE_LIMIT` | — | Requests/min per IP (default `100`) | `500` |
+| `ACTIVITY_RETENTION_DAYS` | — | Activity log retention (default `7`) | `30` |
+
+> **Note:** Workspace agent containers are provisioned by the platform via the Docker socket. Cloud deployments that don't support Docker-in-Docker (Railway, Render free tier) will run without the provisioner; workspaces must be started externally and registered via the API. For full provisioner support, self-host on a VM with Docker access.
+
+---
+
+## 🔀 Multi-Provider Routing with LiteLLM
+
+Starfire ships with an optional [LiteLLM](https://docs.litellm.ai/) proxy service that gives every workspace agent a single unified OpenAI-compatible endpoint — regardless of which underlying model provider you're using.
+
+**Start the stack with LiteLLM:**
+```bash
+docker compose --profile multi-provider up
+```
+
+**Configure a workspace** — in `config.yaml` or via the canvas Secrets panel:
+```yaml
+# config.yaml
+model: claude-opus-4-5        # or gpt-4o, openrouter/deepseek-r1, ollama/llama3.2
+```
+Add these secrets to the workspace via the canvas or API:
+```
+OPENAI_BASE_URL  = http://litellm:4000
+OPENAI_API_KEY   = sk-starfire          # matches LITELLM_MASTER_KEY
+```
+
+**Configure providers** by editing `infra/litellm_config.yml`. Set the relevant API key env vars in your shell or `.env` file:
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENROUTER_API_KEY=sk-or-...
+```
+
+The LiteLLM UI is available at `http://localhost:4000/ui` for monitoring, model testing, and spend tracking.
+
+> **Combine with Ollama:** Run `docker compose --profile multi-provider --profile local-models up` to have both available simultaneously. The `ollama/llama3.2` model entry in `litellm_config.yml` routes through LiteLLM → Ollama automatically.
+
+---
+
+## 🦙 Using Local Models with Ollama
+
+Starfire ships with an optional Ollama service so workspace agents can run entirely on local models — no API keys required.
+
+**Start the stack with Ollama:**
+```bash
+docker compose --profile local-models up
+```
+
+**Pull a model** (first run only):
+```bash
+docker compose exec ollama ollama pull llama3.2
+docker compose exec ollama ollama pull qwen2.5-coder:7b
+```
+
+**Point a workspace at Ollama** — in your workspace `config.yaml`:
+```yaml
+model: ollama:llama3.2       # or ollama:qwen2.5-coder:7b
+```
+
+Workspace agents inside the Docker network reach Ollama at `http://ollama:11434`. The Ollama data volume (`ollamadata`) persists downloaded models across restarts so you only pull once.
+
+> **GPU support:** Add `deploy.resources.reservations.devices` to the `ollama` service in `docker-compose.yml` to pass through a CUDA/ROCm device. See the [Ollama Docker docs](https://hub.docker.com/r/ollama/ollama) for details.
 
 ---
 

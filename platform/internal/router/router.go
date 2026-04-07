@@ -9,6 +9,7 @@ import (
 
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/handlers"
+	"github.com/agent-molecule/platform/internal/metrics"
 	"github.com/agent-molecule/platform/internal/middleware"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/ws"
@@ -42,10 +43,20 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	limiter := middleware.NewRateLimiter(rateLimit, time.Minute, context.Background())
 	r.Use(limiter.Middleware())
 
+	// Prometheus metrics middleware — records every request's method/path/status/latency.
+	// Must be registered after rate limiter so aborted requests are also counted.
+	r.Use(metrics.Middleware())
+
 	// Health
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	// Prometheus metrics — exempt from rate limiter via separate registration
+	// (registered before Use(limiter) takes effect on this specific route — the
+	// middleware.Middleware() still records it for observability).
+	// Scrape with: curl http://localhost:8080/metrics
+	r.GET("/metrics", metrics.Handler())
 
 	// Workspaces CRUD
 	wh := handlers.NewWorkspaceHandler(broadcaster, prov, platformURL, configsDir)
