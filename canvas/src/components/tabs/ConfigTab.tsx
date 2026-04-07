@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { useCanvasStore } from "@/store/canvas";
 
 interface Props {
   workspaceId: string;
@@ -54,6 +55,7 @@ export function ConfigTab({ workspaceId }: Props) {
     setSaving(true);
     try {
       await api.patch(`/workspaces/${workspaceId}/config`, parsed);
+      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       setConfig(draft);
       setSuccess(true);
       clearTimeout(successTimerRef.current);

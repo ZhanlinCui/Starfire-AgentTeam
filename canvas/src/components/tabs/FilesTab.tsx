@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api } from "@/lib/api";
+import { useCanvasStore } from "@/store/canvas";
 import { showToast } from "../Toaster";
 
 interface Props {
@@ -92,6 +93,7 @@ export function FilesTab({ workspaceId }: Props) {
     setError(null);
     try {
       await api.put(`/workspaces/${workspaceId}/files/${selectedFile}`, { content: editContent });
+      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       setFileContent(editContent);
       setSuccess("Saved");
       clearTimeout(successTimerRef.current);

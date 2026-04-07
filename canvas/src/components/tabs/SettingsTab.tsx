@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { useCanvasStore } from "@/store/canvas";
 
 interface Props {
   workspaceId: string;
@@ -52,6 +53,7 @@ export function SettingsTab({ workspaceId }: Props) {
     setError(null);
     try {
       await api.post(`/workspaces/${workspaceId}/secrets`, { key, value });
+      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       setNewKey("");
       setNewValue("");
       setShowAdd(false);

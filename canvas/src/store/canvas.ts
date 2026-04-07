@@ -21,6 +21,7 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   url: string;
   parentId: string | null;
   currentTask: string;
+  needsRestart: boolean;
 }
 
 export type PanelTab = "details" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events" | "activity";
@@ -80,6 +81,7 @@ function buildNodesAndEdges(workspaces: WorkspaceData[]) {
       url: ws.url,
       parentId: ws.parent_id,
       currentTask: ws.current_task || "",
+      needsRestart: false,
     },
     // Hide child nodes from canvas — they render inside the parent WorkspaceNode
     hidden: !!ws.parent_id,
@@ -290,6 +292,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                   url: "",
                   parentId: null,
                   currentTask: "",
+                  needsRestart: false,
                 },
               },
             ],

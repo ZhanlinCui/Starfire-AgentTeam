@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useCanvasStore, type PanelTab } from "@/store/canvas";
+import { api } from "@/lib/api";
 import { StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
 import { DetailsTab } from "./tabs/DetailsTab";
@@ -137,6 +138,23 @@ export function SidePanel() {
           </button>
         ))}
       </div>
+
+      {/* Needs Restart Banner */}
+      {node.data.needsRestart && !node.data.currentTask && (
+        <div className="px-4 py-2 bg-sky-950/20 border-b border-sky-800/20 flex items-center justify-between">
+          <span className="text-[10px] text-sky-300/90">Config changed — restart to apply</span>
+          <button
+            onClick={() => {
+              api.post(`/workspaces/${selectedNodeId}/restart`).then(() => {
+                useCanvasStore.getState().updateNodeData(selectedNodeId!, { needsRestart: false });
+              }).catch(() => {});
+            }}
+            className="text-[9px] px-2 py-1 bg-sky-800/40 hover:bg-sky-700/50 text-sky-200 rounded transition-colors"
+          >
+            Restart Now
+          </button>
+        </div>
+      )}
 
       {/* Current Task Banner */}
       {node.data.currentTask && (
