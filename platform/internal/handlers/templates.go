@@ -56,6 +56,16 @@ func normalizeName(name string) string {
 	return result
 }
 
+// resolveConfigDir finds the config directory for a workspace.
+// Checks ID-based dir (ws-{id[:12]}) first, then falls back to name-based dir.
+func (h *TemplatesHandler) resolveConfigDir(workspaceID, wsName string) string {
+	idDir := filepath.Join(h.configsDir, configDirName(workspaceID))
+	if _, err := os.Stat(idDir); err == nil {
+		return idDir
+	}
+	return filepath.Join(h.configsDir, normalizeName(wsName))
+}
+
 // validateRelPath checks that a relative path doesn't escape the target directory.
 func validateRelPath(relPath string) error {
 	clean := filepath.Clean(relPath)
@@ -193,13 +203,7 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 		return
 	}
 
-	// Resolve config directory: prefer ID-based dir (auto-provisioned), fall back to name-based
-	idDirName := configDirName(workspaceID)
-	destDir := filepath.Join(h.configsDir, idDirName)
-	if _, err := os.Stat(destDir); os.IsNotExist(err) {
-		// Fall back to name-based dir
-		destDir = filepath.Join(h.configsDir, normalizeName(wsName))
-	}
+	destDir := h.resolveConfigDir(workspaceID, wsName)
 
 	// Create dir if needed, don't clear existing (merge files)
 	os.MkdirAll(destDir, 0o755)
@@ -241,8 +245,7 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		return
 	}
 
-	dirName := normalizeName(wsName)
-	configDir := filepath.Join(h.configsDir, dirName)
+	configDir := h.resolveConfigDir(workspaceID, wsName)
 
 	if _, err := os.Stat(configDir); os.IsNotExist(err) {
 		c.JSON(http.StatusOK, []interface{}{})
@@ -298,7 +301,7 @@ func (h *TemplatesHandler) ReadFile(c *gin.Context) {
 		return
 	}
 
-	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
+	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
@@ -340,7 +343,7 @@ func (h *TemplatesHandler) WriteFile(c *gin.Context) {
 		return
 	}
 
-	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
+	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
 	if err := os.WriteFile(fullPath, []byte(body.Content), 0600); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file"})
@@ -370,7 +373,7 @@ func (h *TemplatesHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 
-	fullPath := filepath.Join(h.configsDir, normalizeName(wsName), filePath)
+	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
 
 	info, err := os.Stat(fullPath)
 	if err != nil {
@@ -407,7 +410,7 @@ func (h *TemplatesHandler) SharedContext(c *gin.Context) {
 		return
 	}
 
-	configDir := filepath.Join(h.configsDir, normalizeName(wsName))
+	configDir := h.resolveConfigDir(workspaceID, wsName)
 	configData, err := os.ReadFile(filepath.Join(configDir, "config.yaml"))
 	if err != nil {
 		c.JSON(http.StatusOK, []interface{}{})
