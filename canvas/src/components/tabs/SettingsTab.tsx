@@ -67,6 +67,7 @@ export function SettingsTab({ workspaceId }: Props) {
     setError(null);
     try {
       await api.del(`/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`);
+      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       setSecrets((prev) => prev.filter((s) => s.key !== key));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to delete");

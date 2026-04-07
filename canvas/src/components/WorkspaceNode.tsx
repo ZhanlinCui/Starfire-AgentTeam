@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { api } from "@/lib/api";
+import { showToast } from "@/components/Toaster";
 import { Tooltip } from "@/components/Tooltip";
 import { useShallow } from "zustand/react/shallow";
 
@@ -194,7 +195,7 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
               e.stopPropagation();
               api.post(`/workspaces/${id}/restart`).then(() => {
                 useCanvasStore.getState().updateNodeData(id, { needsRestart: false });
-              }).catch(() => {});
+              }).catch(() => showToast("Restart failed", "error"));
             }}
             className="flex items-center gap-1.5 mt-1 w-full bg-sky-950/30 px-2 py-1 rounded-md border border-sky-800/30 hover:bg-sky-900/40 transition-colors text-left"
           >

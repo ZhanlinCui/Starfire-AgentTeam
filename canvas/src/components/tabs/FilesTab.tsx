@@ -114,6 +114,7 @@ export function FilesTab({ workspaceId }: Props) {
     setError(null);
     try {
       await api.del(`/workspaces/${workspaceId}/files/${confirmDelete}`);
+      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       if (selectedFile === confirmDelete) {
         setSelectedFile(null);
         setFileContent("");
@@ -132,6 +133,7 @@ export function FilesTab({ workspaceId }: Props) {
     setError(null);
     try {
       await api.put(`/workspaces/${workspaceId}/files/${newFileName.trim()}`, { content: "" });
+      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       setShowNewFile(false);
       setNewFileName("");
       loadFiles();
@@ -189,6 +191,7 @@ export function FilesTab({ workspaceId }: Props) {
       } catch { /* skip binary */ }
     }
     if (uploaded > 0) {
+      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       showToast(`Uploaded ${uploaded} files`, "success");
       loadFiles();
     }

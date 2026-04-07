@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useCanvasStore, type PanelTab } from "@/store/canvas";
 import { api } from "@/lib/api";
+import { showToast } from "@/components/Toaster";
 import { StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
 import { DetailsTab } from "./tabs/DetailsTab";
@@ -147,7 +148,7 @@ export function SidePanel() {
             onClick={() => {
               api.post(`/workspaces/${selectedNodeId}/restart`).then(() => {
                 useCanvasStore.getState().updateNodeData(selectedNodeId!, { needsRestart: false });
-              }).catch(() => {});
+              }).catch(() => showToast("Restart failed", "error"));
             }}
             className="text-[9px] px-2 py-1 bg-sky-800/40 hover:bg-sky-700/50 text-sky-200 rounded transition-colors"
           >
