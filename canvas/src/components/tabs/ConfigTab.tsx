@@ -28,7 +28,6 @@ interface ConfigData {
   delegation: { retry_attempts: number; retry_delay: number; timeout: number; escalate: boolean };
   sandbox: { backend: string; memory_limit: string; timeout: number };
   env: { required: string[]; optional: string[] };
-  [key: string]: unknown;
 }
 
 const DEFAULT_CONFIG: ConfigData = {
@@ -48,72 +47,88 @@ const DEFAULT_CONFIG: ConfigData = {
   env: { required: [], optional: [] },
 };
 
-// Simple YAML parser for config.yaml (flat + nested)
+// Simple YAML parser for config.yaml — handles flat keys, 1-level objects,
+// lists, and 2-level nesting (e.g., env.required: [...]).
 function parseYaml(text: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const lines = text.split("\n");
-  let currentKey = "";
-  let currentList: string[] | null = null;
-  let currentObj: Record<string, unknown> | null = null;
 
-  for (const line of lines) {
-    if (line.trim() === "" || line.trim().startsWith("#")) {
-      if (currentList && currentKey) { result[currentKey] = currentList; currentList = null; }
-      if (currentObj && currentKey) { result[currentKey] = currentObj; currentObj = null; }
-      continue;
-    }
+  function parseValue(v: string): unknown {
+    if (v === "true") return true;
+    if (v === "false") return false;
+    if (/^\d+$/.test(v)) return parseInt(v, 10);
+    return v;
+  }
 
-    // List item under a key
-    if (line.match(/^\s+-\s+/)) {
-      const val = line.replace(/^\s+-\s+/, "").trim();
-      if (currentList) currentList.push(val);
-      continue;
-    }
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
 
-    // Nested key: value
-    if (line.match(/^\s+\w/)) {
-      const m = line.match(/^\s+(\w+):\s*(.*)/);
-      if (m && currentObj) {
-        let v: unknown = m[2].trim();
-        if (v === "true") v = true;
-        else if (v === "false") v = false;
-        else if (typeof v === "string" && /^\d+$/.test(v)) v = parseInt(v as string, 10);
-        currentObj[m[1]] = v;
-      }
-      continue;
-    }
+    // Skip blanks and comments
+    if (line.trim() === "" || line.trim().startsWith("#")) { i++; continue; }
 
     // Top-level key
-    if (currentList && currentKey) { result[currentKey] = currentList; currentList = null; }
-    if (currentObj && currentKey) { result[currentKey] = currentObj; currentObj = null; }
+    const topMatch = line.match(/^(\w[\w_]*):\s*(.*)/);
+    if (!topMatch) { i++; continue; }
 
-    const m = line.match(/^(\w[\w_]*):\s*(.*)/);
-    if (!m) continue;
-    const key = m[1];
-    const val = m[2].trim();
+    const key = topMatch[1];
+    const val = topMatch[2].trim();
+    i++;
 
-    if (val === "" || val === "[]") {
-      // Could be a list or object — peek ahead
-      const nextLine = lines[lines.indexOf(line) + 1] || "";
-      if (nextLine.match(/^\s+-\s+/)) {
-        currentKey = key;
-        currentList = [];
-      } else if (nextLine.match(/^\s+\w+:/)) {
-        currentKey = key;
-        currentObj = {};
-      } else {
-        result[key] = val === "[]" ? [] : "";
+    if (val !== "" && val !== "[]") {
+      result[key] = parseValue(val);
+      continue;
+    }
+
+    // Peek ahead to determine structure
+    const nextLine = lines[i] || "";
+    if (val === "[]" || (!nextLine.match(/^\s/) || nextLine.trim() === "" || nextLine.trim().startsWith("#"))) {
+      result[key] = val === "[]" ? [] : "";
+      continue;
+    }
+
+    // Indented content follows — is it a list or object?
+    if (nextLine.match(/^\s+-\s+/)) {
+      // List
+      const items: string[] = [];
+      while (i < lines.length && lines[i].match(/^\s+-\s+/)) {
+        items.push(lines[i].replace(/^\s+-\s+/, "").trim());
+        i++;
       }
-    } else {
-      let parsed: unknown = val;
-      if (val === "true") parsed = true;
-      else if (val === "false") parsed = false;
-      else if (/^\d+$/.test(val)) parsed = parseInt(val, 10);
-      result[key] = parsed;
+      result[key] = items;
+    } else if (nextLine.match(/^\s+\w+:/)) {
+      // Object (1 or 2 levels)
+      const obj: Record<string, unknown> = {};
+      while (i < lines.length) {
+        const sub = lines[i];
+        if (sub.trim() === "" || sub.trim().startsWith("#")) { i++; continue; }
+        // 2-space indented key: value
+        const subMatch = sub.match(/^  (\w[\w_]*):\s*(.*)/);
+        if (!subMatch) break;
+        const subKey = subMatch[1];
+        const subVal = subMatch[2].trim();
+        i++;
+
+        if (subVal !== "" && subVal !== "[]") {
+          obj[subKey] = parseValue(subVal);
+        } else {
+          // Check for nested list (2-level: env.required: [...])
+          const subNext = lines[i] || "";
+          if (subNext.match(/^\s{4,}-\s+/)) {
+            const subItems: string[] = [];
+            while (i < lines.length && lines[i].match(/^\s{4,}-\s+/)) {
+              subItems.push(lines[i].replace(/^\s+-\s+/, "").trim());
+              i++;
+            }
+            obj[subKey] = subItems;
+          } else {
+            obj[subKey] = subVal === "[]" ? [] : "";
+          }
+        }
+      }
+      result[key] = obj;
     }
   }
-  if (currentList && currentKey) result[currentKey] = currentList;
-  if (currentObj && currentKey) result[currentKey] = currentObj;
   return result;
 }
 
