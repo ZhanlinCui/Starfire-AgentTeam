@@ -16,9 +16,21 @@ import (
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
+
+// allowedRoots are the container paths that the Files API can browse.
+var allowedRoots = map[string]bool{
+	"/configs":   true,
+	"/workspace": true,
+	"/home":      true,
+	"/plugins":   true,
+}
+
+// maxExecOutput limits container exec output to 5MB to prevent OOM.
+const maxExecOutput = 5 * 1024 * 1024
 
 // maxUploadFiles limits the number of files in a single import/replace.
 const maxUploadFiles = 200
@@ -33,19 +45,32 @@ func NewTemplatesHandler(configsDir string, dockerCli *client.Client) *Templates
 }
 
 // findContainer finds a running container for the workspace.
+// Checks provisioner name, full ID, and DB workspace name (same candidates as terminal handler).
 func (h *TemplatesHandler) findContainer(ctx context.Context, workspaceID string) string {
 	if h.docker == nil {
 		return ""
 	}
 	name := provisioner.ContainerName(workspaceID)
-	info, err := h.docker.ContainerInspect(ctx, name)
-	if err == nil && info.State.Running {
-		return name
+	candidates := []string{name}
+	if name != "ws-"+workspaceID {
+		candidates = append(candidates, "ws-"+workspaceID)
+	}
+	// Also check by workspace name from DB
+	var wsName string
+	db.DB.QueryRowContext(ctx, `SELECT LOWER(REPLACE(name, ' ', '-')) FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName)
+	if wsName != "" {
+		candidates = append(candidates, wsName)
+	}
+	for _, c := range candidates {
+		info, err := h.docker.ContainerInspect(ctx, c)
+		if err == nil && info.State.Running {
+			return c
+		}
 	}
 	return ""
 }
 
-// execInContainer runs a command in a container and returns stdout.
+// execInContainer runs a command in a container and returns stdout (capped at maxExecOutput).
 func (h *TemplatesHandler) execInContainer(ctx context.Context, containerName string, cmd []string) (string, error) {
 	execCfg := container.ExecOptions{
 		Cmd:          cmd,
@@ -61,26 +86,10 @@ func (h *TemplatesHandler) execInContainer(ctx context.Context, containerName st
 		return "", err
 	}
 	defer resp.Close()
-	var buf bytes.Buffer
-	io.Copy(&buf, resp.Reader)
-	// Docker multiplexed stream: strip 8-byte header frames
-	return stripDockerHeaders(buf.Bytes()), nil
-}
-
-// stripDockerHeaders removes Docker multiplexed stream headers (8 bytes per frame).
-func stripDockerHeaders(raw []byte) string {
-	var out bytes.Buffer
-	for len(raw) >= 8 {
-		// Header: [stream_type(1), 0, 0, 0, size(4)]
-		size := int(raw[4])<<24 | int(raw[5])<<16 | int(raw[6])<<8 | int(raw[7])
-		raw = raw[8:]
-		if size > len(raw) {
-			size = len(raw)
-		}
-		out.Write(raw[:size])
-		raw = raw[size:]
-	}
-	return strings.TrimSpace(out.String())
+	var stdout bytes.Buffer
+	// Use stdcopy to correctly demux Docker multiplexed stream (stdout/stderr)
+	stdcopy.StdCopy(&stdout, io.Discard, io.LimitReader(resp.Reader, maxExecOutput))
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 type templateSummary struct {
@@ -312,6 +321,10 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 
 	// Query param ?root= to explore different container paths (default: /configs)
 	rootPath := c.DefaultQuery("root", "/configs")
+	if !allowedRoots[rootPath] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "root must be one of: /configs, /workspace, /home, /plugins"})
+		return
+	}
 
 	var wsName string
 	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
@@ -327,13 +340,14 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 
 	// Try container filesystem first
 	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
-		// Use find + stat to get file listing as JSON-parseable output
-		// Format: TYPE|SIZE|PATH  (d=dir, f=file)
+		// Portable file listing: works on both GNU and BusyBox/Alpine.
+		// Uses find + sh -c stat to output TYPE|SIZE|PATH per line.
 		output, err := h.execInContainer(ctx, containerName, []string{
-			"find", rootPath, "-maxdepth", "5",
-			"-not", "-path", "*/\\.git/*",
-			"-not", "-name", ".DS_Store",
-			"-printf", "%y|%s|%P\n",
+			"sh", "-c",
+			fmt.Sprintf(`find %s -maxdepth 5 -not -path '*/.git/*' -not -name .DS_Store | while IFS= read -r f; do
+				rel="${f#%s/}"; [ "$rel" = "%s" ] && continue; [ -z "$rel" ] && continue
+				if [ -d "$f" ]; then echo "d|0|$rel"; else s=$(stat -c %%s "$f" 2>/dev/null || stat -f %%z "$f" 2>/dev/null || echo 0); echo "f|$s|$rel"; fi
+			done`, rootPath, rootPath, rootPath),
 		})
 		if err != nil {
 			log.Printf("Container file list failed, falling back to host: %v", err)
@@ -409,6 +423,10 @@ func (h *TemplatesHandler) ReadFile(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	rootPath := c.DefaultQuery("root", "/configs")
+	if !allowedRoots[rootPath] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "root must be one of: /configs, /workspace, /home, /plugins"})
+		return
+	}
 
 	var wsName string
 	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
