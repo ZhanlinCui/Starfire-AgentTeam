@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useCanvasStore, type PanelTab } from "@/store/canvas";
 import { StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
@@ -36,12 +37,55 @@ export function SidePanel() {
     s.nodes.find((n) => n.id === s.selectedNodeId)
   );
 
+  // Resizable panel width
+  const [width, setWidth] = useState(480);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(480);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startX.current = e.clientX;
+    startWidth.current = width;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [width]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = startX.current - e.clientX;
+      const newWidth = Math.min(Math.max(startWidth.current + delta, 320), window.innerWidth * 0.8);
+      setWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      dragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
   if (!selectedNodeId || !node) return null;
 
   const isOnline = node.data.status === "online";
 
   return (
-    <div className="fixed top-0 right-0 h-full w-[480px] bg-zinc-950/95 backdrop-blur-xl border-l border-zinc-800/50 flex flex-col z-50 shadow-2xl shadow-black/50 animate-in slide-in-from-right duration-200">
+    <div
+      className="fixed top-0 right-0 h-full bg-zinc-950/95 backdrop-blur-xl border-l border-zinc-800/50 flex flex-col z-50 shadow-2xl shadow-black/50 animate-in slide-in-from-right duration-200"
+      style={{ width }}
+    >
+      {/* Resize handle */}
+      <div
+        onMouseDown={onMouseDown}
+        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors z-10"
+      />
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800/40 bg-zinc-900/30">
         <div className="flex items-center gap-3 min-w-0">
