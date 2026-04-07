@@ -59,12 +59,12 @@ def _brief_summary(text: str, max_len: int = 80) -> str:
 RUNTIME_PRESETS: dict[str, dict] = {
     "claude-code": {
         "command": "claude",
-        "base_args": ["--print", "--dangerously-skip-permissions", "--bare", "--allowed-tools", "Bash"],
+        "base_args": ["--print", "--dangerously-skip-permissions", "--allowed-tools", "Bash"],
         "prompt_flag": "-p",
         "model_flag": "--model",
         "system_prompt_flag": "--system-prompt",
-        "auth_pattern": "apiKeyHelper",  # uses --settings '{"apiKeyHelper":"<path>"}'
-        "default_auth_env": "CLAUDE_AUTH_TOKEN",
+        "auth_pattern": "env",  # OAuth token via CLAUDE_CODE_OAUTH_TOKEN (--bare disables OAuth)
+        "default_auth_env": "CLAUDE_CODE_OAUTH_TOKEN",
         "default_auth_file": ".auth-token",
     },
     "codex": {
