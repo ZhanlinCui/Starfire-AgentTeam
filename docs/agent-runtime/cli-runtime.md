@@ -192,11 +192,29 @@ a2a info                           # Show workspace info
 
 Both approaches use the same backend: platform registry for discovery, A2A protocol for messaging, and access control enforcement (parent↔child, siblings only).
 
+## Task Status Reporting
+
+Any process inside a workspace container (cron jobs, scripts, background tasks) can update the canvas card display:
+
+```bash
+agent-molecule-status "Running weekly SEO audit..."  # show on canvas
+agent-molecule-status ""                              # clear when done
+```
+
+From Python:
+```python
+from agent_molecule_status import set_status
+set_status("Analyzing competitor data...")
+```
+
+This pushes an immediate heartbeat with `current_task` to the platform, which broadcasts via WebSocket to the canvas. The task banner appears instantly on the workspace card.
+
 ## Key Files
 
 | File | Role |
 |------|------|
 | `cli_executor.py` | Generic CLI agent executor with runtime presets |
+| `agent_molecule_status.py` | CLI tool + module for updating canvas task display from any process |
 | `a2a_mcp_server.py` | MCP server exposing A2A delegation tools (list_peers, delegate_task, delegate_task_async, check_task_status) |
 | `a2a_cli.py` | CLI tool for A2A delegation (all runtimes) |
 | `config.py` | `RuntimeConfig` dataclass, `runtime` field in `WorkspaceConfig` |

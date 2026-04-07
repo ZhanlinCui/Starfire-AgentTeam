@@ -36,6 +36,23 @@ from config import RuntimeConfig
 
 logger = logging.getLogger(__name__)
 
+
+def _brief_summary(text: str, max_len: int = 80) -> str:
+    """Extract a brief one-line task summary for the canvas card display."""
+    # Take the first non-empty, non-header line
+    for line in text.split("\n"):
+        line = line.strip().lstrip("#").strip().lstrip("-").strip().lstrip("*").strip()
+        if not line or line.startswith("```") or line.startswith("---"):
+            continue
+        # Remove markdown bold/italic
+        line = line.replace("**", "").replace("__", "")
+        # Truncate
+        if len(line) > max_len:
+            line = line[:max_len - 3] + "..."
+        return line
+    return text[:max_len]
+
+
 # Built-in runtime presets
 RUNTIME_PRESETS: dict[str, dict] = {
     "claude-code": {
@@ -304,9 +321,8 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             )
             return
 
-        # Show current task on canvas — truncate to a readable summary
-        task_summary = user_input[:500] + ("..." if len(user_input) > 500 else "")
-        await self._set_current_task(task_summary)
+        # Show current task on canvas — extract a brief one-line summary
+        await self._set_current_task(_brief_summary(user_input))
 
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
 

@@ -230,8 +230,8 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
         # Report delegation start — include the task text for traceability
         peer_name = peer.get("name") or _peer_names.get(target_id) or target_id[:8]
         _peer_names[target_id] = peer_name  # cache for future use
-        task_preview = task[:200] + ("..." if len(task) > 200 else "")
-        await report_activity("a2a_send", target_id, f"Delegating to {peer_name}: {task_preview}", task_text=task)
+        # Brief summary for canvas display — just the delegation target
+        await report_activity("a2a_send", target_id, f"Delegating to {peer_name}", task_text=task)
 
         # Send A2A message and log the full round-trip
         result = await send_a2a_message(target_url, task)
