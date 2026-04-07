@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
-import { SkillInstaller } from "../SkillInstaller";
 import { StatusDot } from "../StatusDot";
 
 interface Props {
@@ -191,11 +190,6 @@ export function DetailsTab({ workspaceId, data }: Props) {
         )}
       </Section>
 
-      {/* Install Skills */}
-      <Section title="Install Skill">
-        <SkillInstaller workspaceId={workspaceId} />
-      </Section>
-
       {/* Agent Card / Skills */}
       {skills.length > 0 && (
         <Section title="Skills">
@@ -211,16 +205,6 @@ export function DetailsTab({ workspaceId, data }: Props) {
           </div>
         </Section>
       )}
-
-      {/* Agent Management */}
-      <Section title="Agent">
-        <AgentManager workspaceId={workspaceId} />
-      </Section>
-
-      {/* Agent Card — editable */}
-      <Section title="Agent Card">
-        <AgentCardEditor workspaceId={workspaceId} card={agentCard} />
-      </Section>
 
       {/* Peers */}
       <Section title={`Peers (${peers.length})`}>
@@ -305,238 +289,6 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
       <span className={`text-xs text-zinc-200 ${mono ? "font-mono" : ""} text-right max-w-[200px] truncate`}>
         {value}
       </span>
-    </div>
-  );
-}
-
-function AgentManager({ workspaceId }: { workspaceId: string }) {
-  const [agent, setAgent] = useState<{ agent_id: string; model: string } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [model, setModel] = useState("");
-  const [showAssign, setShowAssign] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    // Try to get current agent by checking the agents table
-    // For MVP, we show the model from the workspace config
-    api.get<{ model: string; source: string }>(`/workspaces/${workspaceId}/model`)
-      .then((res) => {
-        if (res.model) {
-          setAgent({ agent_id: "", model: res.model });
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [workspaceId]);
-
-  const handleAssign = async () => {
-    if (!model.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await api.post<{ agent_id: string; model: string }>(
-        `/workspaces/${workspaceId}/agent`,
-        { model: model.trim() }
-      );
-      setAgent(res);
-      setShowAssign(false);
-      setModel("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to assign");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleReplace = async () => {
-    if (!model.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await api.patch<{ agent_id: string; model: string }>(
-        `/workspaces/${workspaceId}/agent`,
-        { model: model.trim() }
-      );
-      setAgent(res);
-      setShowAssign(false);
-      setModel("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to replace");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRemove = async () => {
-    setError(null);
-    try {
-      await api.del(`/workspaces/${workspaceId}/agent`);
-      setAgent(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove");
-    }
-  };
-
-  if (loading) return <div className="text-xs text-zinc-500">Loading...</div>;
-
-  return (
-    <div className="space-y-2">
-      {error && (
-        <div className="px-3 py-1.5 bg-red-900/30 border border-red-800 rounded text-xs text-red-400">{error}</div>
-      )}
-
-      {agent ? (
-        <div className="bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-2.5">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-[10px] text-zinc-500">Current Model</div>
-              <div className="text-xs text-zinc-200 font-mono">{agent.model}</div>
-            </div>
-            <div className="flex gap-1.5">
-              <button
-                onClick={() => { setShowAssign(true); setModel(agent.model); }}
-                className="text-[10px] text-blue-400 hover:text-blue-300"
-              >
-                Replace
-              </button>
-              <button
-                onClick={handleRemove}
-                className="text-[10px] text-red-400 hover:text-red-300"
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="text-xs text-zinc-500">No agent assigned</div>
-      )}
-
-      {(showAssign || !agent) && (
-        <div className="flex gap-2">
-          <input
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="anthropic:claude-sonnet-4-6"
-            className="flex-1 bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-2.5 py-1.5 text-xs font-mono text-zinc-100 focus:outline-none focus:border-blue-500/60"
-          />
-          <button
-            onClick={agent ? handleReplace : handleAssign}
-            disabled={!model.trim() || saving}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-[10px] rounded-lg text-white disabled:opacity-30"
-          >
-            {saving ? "..." : agent ? "Replace" : "Assign"}
-          </button>
-          {showAssign && agent && (
-            <button
-              onClick={() => setShowAssign(false)}
-              className="px-2 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-[10px] rounded-lg text-zinc-300"
-            >
-              Cancel
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AgentCardEditor({ workspaceId, card }: { workspaceId: string; card: Record<string, unknown> | null }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-
-  const startEditing = () => {
-    setDraft(JSON.stringify(card || {}, null, 2));
-    setEditing(true);
-    setError(null);
-    setSuccess(false);
-  };
-
-  const handleSave = async () => {
-    setError(null);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(draft);
-    } catch {
-      setError("Invalid JSON");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await api.post("/registry/update-card", {
-        workspace_id: workspaceId,
-        agent_card: parsed,
-      });
-      setSuccess(true);
-      setEditing(false);
-      setTimeout(() => setSuccess(false), 2000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update agent card");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!editing) {
-    return (
-      <div>
-        {card ? (
-          <pre className="text-[10px] text-zinc-400 bg-zinc-800 rounded p-2 overflow-x-auto max-h-48">
-            {JSON.stringify(card, null, 2)}
-          </pre>
-        ) : (
-          <p className="text-xs text-zinc-500">No agent card</p>
-        )}
-        {success && (
-          <div className="mt-2 px-3 py-1.5 bg-green-900/30 border border-green-800 rounded text-xs text-green-400">
-            Agent card updated
-          </div>
-        )}
-        <button
-          onClick={startEditing}
-          className="mt-2 px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-xs rounded text-zinc-300"
-        >
-          Edit Agent Card
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        spellCheck={false}
-        rows={12}
-        className="w-full bg-zinc-800 border border-zinc-600 rounded p-2 text-[10px] font-mono text-zinc-200 focus:outline-none focus:border-blue-500 resize-none"
-      />
-      {error && (
-        <div className="px-3 py-1.5 bg-red-900/30 border border-red-800 rounded text-xs text-red-400">
-          {error}
-        </div>
-      )}
-      <div className="flex gap-2">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-xs rounded text-white disabled:opacity-50"
-        >
-          {saving ? "Saving..." : "Save"}
-        </button>
-        <button
-          onClick={() => setEditing(false)}
-          className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 text-xs rounded text-zinc-300"
-        >
-          Cancel
-        </button>
-      </div>
     </div>
   );
 }

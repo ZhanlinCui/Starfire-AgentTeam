@@ -399,6 +399,78 @@ function SecretsSection({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+// --- Agent Card Section ---
+
+function AgentCardSection({ workspaceId }: { workspaceId: string }) {
+  const [card, setCard] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    api.get<Record<string, unknown>>(`/workspaces/${workspaceId}`)
+      .then((ws) => setCard((ws.agent_card as Record<string, unknown>) || null))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  const handleSave = async () => {
+    setError(null);
+    let parsed: unknown;
+    try { parsed = JSON.parse(draft); } catch { setError("Invalid JSON"); return; }
+    setSaving(true);
+    try {
+      await api.post("/registry/update-card", { workspace_id: workspaceId, agent_card: parsed });
+      setCard(parsed as Record<string, unknown>);
+      setSuccess(true);
+      setEditing(false);
+      setTimeout(() => setSuccess(false), 2000);
+    } catch (e) { setError(e instanceof Error ? e.message : "Failed to update"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Section title="Agent Card" defaultOpen={false}>
+      {loading ? (
+        <div className="text-[10px] text-zinc-500">Loading...</div>
+      ) : editing ? (
+        <div className="space-y-2">
+          <textarea
+            value={draft} onChange={(e) => setDraft(e.target.value)}
+            spellCheck={false} rows={12}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded p-2 text-[10px] font-mono text-zinc-200 focus:outline-none focus:border-blue-500 resize-none"
+          />
+          {error && <div className="px-2 py-1 bg-red-900/30 border border-red-800 rounded text-[10px] text-red-400">{error}</div>}
+          <div className="flex gap-2">
+            <button onClick={handleSave} disabled={saving}
+              className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-[10px] rounded text-white disabled:opacity-50">
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button onClick={() => setEditing(false)}
+              className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-[10px] rounded text-zinc-300">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          {card ? (
+            <pre className="text-[9px] text-zinc-400 bg-zinc-800/50 rounded p-2 overflow-x-auto max-h-48 border border-zinc-700/50">
+              {JSON.stringify(card, null, 2)}
+            </pre>
+          ) : (
+            <div className="text-[10px] text-zinc-500">No agent card</div>
+          )}
+          {success && <div className="mt-2 px-2 py-1 bg-green-900/30 border border-green-800 rounded text-[10px] text-green-400">Updated</div>}
+          <button onClick={() => { setDraft(JSON.stringify(card || {}, null, 2)); setEditing(true); setError(null); setSuccess(false); }}
+            className="mt-2 text-[10px] text-blue-400 hover:text-blue-300">Edit Agent Card</button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 // --- Main ConfigTab ---
 
 export function ConfigTab({ workspaceId }: Props) {
@@ -611,6 +683,8 @@ export function ConfigTab({ workspaceId }: Props) {
           </Section>
 
           <SecretsSection workspaceId={workspaceId} />
+
+          <AgentCardSection workspaceId={workspaceId} />
         </div>
       )}
 

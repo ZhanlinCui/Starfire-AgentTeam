@@ -88,7 +88,7 @@ Both banners use the shared `restartWorkspace(id)` store action. The panel conta
 | **Activity** | `ActivityTab` | Comprehensive activity log — A2A communications (with request/response bodies, duration), task updates, agent logs, errors. Type filters, auto-refresh (5s), expandable JSON details with message previews. Workspace names resolved from IDs. **Full Trace** button opens cross-workspace conversation timeline modal |
 | **Chat** | `ChatTab` | **Poll-based chat** — fire-and-forget A2A request + poll activity log for response (survives page refresh/tab switch). Session continuity (Claude Code `--resume`), markdown for agent responses, live activity feed via WebSocket, multi-line textarea, session persistence (localStorage) |
 | **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
-| **Config** | `ConfigTab` | Structured form editor for `config.yaml` + secrets management. Sections: General, Runtime, Skills/Tools, A2A, Delegation, Sandbox, Secrets & API Keys. Includes quick-set rows for common API keys (Anthropic, OpenAI, Google, SERP), custom env vars, tag inputs, dropdowns, raw YAML toggle. Reads/writes config via Files API, secrets via `/workspaces/:id/secrets` |
+| **Config** | `ConfigTab` | Structured form editor for `config.yaml` + secrets + agent card. Sections: General, Runtime, Skills/Tools, A2A, Delegation, Sandbox, Secrets & API Keys, Agent Card. Includes quick-set rows for common API keys, custom env vars, tag inputs, dropdowns, raw YAML toggle, editable agent card JSON. Reads/writes config via Files API, secrets via `/workspaces/:id/secrets`, agent card via `/registry/update-card` |
 | **Files** | `FilesTab` | Container file explorer with root selector (`/configs`, `/home`, `/workspace`, `/plugins`), tree view, inline editor. `/configs` is editable; other roots are read-only. Falls back to host-side config dir when container is offline |
 | **Memory** | `MemoryTab` | Browse key/value memory entries from `GET /workspaces/:id/memory`, add new entries with optional TTL |
 | **Traces** | `TracesTab` | Langfuse LLM traces — name, latency, token usage, cost, expandable I/O |
@@ -96,7 +96,7 @@ Both banners use the shared `restartWorkspace(id)` store action. The panel conta
 
 Tab state is managed in the Zustand store via `panelTab` and `setPanelTab`. The panel closes when the user clicks the close button or clicks the canvas background.
 
-The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, Restart triggers `POST /workspaces/:id/restart`. Also includes Agent Management (assign/replace/remove model) and Skill Installer.
+The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, Restart triggers `POST /workspaces/:id/restart`. Shows read-only skills list from agent card, peer list, and delete with confirmation.
 
 The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. No hard session deadline — the idle timeout (30 min) resets on each keystroke. The shell prefers `/bin/bash` for tab completion and history, falling back to `/bin/sh` on minimal containers.
 
