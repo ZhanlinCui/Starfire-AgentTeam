@@ -152,7 +152,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.PUT("/canvas/viewport", vh.Save)
 
 	// Templates
-	tmplh := handlers.NewTemplatesHandler(configsDir)
+	tmplh := handlers.NewTemplatesHandler(configsDir, dockerCli)
 	r.GET("/templates", tmplh.List)
 	r.POST("/templates/import", tmplh.Import)
 	r.GET("/workspaces/:id/shared-context", tmplh.SharedContext)

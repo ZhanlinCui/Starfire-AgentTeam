@@ -491,7 +491,7 @@ func TestSharedContext(t *testing.T) {
 		t.Fatalf("failed to write test.md: %v", err)
 	}
 
-	handler := NewTemplatesHandler(tmpDir)
+	handler := NewTemplatesHandler(tmpDir, nil)
 
 	// Mock DB returning workspace name that normalizes to "test-workspace"
 	mock.ExpectQuery("SELECT name FROM workspaces WHERE id =").
@@ -1019,7 +1019,7 @@ func TestSharedContext_NoSharedFiles(t *testing.T) {
 		t.Fatalf("failed to write config.yaml: %v", err)
 	}
 
-	handler := NewTemplatesHandler(tmpDir)
+	handler := NewTemplatesHandler(tmpDir, nil)
 
 	// Mock DB returning workspace name that normalizes to "empty-workspace"
 	mock.ExpectQuery("SELECT name FROM workspaces WHERE id =").

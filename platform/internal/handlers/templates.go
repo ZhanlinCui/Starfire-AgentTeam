@@ -1,13 +1,21 @@
 package handlers
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/agent-molecule/platform/internal/db"
+	"github.com/agent-molecule/platform/internal/provisioner"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
@@ -17,10 +25,62 @@ const maxUploadFiles = 200
 
 type TemplatesHandler struct {
 	configsDir string
+	docker     *client.Client
 }
 
-func NewTemplatesHandler(configsDir string) *TemplatesHandler {
-	return &TemplatesHandler{configsDir: configsDir}
+func NewTemplatesHandler(configsDir string, dockerCli *client.Client) *TemplatesHandler {
+	return &TemplatesHandler{configsDir: configsDir, docker: dockerCli}
+}
+
+// findContainer finds a running container for the workspace.
+func (h *TemplatesHandler) findContainer(ctx context.Context, workspaceID string) string {
+	if h.docker == nil {
+		return ""
+	}
+	name := provisioner.ContainerName(workspaceID)
+	info, err := h.docker.ContainerInspect(ctx, name)
+	if err == nil && info.State.Running {
+		return name
+	}
+	return ""
+}
+
+// execInContainer runs a command in a container and returns stdout.
+func (h *TemplatesHandler) execInContainer(ctx context.Context, containerName string, cmd []string) (string, error) {
+	execCfg := container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	execID, err := h.docker.ContainerExecCreate(ctx, containerName, execCfg)
+	if err != nil {
+		return "", err
+	}
+	resp, err := h.docker.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, resp.Reader)
+	// Docker multiplexed stream: strip 8-byte header frames
+	return stripDockerHeaders(buf.Bytes()), nil
+}
+
+// stripDockerHeaders removes Docker multiplexed stream headers (8 bytes per frame).
+func stripDockerHeaders(raw []byte) string {
+	var out bytes.Buffer
+	for len(raw) >= 8 {
+		// Header: [stream_type(1), 0, 0, 0, size(4)]
+		size := int(raw[4])<<24 | int(raw[5])<<16 | int(raw[6])<<8 | int(raw[7])
+		raw = raw[8:]
+		if size > len(raw) {
+			size = len(raw)
+		}
+		out.Write(raw[:size])
+		raw = raw[size:]
+	}
+	return strings.TrimSpace(out.String())
 }
 
 type templateSummary struct {
@@ -244,21 +304,18 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 }
 
 // ListFiles handles GET /workspaces/:id/files
-// Returns the file tree of a workspace's config directory.
+// Lists files inside the running container's /configs directory (or /workspace, etc.).
+// Falls back to host-side config templates directory when container isn't running.
 func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
+	// Query param ?root= to explore different container paths (default: /configs)
+	rootPath := c.DefaultQuery("root", "/configs")
+
 	var wsName string
 	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-		return
-	}
-
-	configDir := h.resolveConfigDir(workspaceID, wsName)
-
-	if _, err := os.Stat(configDir); os.IsNotExist(err) {
-		c.JSON(http.StatusOK, []interface{}{})
 		return
 	}
 
@@ -268,13 +325,59 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		Dir  bool   `json:"dir"`
 	}
 
+	// Try container filesystem first
+	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
+		// Use find + stat to get file listing as JSON-parseable output
+		// Format: TYPE|SIZE|PATH  (d=dir, f=file)
+		output, err := h.execInContainer(ctx, containerName, []string{
+			"find", rootPath, "-maxdepth", "5",
+			"-not", "-path", "*/\\.git/*",
+			"-not", "-name", ".DS_Store",
+			"-printf", "%y|%s|%P\n",
+		})
+		if err != nil {
+			log.Printf("Container file list failed, falling back to host: %v", err)
+		} else {
+			var files []fileEntry
+			for _, line := range strings.Split(output, "\n") {
+				parts := strings.SplitN(line, "|", 3)
+				if len(parts) != 3 || parts[2] == "" {
+					continue
+				}
+				size, _ := strconv.ParseInt(parts[1], 10, 64)
+				files = append(files, fileEntry{
+					Path: parts[2],
+					Size: size,
+					Dir:  parts[0] == "d",
+				})
+			}
+			if files == nil {
+				files = []fileEntry{}
+			}
+			c.JSON(http.StatusOK, files)
+			return
+		}
+	}
+
+	// Fallback: host-side config dir
+	configDir := h.resolveConfigDir(workspaceID, wsName)
+
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
 	var files []fileEntry
 	filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || path == configDir {
 			return nil
 		}
 		rel, _ := filepath.Rel(configDir, path)
-		if strings.HasPrefix(rel, ".") {
+		base := filepath.Base(rel)
+		if base == ".git" || base == ".DS_Store" {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		files = append(files, fileEntry{
@@ -305,12 +408,29 @@ func (h *TemplatesHandler) ReadFile(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	rootPath := c.DefaultQuery("root", "/configs")
+
 	var wsName string
 	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 		return
 	}
 
+	// Try container first
+	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
+		containerPath := rootPath + "/" + filePath
+		content, err := h.execInContainer(ctx, containerName, []string{"cat", containerPath})
+		if err == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"path":    filePath,
+				"content": content,
+				"size":    len(content),
+			})
+			return
+		}
+	}
+
+	// Fallback: host-side
 	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
@@ -353,6 +473,7 @@ func (h *TemplatesHandler) WriteFile(c *gin.Context) {
 		return
 	}
 
+	// Write to host-side config dir (bind-mounted as /configs in container)
 	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
 	if err := os.WriteFile(fullPath, []byte(body.Content), 0600); err != nil {
