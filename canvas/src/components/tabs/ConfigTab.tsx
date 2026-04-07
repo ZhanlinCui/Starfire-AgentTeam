@@ -27,7 +27,6 @@ interface ConfigData {
   a2a: { port: number; streaming: boolean; push_notifications: boolean };
   delegation: { retry_attempts: number; retry_delay: number; timeout: number; escalate: boolean };
   sandbox: { backend: string; memory_limit: string; timeout: number };
-  env: { required: string[]; optional: string[] };
 }
 
 const DEFAULT_CONFIG: ConfigData = {
@@ -44,7 +43,6 @@ const DEFAULT_CONFIG: ConfigData = {
   a2a: { port: 8000, streaming: true, push_notifications: true },
   delegation: { retry_attempts: 3, retry_delay: 5, timeout: 120, escalate: true },
   sandbox: { backend: "docker", memory_limit: "256m", timeout: 30 },
-  env: { required: [], optional: [] },
 };
 
 // Simple YAML parser for config.yaml — handles flat keys, 1-level objects,
@@ -170,17 +168,6 @@ function toYaml(config: ConfigData): string {
   lines.push(""); obj("a2a", config.a2a as unknown as Record<string, unknown>);
   lines.push(""); obj("delegation", config.delegation as unknown as Record<string, unknown>);
   if (config.sandbox?.backend) { lines.push(""); obj("sandbox", config.sandbox as unknown as Record<string, unknown>); }
-  if (config.env?.required?.length || config.env?.optional?.length) {
-    lines.push(""); lines.push("env:");
-    if (config.env.required?.length) {
-      lines.push("  required:");
-      config.env.required.forEach((v) => lines.push(`    - ${v}`));
-    }
-    if (config.env.optional?.length) {
-      lines.push("  optional:");
-      config.env.optional.forEach((v) => lines.push(`    - ${v}`));
-    }
-  }
 
   return lines.join("\n") + "\n";
 }
@@ -528,7 +515,15 @@ export function ConfigTab({ workspaceId }: Props) {
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           <Section title="General">
             <TextInput label="Name" value={config.name} onChange={(v) => update("name", v)} />
-            <TextInput label="Description" value={config.description} onChange={(v) => update("description", v)} />
+            <div>
+              <label className="text-[10px] text-zinc-500 block mb-1">Description</label>
+              <textarea
+                value={config.description}
+                onChange={(e) => update("description", e.target.value)}
+                rows={3}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-blue-500 resize-none"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <TextInput label="Version" value={config.version} onChange={(v) => update("version", v)} mono />
               <div>
@@ -613,11 +608,6 @@ export function ConfigTab({ workspaceId }: Props) {
               <TextInput label="Memory Limit" value={config.sandbox?.memory_limit || "256m"} onChange={(v) => updateNested("sandbox" as keyof ConfigData, "memory_limit", v)} mono />
               <NumberInput label="Timeout (s)" value={config.sandbox?.timeout ?? 30} onChange={(v) => updateNested("sandbox" as keyof ConfigData, "timeout", v)} min={5} />
             </div>
-          </Section>
-
-          <Section title="Environment" defaultOpen={false}>
-            <TagList label="Required" values={config.env?.required || []} onChange={(v) => updateNested("env" as keyof ConfigData, "required", v)} placeholder="e.g. ANTHROPIC_API_KEY" />
-            <TagList label="Optional" values={config.env?.optional || []} onChange={(v) => updateNested("env" as keyof ConfigData, "optional", v)} placeholder="e.g. GITHUB_TOKEN" />
           </Section>
 
           <SecretsSection workspaceId={workspaceId} />
