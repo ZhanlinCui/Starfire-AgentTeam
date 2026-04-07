@@ -57,13 +57,20 @@ func normalizeName(name string) string {
 }
 
 // resolveConfigDir finds the config directory for a workspace.
-// Checks ID-based dir (ws-{id[:12]}) first, then falls back to name-based dir.
+// Checks ID-based dir (ws-{id[:12]}) first, then name-based dir.
+// If neither exists, defaults to ID-based dir (matching provisioner convention).
 func (h *TemplatesHandler) resolveConfigDir(workspaceID, wsName string) string {
 	idDir := filepath.Join(h.configsDir, configDirName(workspaceID))
 	if _, err := os.Stat(idDir); err == nil {
 		return idDir
 	}
-	return filepath.Join(h.configsDir, normalizeName(wsName))
+	nameDir := filepath.Join(h.configsDir, normalizeName(wsName))
+	if _, err := os.Stat(nameDir); err == nil {
+		return nameDir
+	}
+	// Neither exists — default to ID-based dir so writes land in the
+	// same location the provisioner uses.
+	return idDir
 }
 
 // validateRelPath checks that a relative path doesn't escape the target directory.
