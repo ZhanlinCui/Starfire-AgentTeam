@@ -48,6 +48,7 @@ export function FilesTab({ workspaceId }: Props) {
   const [showNewFile, setShowNewFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [root, setRoot] = useState("/configs");
   const successTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
@@ -58,14 +59,14 @@ export function FilesTab({ workspaceId }: Props) {
   const loadFiles = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.get<FileEntry[]>(`/workspaces/${workspaceId}/files`);
+      const data = await api.get<FileEntry[]>(`/workspaces/${workspaceId}/files?root=${encodeURIComponent(root)}`);
       setFiles(data);
     } catch {
       setFiles([]);
     } finally {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, root]);
 
   useEffect(() => {
     loadFiles();
@@ -76,7 +77,7 @@ export function FilesTab({ workspaceId }: Props) {
     setError(null);
     setSuccess(null);
     try {
-      const res = await api.get<{ content: string }>(`/workspaces/${workspaceId}/files/${path}`);
+      const res = await api.get<{ content: string }>(`/workspaces/${workspaceId}/files/${path}?root=${encodeURIComponent(root)}`);
       setSelectedFile(path);
       setFileContent(res.content);
       setEditContent(res.content);
@@ -228,29 +229,52 @@ export function FilesTab({ workspaceId }: Props) {
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/40 bg-zinc-900/30">
-        <span className="text-[10px] text-zinc-500">{files.filter((f) => !f.dir).length} files</span>
+        <div className="flex items-center gap-2">
+          <select
+            value={root}
+            onChange={(e) => {
+              setRoot(e.target.value);
+              setSelectedFile(null);
+              setFileContent("");
+              setEditContent("");
+            }}
+            className="text-[10px] bg-zinc-800 text-zinc-300 border border-zinc-700 rounded px-1.5 py-0.5 outline-none"
+          >
+            <option value="/configs">/configs</option>
+            <option value="/home">/home</option>
+            <option value="/workspace">/workspace</option>
+            <option value="/plugins">/plugins</option>
+          </select>
+          <span className="text-[10px] text-zinc-500">{files.filter((f) => !f.dir).length} files</span>
+        </div>
         <div className="flex gap-1.5">
-          <button onClick={() => setShowNewFile(true)} className="text-[10px] text-blue-400 hover:text-blue-300" title="Create new file">
-            + New
-          </button>
-          <input
-            ref={uploadRef}
-            type="file"
-            // @ts-expect-error webkitdirectory
-            webkitdirectory=""
-            multiple
-            className="hidden"
-            onChange={(e) => e.target.files && handleUploadFiles(e.target.files)}
-          />
-          <button onClick={() => uploadRef.current?.click()} className="text-[10px] text-blue-400 hover:text-blue-300" title="Upload folder">
-            Upload
-          </button>
+          {root === "/configs" && (
+            <>
+              <button onClick={() => setShowNewFile(true)} className="text-[10px] text-blue-400 hover:text-blue-300" title="Create new file">
+                + New
+              </button>
+              <input
+                ref={uploadRef}
+                type="file"
+                // @ts-expect-error webkitdirectory
+                webkitdirectory=""
+                multiple
+                className="hidden"
+                onChange={(e) => e.target.files && handleUploadFiles(e.target.files)}
+              />
+              <button onClick={() => uploadRef.current?.click()} className="text-[10px] text-blue-400 hover:text-blue-300" title="Upload folder">
+                Upload
+              </button>
+            </>
+          )}
           <button onClick={handleDownloadAll} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Download all files">
             Export
           </button>
-          <button onClick={() => setShowDeleteAll(true)} className="text-[10px] text-red-400/60 hover:text-red-400" title="Delete all files">
-            Clear
-          </button>
+          {root === "/configs" && (
+            <button onClick={() => setShowDeleteAll(true)} className="text-[10px] text-red-400/60 hover:text-red-400" title="Delete all files">
+              Clear
+            </button>
+          )}
           <button onClick={loadFiles} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Refresh">
             ↻
           </button>
@@ -318,7 +342,7 @@ export function FilesTab({ workspaceId }: Props) {
               nodes={tree}
               selectedPath={selectedFile}
               onSelect={openFile}
-              onDelete={requestDeleteFile}
+              onDelete={root === "/configs" ? requestDeleteFile : () => {}}
             />
           )}
         </div>
@@ -343,13 +367,15 @@ export function FilesTab({ workspaceId }: Props) {
                   >
                     ↓
                   </button>
-                  <button
-                    onClick={saveFile}
-                    disabled={!isDirty || saving}
-                    className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-30"
-                  >
-                    {saving ? "Saving..." : "Save"}
-                  </button>
+                  {root === "/configs" && (
+                    <button
+                      onClick={saveFile}
+                      disabled={!isDirty || saving}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-30"
+                    >
+                      {saving ? "Saving..." : "Save"}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -360,6 +386,7 @@ export function FilesTab({ workspaceId }: Props) {
                 <textarea
                   ref={editorRef}
                   value={editContent}
+                  readOnly={root !== "/configs"}
                   onChange={(e) => setEditContent(e.target.value)}
                   onKeyDown={(e) => {
                     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
