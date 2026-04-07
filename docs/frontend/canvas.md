@@ -77,20 +77,19 @@ See [WebSocket Events](../api-protocol/websocket-events.md) for the full JSON pa
 
 Clicking a workspace node opens a **480px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. Below the tab bar, two contextual banners may appear:
 
-- **Needs Restart** (sky-blue): shown when `needsRestart` is true and no active task — displays "Config changed — restart to apply" with a "Restart Now" button. Triggered by config/secrets/files mutations in ConfigTab, SettingsTab, and FilesTab. Hidden while agent has an active task to prevent mid-task restarts. Note: this flag is client-only and resets on page refresh.
+- **Needs Restart** (sky-blue): shown when `needsRestart` is true and no active task — displays "Config changed — restart to apply" with a "Restart Now" button. Triggered by config/secrets/files mutations in ConfigTab and FilesTab. Hidden while agent has an active task to prevent mid-task restarts. Note: this flag is client-only and resets on page refresh.
 - **Current Task** (amber pulsing): shown when the agent has an active task (`current_task` from heartbeat) — displays what the agent is currently working on.
 
-Both banners use the shared `restartWorkspace(id)` store action. The panel contains eleven tabs:
+Both banners use the shared `restartWorkspace(id)` store action. The panel contains nine tabs:
 
 | Tab | Component | Description |
 |-----|-----------|-------------|
 | **Details** | `DetailsTab` | Inline editing of name/role/tier, editable Agent Card (JSON), Restart button for offline/failed, peer list, delete with confirmation |
 | **Activity** | `ActivityTab` | Comprehensive activity log — A2A communications (with request/response bodies, duration), task updates, agent logs, errors. Type filters, auto-refresh (5s), expandable JSON details with message previews. Workspace names resolved from IDs. **Full Trace** button opens cross-workspace conversation timeline modal |
 | **Chat** | `ChatTab` | **Poll-based chat** — fire-and-forget A2A request + poll activity log for response (survives page refresh/tab switch). Session continuity (Claude Code `--resume`), markdown for agent responses, live activity feed via WebSocket, multi-line textarea, session persistence (localStorage) |
-| **Settings** | `SettingsTab` | Configure LLM provider + API keys per workspace via `/workspaces/:id/secrets`, quick-set rows for common keys. Sets `needsRestart` flag on add/delete |
 | **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
+| **Config** | `ConfigTab` | Structured form editor for `config.yaml` + secrets management. Sections: General, Runtime, Skills/Tools, A2A, Delegation, Sandbox, Secrets & API Keys. Includes quick-set rows for common API keys (Anthropic, OpenAI, Google, SERP), custom env vars, tag inputs, dropdowns, raw YAML toggle. Reads/writes config via Files API, secrets via `/workspaces/:id/secrets` |
 | **Files** | `FilesTab` | Container file explorer with root selector (`/configs`, `/home`, `/workspace`, `/plugins`), tree view, inline editor. `/configs` is editable; other roots are read-only. Falls back to host-side config dir when container is offline |
-| **Config** | `ConfigTab` | Structured form editor for `config.yaml` — sections for General, Runtime, Skills/Tools, A2A, Delegation, Sandbox, Environment. Tag inputs for skills/tools/env vars, dropdowns for tier/runtime/sandbox. Raw YAML toggle for power users. Reads/writes via Files API |
 | **Memory** | `MemoryTab` | Browse key/value memory entries from `GET /workspaces/:id/memory`, add new entries with optional TTL |
 | **Traces** | `TracesTab` | Langfuse LLM traces — name, latency, token usage, cost, expandable I/O |
 | **Events** | `EventsTab` | Workspace-scoped structure event log from `GET /events/:workspaceId`, color-coded by event type |
@@ -98,8 +97,6 @@ Both banners use the shared `restartWorkspace(id)` store action. The panel conta
 Tab state is managed in the Zustand store via `panelTab` and `setPanelTab`. The panel closes when the user clicks the close button or clicks the canvas background.
 
 The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, Restart triggers `POST /workspaces/:id/restart`. Also includes Agent Management (assign/replace/remove model) and Replace Agent Folder (upload folder to swap agent files with confirmation).
-
-The **Settings tab** stores API keys in the `workspace_secrets` table — values are never exposed to the browser (only key names are returned by `GET /workspaces/:id/secrets`).
 
 The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. No hard session deadline — the idle timeout (30 min) resets on each keystroke. The shell prefers `/bin/bash` for tab completion and history, falling back to `/bin/sh` on minimal containers.
 
@@ -299,7 +296,7 @@ interface CanvasState {
 
   // Selection / panel state
   selectedNodeId: string | null;
-  panelTab: PanelTab; // "details" | "activity" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events"
+  panelTab: PanelTab; // "details" | "activity" | "chat" | "terminal" | "config" | "files" | "memory" | "traces" | "events"
 
   // Actions
   hydrate(workspaces): void;
