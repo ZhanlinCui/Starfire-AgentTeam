@@ -65,6 +65,8 @@ export function ChatTab({ workspaceId, data }: Props) {
   const [sending, setSending] = useState(!!data.currentTask);
   const [thinkingElapsed, setThinkingElapsed] = useState(0);
   const [activityLog, setActivityLog] = useState<string[]>([]);
+  const cleanupRef = useRef<(() => void) | undefined>(undefined);
+  const currentTaskRef = useRef(data.currentTask);
   const sendingFromAPIRef = useRef(false); // tracks whether WE initiated the send
   const [agentReachable, setAgentReachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,16 +110,23 @@ export function ChatTab({ workspaceId, data }: Props) {
     checkAgent();
   }, [checkAgent]);
 
+  // Keep currentTaskRef in sync
+  useEffect(() => {
+    currentTaskRef.current = data.currentTask;
+  }, [data.currentTask]);
+
+  // Clean up poll timer on unmount
+  useEffect(() => () => cleanupRef.current?.(), []);
+
   // On page load/refresh: if agent has an active task, start polling for the response.
-  // This picks up results from requests that were in-flight when the page was refreshed.
   useEffect(() => {
     if (!sending || sendingFromAPIRef.current) return;
-    // We're in "resumed from refresh" mode — poll for the response
     const lastMsgTime = messages.length > 0
       ? messages[messages.length - 1].timestamp
-      : new Date(Date.now() - 600_000).toISOString(); // 10 min ago fallback
+      : new Date(Date.now() - 600_000).toISOString();
     const pollTimer = pollForResponse(lastMsgTime);
-    return () => clearInterval(pollTimer);
+    cleanupRef.current = () => clearInterval(pollTimer);
+    return () => cleanupRef.current?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -274,7 +283,7 @@ export function ChatTab({ workspaceId, data }: Props) {
         // Also check if agent stopped working (no more current_task)
         // but only after giving it time to start (30s grace period)
         const elapsed = (Date.now() - new Date(sentAfter).getTime()) / 1000;
-        if (elapsed > 30 && !data.currentTask) {
+        if (elapsed > 30 && !currentTaskRef.current) {
           // Agent finished but we didn't find a response — check one more time
           try {
             const activities = await api.get<Array<{
@@ -298,7 +307,7 @@ export function ChatTab({ workspaceId, data }: Props) {
 
       return pollInterval;
     },
-    [workspaceId, addMessage, data.currentTask]
+    [workspaceId, addMessage]
   );
 
   const sendMessage = async () => {
@@ -313,37 +322,25 @@ export function ChatTab({ workspaceId, data }: Props) {
 
     const sentAt = new Date().toISOString();
 
+    // Clean up any previous poll
+    cleanupRef.current?.();
+
     // Fire the A2A request — don't wait for the response.
     // The poll loop picks up the result from the activity log.
-    const controller = new AbortController();
-    fetch(
-      `${process.env.NEXT_PUBLIC_PLATFORM_URL || "http://localhost:8080"}/workspaces/${workspaceId}/a2a`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          method: "message/send",
-          params: {
-            message: {
-              role: "user",
-              messageId: crypto.randomUUID(),
-              parts: [{ kind: "text", text }],
-            },
-          },
-        }),
-        signal: controller.signal,
-      }
-    ).catch(() => {}); // Ignore — we poll for the result instead
+    api.post(`/workspaces/${workspaceId}/a2a`, {
+      method: "message/send",
+      params: {
+        message: {
+          role: "user",
+          messageId: crypto.randomUUID(),
+          parts: [{ kind: "text", text }],
+        },
+      },
+    }).catch(() => {}); // Ignore — we poll for the result instead
 
     // Start polling for the response
     const pollTimer = pollForResponse(sentAt);
-
-    // Store cleanup so if component unmounts, we stop polling
-    // (but the response is still stored server-side)
-    return () => {
-      clearInterval(pollTimer);
-      controller.abort();
-    };
+    cleanupRef.current = () => clearInterval(pollTimer);
   };
 
   const deleteSession = (sessionId: string) => {

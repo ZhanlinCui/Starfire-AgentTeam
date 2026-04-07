@@ -39,14 +39,16 @@ logger = logging.getLogger(__name__)
 
 def _brief_summary(text: str, max_len: int = 80) -> str:
     """Extract a brief one-line task summary for the canvas card display."""
-    # Take the first non-empty, non-header line
     for line in text.split("\n"):
-        line = line.strip().lstrip("#").strip().lstrip("-").strip().lstrip("*").strip()
-        if not line or line.startswith("```") or line.startswith("---"):
+        line = line.strip()
+        # Strip markdown headers (# ## ###)
+        while line.startswith("#"):
+            line = line[1:]
+        line = line.strip()
+        if not line or line.startswith("```") or line == "---":
             continue
-        # Remove markdown bold/italic
+        # Remove markdown bold/italic markers
         line = line.replace("**", "").replace("__", "")
-        # Truncate
         if len(line) > max_len:
             line = line[:max_len - 3] + "..."
         return line
