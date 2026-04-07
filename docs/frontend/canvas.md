@@ -96,7 +96,7 @@ Both banners use the shared `restartWorkspace(id)` store action. The panel conta
 
 Tab state is managed in the Zustand store via `panelTab` and `setPanelTab`. The panel closes when the user clicks the close button or clicks the canvas background.
 
-The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, Restart triggers `POST /workspaces/:id/restart`. Also includes Agent Management (assign/replace/remove model) and Replace Agent Folder (upload folder to swap agent files with confirmation).
+The **DetailsTab** integrates directly with the store — edits update the node via `updateNodeData()`, delete removes it via `removeNode()`, Restart triggers `POST /workspaces/:id/restart`. Also includes Agent Management (assign/replace/remove model) and Skill Installer.
 
 The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. No hard session deadline — the idle timeout (30 min) resets on each keystroke. The shell prefers `/bin/bash` for tab completion and history, falling back to `/bin/sh` on minimal containers.
 
