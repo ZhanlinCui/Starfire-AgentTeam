@@ -86,14 +86,13 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	// Set session timeout — auto-close after 30 minutes
-	deadline := time.Now().Add(terminalSessionTimeout)
-	conn.SetReadDeadline(deadline)
-	conn.SetWriteDeadline(deadline)
+	// No hard deadline — terminal stays open as long as the WebSocket connection is alive.
+	// The browser-side xterm.js handles idle display; the container exec ends when the
+	// user types 'exit' or the container stops.
 
-	// Create exec instance
+	// Create exec instance — prefer bash for better UX (tab completion, history)
 	execCfg := container.ExecOptions{
-		Cmd:          []string{"/bin/sh"},
+		Cmd:          []string{"/bin/bash"},
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
