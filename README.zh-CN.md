@@ -1,13 +1,13 @@
 <div align="center">
 
 <p>
-  <img src="./Starfirelandingpage-main/public/branding/starfire-logo.png" alt="Starfire 图案 Logo" width="160" />
+  <img src="./docs/assets/branding/starfire-icon.png" alt="Starfire 图案 Logo" width="160" />
 </p>
 
 <p>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./Starfirelandingpage-main/public/branding/starfire-text-logo-white.png">
-    <img src="./Starfirelandingpage-main/public/branding/starfire-text-logo-black.png" alt="Starfire 文字 Logo" width="420" />
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/branding/starfire-text-white.png">
+    <img src="./docs/assets/branding/starfire-text-black.png" alt="Starfire 文字 Logo" width="420" />
   </picture>
 </p>
 
