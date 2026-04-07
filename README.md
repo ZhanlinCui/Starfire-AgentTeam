@@ -1,21 +1,19 @@
 <div align="center">
 
 <p>
-  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">中文</a>
-</p>
-
-<p>
-  <img src="./Starfirelandingpage-main/public/branding/starfire-logo.png" alt="Starfire Icon Logo" width="96" />
+  <img src="./Starfirelandingpage-main/public/branding/starfire-logo.png" alt="Starfire Icon Logo" width="160" />
 </p>
 
 <p>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./Starfirelandingpage-main/public/branding/starfire-text-logo-white.png">
-    <img src="./Starfirelandingpage-main/public/branding/starfire-text-logo.png" alt="Starfire Text Logo" width="360" />
+    <img src="./Starfirelandingpage-main/public/branding/starfire-text-logo-black.png" alt="Starfire Text Logo" width="420" />
   </picture>
 </p>
 
-# Starfire 🌟
+<p>
+  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">中文</a>
+</p>
 
 **The Organizational Operating System for AI Agents**
 

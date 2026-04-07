@@ -1,21 +1,19 @@
 <div align="center">
 
 <p>
-  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">中文</a>
-</p>
-
-<p>
-  <img src="./Starfirelandingpage-main/public/branding/starfire-logo.png" alt="Starfire 图案 Logo" width="96" />
+  <img src="./Starfirelandingpage-main/public/branding/starfire-logo.png" alt="Starfire 图案 Logo" width="160" />
 </p>
 
 <p>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./Starfirelandingpage-main/public/branding/starfire-text-logo-white.png">
-    <img src="./Starfirelandingpage-main/public/branding/starfire-text-logo.png" alt="Starfire 文字 Logo" width="360" />
+    <img src="./Starfirelandingpage-main/public/branding/starfire-text-logo-black.png" alt="Starfire 文字 Logo" width="420" />
   </picture>
 </p>
 
-# Starfire 🌟
+<p>
+  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">中文</a>
+</p>
 
 **面向 AI Agent 团队的组织操作系统**
 
