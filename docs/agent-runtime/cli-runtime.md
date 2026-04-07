@@ -28,7 +28,7 @@ A2A request arrives
 CLIAgentExecutor._build_command(message)
       |  - selects preset (claude-code, codex, ollama)
       |  - adds model flag, system prompt flag
-      |  - adds auth (apiKeyHelper or env var)
+      |  - adds auth (env var: CLAUDE_CODE_OAUTH_TOKEN or OPENAI_API_KEY)
       |  - adds prompt
       v
 asyncio.create_subprocess_exec(cmd, args)
@@ -49,9 +49,9 @@ runtime_config:
   timeout: 0           # seconds
 ```
 
-Invokes: `claude --print --dangerously-skip-permissions --bare --model sonnet --system-prompt <prompt> --settings '{"apiKeyHelper":"/tmp/auth-helper.sh"}' -p "<message>"`
+Invokes: `claude --print --dangerously-skip-permissions --allowed-tools Bash --model sonnet --system-prompt <prompt> -p "<message>"`
 
-**Auth:** Uses the `apiKeyHelper` pattern — creates a shell script that echoes the OAuth token, passed via `--settings`. The token is read from `/configs/.auth-token` or the `CLAUDE_AUTH_TOKEN` env var.
+**Auth:** Uses the `CLAUDE_CODE_OAUTH_TOKEN` env var — the OAuth token is read from `/configs/.auth-token` and injected into the subprocess environment. The `--bare` flag is **not** used because it disables OAuth and reduces the agent to a simple LLM provider. Without `--bare`, each workspace is a full agentic Claude Code instance with hooks, CLAUDE.md discovery, auto-memory, and plugin support.
 
 **Important:** Claude Code refuses to run as root with `--dangerously-skip-permissions`. The Dockerfile creates a non-root `agent` user.
 

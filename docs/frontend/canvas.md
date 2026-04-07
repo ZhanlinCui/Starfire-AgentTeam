@@ -89,8 +89,8 @@ Both banners use the shared `restartWorkspace(id)` store action. The panel conta
 | **Chat** | `ChatTab` | **Poll-based chat** — fire-and-forget A2A request + poll activity log for response (survives page refresh/tab switch). Session continuity (Claude Code `--resume`), markdown for agent responses, live activity feed via WebSocket, multi-line textarea, session persistence (localStorage) |
 | **Settings** | `SettingsTab` | Configure LLM provider + API keys per workspace via `/workspaces/:id/secrets`, quick-set rows for common keys. Sets `needsRestart` flag on add/delete |
 | **Terminal** | `TerminalTab` | Shell access into workspace container via WebSocket (`WS /workspaces/:id/terminal`), xterm.js with dark theme |
-| **Files** | `FilesTab` | VS Code-style file explorer with tree view, inline editor, create/delete files |
-| **Config** | `ConfigTab` | JSON editor for workspace config, load via `GET /workspaces/:id/config`, save changes |
+| **Files** | `FilesTab` | Container file explorer with root selector (`/configs`, `/home`, `/workspace`, `/plugins`), tree view, inline editor. `/configs` is editable; other roots are read-only. Falls back to host-side config dir when container is offline |
+| **Config** | `ConfigTab` | Structured form editor for `config.yaml` — sections for General, Runtime, Skills/Tools, A2A, Delegation, Sandbox, Environment. Tag inputs for skills/tools/env vars, dropdowns for tier/runtime/sandbox. Raw YAML toggle for power users. Reads/writes via Files API |
 | **Memory** | `MemoryTab` | Browse key/value memory entries from `GET /workspaces/:id/memory`, add new entries with optional TTL |
 | **Traces** | `TracesTab` | Langfuse LLM traces — name, latency, token usage, cost, expandable I/O |
 | **Events** | `EventsTab` | Workspace-scoped structure event log from `GET /events/:workspaceId`, color-coded by event type |
@@ -103,11 +103,19 @@ The **Settings tab** stores API keys in the `workspace_secrets` table — values
 
 The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. No hard session deadline — the idle timeout (30 min) resets on each keystroke. The shell prefers `/bin/bash` for tab completion and history, falling back to `/bin/sh` on minimal containers.
 
-The **Files tab** provides a VS Code-style file explorer:
+The **Files tab** is a container filesystem explorer:
+- **Root selector** dropdown: `/configs` (default, editable), `/home`, `/workspace`, `/plugins` (read-only)
+- When container is running, lists/reads files via Docker exec (`find` + `cat`); falls back to host-side config dir when offline
 - Tree view with collapsible directories and file icons by extension
 - Inline editor with monospace font, Ctrl/Cmd+S to save, Tab inserts spaces
-- Create new files with path input, delete files with confirmation
-- File operations via `GET/PUT/DELETE /workspaces/:id/files/*path`
+- Create/upload/delete only available for `/configs` root (bind-mounted from host)
+- File operations via `GET/PUT/DELETE /workspaces/:id/files/*path?root=/configs`
+
+The **Config tab** provides a structured form for editing `config.yaml`:
+- Collapsible sections: General (name, description, version, tier), Runtime (runtime type, model, auth), Skills & Tools (tag inputs), A2A Protocol (port, streaming, push), Delegation (retry, timeout, escalate), Sandbox (backend, memory, timeout), Environment (required/optional env vars)
+- Tag input components for list fields — type and press Enter to add, × to remove
+- Raw YAML toggle checkbox for power users who prefer direct editing
+- Reads/writes `config.yaml` via the Files API, not the DB config endpoint
 
 ## Canvas Chrome
 
