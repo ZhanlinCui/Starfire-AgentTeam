@@ -24,7 +24,7 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   needsRestart: boolean;
 }
 
-export type PanelTab = "details" | "chat" | "settings" | "terminal" | "files" | "config" | "memory" | "traces" | "events" | "activity";
+export type PanelTab = "details" | "chat" | "terminal" | "config" | "files" | "memory" | "traces" | "events" | "activity";
 
 export interface ContextMenuState {
   x: number;

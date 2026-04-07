@@ -513,8 +513,8 @@ describe("setPanelTab", () => {
 
   it("can switch between tabs", () => {
     useCanvasStore.getState().setPanelTab("terminal");
-    useCanvasStore.getState().setPanelTab("settings");
-    expect(useCanvasStore.getState().panelTab).toBe("settings");
+    useCanvasStore.getState().setPanelTab("config");
+    expect(useCanvasStore.getState().panelTab).toBe("config");
   });
 });
 
