@@ -48,6 +48,7 @@ interface CanvasState {
   setPanelTab: (tab: PanelTab) => void;
   getSelectedNode: () => Node<WorkspaceNodeData> | null;
   updateNodeData: (id: string, data: Partial<WorkspaceNodeData>) => void;
+  restartWorkspace: (id: string) => Promise<void>;
   removeNode: (id: string) => void;
   setDragOverNode: (id: string | null) => void;
   nestNode: (draggedId: string, targetId: string | null) => Promise<void>;
@@ -191,6 +192,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         n.id === id ? { ...n, data: { ...n.data, ...data } } : n
       ),
     });
+  },
+
+  restartWorkspace: async (id) => {
+    await api.post(`/workspaces/${id}/restart`);
+    get().updateNodeData(id, { needsRestart: false });
   },
 
   removeNode: (id) => {

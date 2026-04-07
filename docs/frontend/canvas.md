@@ -75,7 +75,12 @@ See [WebSocket Events](../api-protocol/websocket-events.md) for the full JSON pa
 
 ## Side Panel
 
-Clicking a workspace node opens a **480px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. When the agent has an active task (`current_task` from heartbeat), an amber pulsing banner appears below the tab bar showing what the agent is currently working on. The panel contains eleven tabs:
+Clicking a workspace node opens a **480px-wide side panel** on the right edge of the screen (`canvas/src/components/SidePanel.tsx`). The panel header shows the workspace name, role, and a live status dot. Below the tab bar, two contextual banners may appear:
+
+- **Needs Restart** (sky-blue): shown when `needsRestart` is true and no active task — displays "Config changed — restart to apply" with a "Restart Now" button. Triggered by config/secrets/files mutations in ConfigTab, SettingsTab, and FilesTab. Hidden while agent has an active task to prevent mid-task restarts. Note: this flag is client-only and resets on page refresh.
+- **Current Task** (amber pulsing): shown when the agent has an active task (`current_task` from heartbeat) — displays what the agent is currently working on.
+
+Both banners use the shared `restartWorkspace(id)` store action. The panel contains eleven tabs:
 
 | Tab | Component | Description |
 |-----|-----------|-------------|
@@ -96,7 +101,7 @@ The **DetailsTab** integrates directly with the store — edits update the node 
 
 The **Settings tab** stores API keys in the `workspace_secrets` table — values are never exposed to the browser (only key names are returned by `GET /workspaces/:id/secrets`).
 
-The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. Sessions have a 30-minute idle timeout.
+The **Terminal tab** uses xterm.js with a WebSocket connection to a Docker exec session inside the workspace container. No hard session deadline — the idle timeout (30 min) resets on each keystroke. The shell prefers `/bin/bash` for tab completion and history, falling back to `/bin/sh` on minimal containers.
 
 The **Files tab** provides a VS Code-style file explorer:
 - Tree view with collapsible directories and file icons by extension
@@ -267,6 +272,7 @@ function hydrate(workspaces: WorkspaceRow[]) {
       url: ws.url,
       parentId: ws.parent_id,
       currentTask: ws.current_task || "",
+      needsRestart: false,
     }
   }))
   setNodes(nodes)
@@ -296,6 +302,7 @@ interface CanvasState {
   setPanelTab(tab: PanelTab): void;
   getSelectedNode(): Node | null;
   updateNodeData(id, data): void;  // patch node data in-place
+  restartWorkspace(id): Promise<void>; // POST restart + clear needsRestart flag
   removeNode(id): void;            // remove node + edges + clear selection
 }
 ```

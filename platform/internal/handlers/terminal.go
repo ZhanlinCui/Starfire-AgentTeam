@@ -9,6 +9,7 @@ import (
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/provisioner"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
@@ -86,31 +87,36 @@ func (h *TerminalHandler) HandleConnect(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	// No hard deadline — terminal stays open as long as the WebSocket connection is alive.
-	// The browser-side xterm.js handles idle display; the container exec ends when the
-	// user types 'exit' or the container stops.
+	// No hard session deadline — terminal stays open as long as there is activity.
+	// The idle timeout (terminalSessionTimeout) resets on each keystroke in the
+	// WebSocket→stdin bridge loop below.
+	// The container exec ends when the user types 'exit' or the container stops.
 
-	// Create exec instance — prefer bash for better UX (tab completion, history)
-	execCfg := container.ExecOptions{
-		Cmd:          []string{"/bin/bash"},
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-		Tty:          true,
+	// Try bash first for better UX (tab completion, history), fall back to sh.
+	// ContainerExecCreate succeeds even if the binary doesn't exist — the error
+	// only surfaces at attach/start time, so we must retry at the attach level.
+	var resp types.HijackedResponse
+	for _, shell := range []string{"/bin/bash", "/bin/sh"} {
+		execCfg := container.ExecOptions{
+			Cmd:          []string{shell},
+			AttachStdin:  true,
+			AttachStdout: true,
+			AttachStderr: true,
+			Tty:          true,
+		}
+		execID, createErr := h.docker.ContainerExecCreate(ctx, containerName, execCfg)
+		if createErr != nil {
+			err = createErr
+			continue
+		}
+		resp, err = h.docker.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{Tty: true})
+		if err == nil {
+			break
+		}
 	}
-
-	execID, err := h.docker.ContainerExecCreate(ctx, containerName, execCfg)
 	if err != nil {
-		log.Printf("Terminal exec create error: %v", err)
+		log.Printf("Terminal exec error: %v", err)
 		conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to create shell session\r\n"))
-		return
-	}
-
-	// Attach to exec
-	resp, err := h.docker.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{Tty: true})
-	if err != nil {
-		log.Printf("Terminal exec attach error: %v", err)
-		conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to attach to shell\r\n"))
 		return
 	}
 	defer resp.Close()
