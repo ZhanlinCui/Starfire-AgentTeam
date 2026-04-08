@@ -49,6 +49,13 @@ type EventInfo struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+// WorkspaceFile represents a file read through the Files API.
+type WorkspaceFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Size    int    `json:"size"`
+}
+
 // SessionSearchItem represents a session search result from the platform API.
 type SessionSearchItem struct {
 	Kind         string          `json:"kind"`
@@ -139,6 +146,55 @@ func (c *PlatformClient) FetchEvents() ([]EventInfo, error) {
 		return nil, fmt.Errorf("decode events: %w", err)
 	}
 	return events, nil
+}
+
+// GetWorkspaceFile fetches a workspace file via GET /workspaces/:id/files/*path.
+func (c *PlatformClient) GetWorkspaceFile(id, filePath string) (*WorkspaceFile, error) {
+	endpoint, err := url.JoinPath(c.baseURL, "workspaces", id, "files", filePath)
+	if err != nil {
+		return nil, fmt.Errorf("build file URL: %w", err)
+	}
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("get file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get file: status %d: %s", resp.StatusCode, body)
+	}
+	var file WorkspaceFile
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		return nil, fmt.Errorf("decode file: %w", err)
+	}
+	return &file, nil
+}
+
+// PutWorkspaceFile writes a workspace file via PUT /workspaces/:id/files/*path.
+func (c *PlatformClient) PutWorkspaceFile(id, filePath, content string) error {
+	endpoint, err := url.JoinPath(c.baseURL, "workspaces", id, "files", filePath)
+	if err != nil {
+		return fmt.Errorf("build file URL: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{"content": content})
+	if err != nil {
+		return fmt.Errorf("marshal file request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build file request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("put file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("put file: status %d: %s", resp.StatusCode, body)
+	}
+	return nil
 }
 
 // SearchSession searches a workspace's activity logs and memories.

@@ -1,0 +1,231 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/spf13/cobra"
+)
+
+func buildAgentSkillCmd() *cobra.Command {
+	skill := &cobra.Command{
+		Use:   "skill",
+		Short: "Manage workspace skills in config.yaml",
+	}
+	skill.AddCommand(buildAgentSkillListCmd())
+	skill.AddCommand(buildAgentSkillAddCmd())
+	skill.AddCommand(buildAgentSkillRemoveCmd())
+	return skill
+}
+
+func buildAgentSkillListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "list <id>",
+		Short:        "List skills configured for a workspace",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := NewPlatformClient(baseURL())
+			skills, err := fetchWorkspaceSkills(client, args[0])
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return printJSON(skills)
+			}
+			if len(skills) == 0 {
+				fmt.Println("(no skills configured)")
+				return nil
+			}
+			for _, s := range skills {
+				fmt.Println(s)
+			}
+			return nil
+		},
+	}
+}
+
+func buildAgentSkillAddCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "add <id> <skill>",
+		Short:        "Add a skill to config.yaml if it is not already present",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := NewPlatformClient(baseURL())
+			skills, raw, err := fetchWorkspaceSkillsWithRaw(client, args[0])
+			if err != nil {
+				return err
+			}
+			next, changed := upsertSkill(skills, args[1], true)
+			if !changed {
+				fmt.Printf("Skill %q already present on %s\n", args[1], shortID(args[0]))
+				return nil
+			}
+			updated, err := replaceSkillsInConfig(raw, next)
+			if err != nil {
+				return err
+			}
+			if err := client.PutWorkspaceFile(args[0], "config.yaml", updated); err != nil {
+				return err
+			}
+			fmt.Printf("Added skill %q to %s\n", args[1], shortID(args[0]))
+			return nil
+		},
+	}
+}
+
+func buildAgentSkillRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "remove <id> <skill>",
+		Short:        "Remove a skill from config.yaml if it is present",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := NewPlatformClient(baseURL())
+			skills, raw, err := fetchWorkspaceSkillsWithRaw(client, args[0])
+			if err != nil {
+				return err
+			}
+			next, changed := upsertSkill(skills, args[1], false)
+			if !changed {
+				fmt.Printf("Skill %q not found on %s\n", args[1], shortID(args[0]))
+				return nil
+			}
+			updated, err := replaceSkillsInConfig(raw, next)
+			if err != nil {
+				return err
+			}
+			if err := client.PutWorkspaceFile(args[0], "config.yaml", updated); err != nil {
+				return err
+			}
+			fmt.Printf("Removed skill %q from %s\n", args[1], shortID(args[0]))
+			return nil
+		},
+	}
+}
+
+func fetchWorkspaceSkills(client *PlatformClient, id string) ([]string, error) {
+	skills, _, err := fetchWorkspaceSkillsWithRaw(client, id)
+	return skills, err
+}
+
+func fetchWorkspaceSkillsWithRaw(client *PlatformClient, id string) ([]string, string, error) {
+	file, err := client.GetWorkspaceFile(id, "config.yaml")
+	if err != nil {
+		return nil, "", err
+	}
+	skills, err := parseSkillsFromConfig(file.Content)
+	if err != nil {
+		return nil, "", err
+	}
+	return skills, file.Content, nil
+}
+
+func parseSkillsFromConfig(content string) ([]string, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		return nil, fmt.Errorf("parse config.yaml: %w", err)
+	}
+	doc := root.Content
+	if len(doc) == 0 {
+		return []string{}, nil
+	}
+	mapping := doc[0]
+	if mapping.Kind != yaml.MappingNode {
+		return []string{}, nil
+	}
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		key := mapping.Content[i]
+		val := mapping.Content[i+1]
+		if key.Value != "skills" || val.Kind != yaml.SequenceNode {
+			continue
+		}
+		skills := make([]string, 0, len(val.Content))
+		for _, item := range val.Content {
+			if item != nil {
+				skills = append(skills, item.Value)
+			}
+		}
+		return skills, nil
+	}
+	return []string{}, nil
+}
+
+func replaceSkillsInConfig(content string, skills []string) (string, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		return "", fmt.Errorf("parse config.yaml: %w", err)
+	}
+	doc := root.Content
+	if len(doc) == 0 || doc[0].Kind != yaml.MappingNode {
+		return "", fmt.Errorf("config.yaml must contain a top-level mapping")
+	}
+	mapping := doc[0]
+
+	var skillsKey *yaml.Node
+	var skillsVal *yaml.Node
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		if mapping.Content[i].Value == "skills" {
+			skillsKey = mapping.Content[i]
+			skillsVal = mapping.Content[i+1]
+			break
+		}
+	}
+
+	if skillsKey == nil {
+		skillsKey = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "skills"}
+		skillsVal = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		mapping.Content = append(mapping.Content, skillsKey, skillsVal)
+	} else {
+		skillsVal.Kind = yaml.SequenceNode
+		skillsVal.Tag = "!!seq"
+		skillsVal.Content = nil
+	}
+
+	for _, skill := range skills {
+		skillsVal.Content = append(skillsVal.Content, &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Tag:   "!!str",
+			Value: skill,
+		})
+	}
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return "", fmt.Errorf("marshal config.yaml: %w", err)
+	}
+	return string(out), nil
+}
+
+func upsertSkill(skills []string, target string, add bool) ([]string, bool) {
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return skills, false
+	}
+	exists := false
+	for _, s := range skills {
+		if s == trimmed {
+			exists = true
+			break
+		}
+	}
+	if add {
+		if exists {
+			return skills, false
+		}
+		return append(skills, trimmed), true
+	}
+	if !exists {
+		return skills, false
+	}
+	next := make([]string, 0, len(skills)-1)
+	for _, s := range skills {
+		if s != trimmed {
+			next = append(next, s)
+		}
+	}
+	return next, true
+}
