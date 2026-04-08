@@ -220,6 +220,20 @@ The audit is intentionally local and file-based. It checks the workspace's `conf
 
 Use this as a lightweight hygiene check before publishing, bundling, or reusing a skill. It is not a marketplace or remote registry.
 
+## Skill Install and Publish
+
+The CLI also exposes a thin local workflow for moving skills between a workspace and your machine:
+
+```bash
+molecli agent skill install <workspace-id> <local-skill-dir>
+molecli agent skill publish <workspace-id> <skill-name> --to <output-dir>
+```
+
+- `install` copies a local skill folder into a workspace and updates `config.yaml`
+- `publish` exports a workspace skill from the bundle endpoint into a local directory
+
+Both commands stay intentionally small and reuse the existing workspace Files API and bundle export path. They are convenience wrappers, not a separate skill registry.
+
 ## ClawHub Compatibility
 
 ### Installing from ClawHub

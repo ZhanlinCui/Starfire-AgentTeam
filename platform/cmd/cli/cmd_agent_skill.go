@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -18,6 +20,8 @@ func buildAgentSkillCmd() *cobra.Command {
 	skill.AddCommand(buildAgentSkillAddCmd())
 	skill.AddCommand(buildAgentSkillRemoveCmd())
 	skill.AddCommand(buildAgentSkillAuditCmd())
+	skill.AddCommand(buildAgentSkillInstallCmd())
+	skill.AddCommand(buildAgentSkillPublishCmd())
 	return skill
 }
 
@@ -26,6 +30,18 @@ type SkillAuditResult struct {
 	Status string   `json:"status"`
 	Issues []string `json:"issues,omitempty"`
 	Fix    string   `json:"fix,omitempty"`
+}
+
+type SkillPublishResult struct {
+	WorkspaceID string `json:"workspace_id"`
+	Skill       string `json:"skill"`
+	Destination string `json:"destination"`
+}
+
+type SkillInstallResult struct {
+	WorkspaceID string `json:"workspace_id"`
+	Skill       string `json:"skill"`
+	Source      string `json:"source"`
 }
 
 func buildAgentSkillListCmd() *cobra.Command {
@@ -156,6 +172,55 @@ func buildAgentSkillAuditCmd() *cobra.Command {
 	}
 }
 
+func buildAgentSkillInstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "install <id> <source-path>",
+		Short:        "Install a local skill folder into a workspace",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := NewPlatformClient(baseURL())
+			result, err := installWorkspaceSkillFromDir(client, args[0], args[1])
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return printJSON(result)
+			}
+			fmt.Printf("Installed skill %q into %s from %s\n", result.Skill, shortID(result.WorkspaceID), result.Source)
+			return nil
+		},
+	}
+}
+
+func buildAgentSkillPublishCmd() *cobra.Command {
+	var destination string
+
+	cmd := &cobra.Command{
+		Use:          "publish <id> <skill>",
+		Short:        "Export a workspace skill to a local directory",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if destination == "" {
+				return fmt.Errorf("--to is required")
+			}
+			client := NewPlatformClient(baseURL())
+			result, err := publishWorkspaceSkillToDir(client, args[0], args[1], destination)
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return printJSON(result)
+			}
+			fmt.Printf("Published skill %q from %s to %s\n", result.Skill, shortID(result.WorkspaceID), result.Destination)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&destination, "to", "", "Destination directory for the exported skill")
+	return cmd
+}
+
 func fetchWorkspaceSkills(client *PlatformClient, id string) ([]string, error) {
 	skills, _, err := fetchWorkspaceSkillsWithRaw(client, id)
 	return skills, err
@@ -232,6 +297,111 @@ func auditWorkspaceSkills(client *PlatformClient, id string) ([]SkillAuditResult
 	}
 
 	return results, nil
+}
+
+func installWorkspaceSkillFromDir(client *PlatformClient, workspaceID, sourcePath string) (*SkillInstallResult, error) {
+	skillDir := filepath.Clean(sourcePath)
+	if info, err := os.Stat(skillDir); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("source path must be a directory: %s", sourcePath)
+	}
+
+	skillName := filepath.Base(skillDir)
+	files, err := collectFilesFromDir(skillDir)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := files["SKILL.md"]; !ok {
+		return nil, fmt.Errorf("source skill is missing SKILL.md")
+	}
+
+	skills, raw, err := fetchWorkspaceSkillsWithRaw(client, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	next, _ := upsertSkill(skills, skillName, true)
+	updated, err := replaceSkillsInConfig(raw, next)
+	if err != nil {
+		return nil, err
+	}
+
+	for relPath, content := range files {
+		if err := client.PutWorkspaceFile(workspaceID, filepath.ToSlash(filepath.Join("skills", skillName, relPath)), content); err != nil {
+			return nil, err
+		}
+	}
+	if err := client.PutWorkspaceFile(workspaceID, "config.yaml", updated); err != nil {
+		return nil, err
+	}
+
+	return &SkillInstallResult{
+		WorkspaceID: workspaceID,
+		Skill:       skillName,
+		Source:      sourcePath,
+	}, nil
+}
+
+func publishWorkspaceSkillToDir(client *PlatformClient, workspaceID, skillName, destination string) (*SkillPublishResult, error) {
+	bundle, err := client.ExportBundle(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	var skill *WorkspaceBundleSkill
+	for i := range bundle.Skills {
+		if bundle.Skills[i].ID == skillName {
+			skill = &bundle.Skills[i]
+			break
+		}
+	}
+	if skill == nil {
+		return nil, fmt.Errorf("skill %q not found in exported bundle", skillName)
+	}
+
+	destDir := filepath.Join(destination, skillName)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create destination directory: %w", err)
+	}
+	for relPath, content := range skill.Files {
+		outPath := filepath.Join(destDir, filepath.FromSlash(relPath))
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+			return nil, fmt.Errorf("create parent directory: %w", err)
+		}
+		if err := os.WriteFile(outPath, []byte(content), 0o644); err != nil {
+			return nil, fmt.Errorf("write skill file: %w", err)
+		}
+	}
+
+	return &SkillPublishResult{
+		WorkspaceID: workspaceID,
+		Skill:       skillName,
+		Destination: destDir,
+	}, nil
+}
+
+func collectFilesFromDir(dir string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = string(data)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read source skill files: %w", err)
+	}
+	return files, nil
 }
 
 func auditSkillMarkdown(content string) []string {

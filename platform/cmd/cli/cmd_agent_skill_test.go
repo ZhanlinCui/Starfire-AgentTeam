@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -79,6 +81,21 @@ func TestBuildAgentSkillCmdIncludesAudit(t *testing.T) {
 	}
 }
 
+func TestBuildAgentSkillCmdIncludesInstallAndPublish(t *testing.T) {
+	cmd := buildAgentSkillCmd()
+	want := map[string]bool{"install": false, "publish": false}
+	for _, child := range cmd.Commands() {
+		if _, ok := want[child.Name()]; ok {
+			want[child.Name()] = true
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Fatalf("expected skill command to include %s subcommand", name)
+		}
+	}
+}
+
 func TestAuditWorkspaceSkills(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/workspaces/ws-1/files/config.yaml", func(w http.ResponseWriter, r *http.Request) {
@@ -122,5 +139,135 @@ func TestAuditWorkspaceSkills(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(results[1].Issues, " "), "SKILL.md") {
 		t.Fatalf("expected missing file issue, got %+v", results[1])
+	}
+}
+
+func TestInstallWorkspaceSkillFromDir(t *testing.T) {
+	mux := http.NewServeMux()
+	var putPaths []string
+	var putBodies = map[string]string{}
+
+	mux.HandleFunc("/workspaces/ws-1/files/config.yaml", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"path":    "config.yaml",
+				"content": "name: Demo\nskills:\n  - brainstorming\n",
+				"size":    37,
+			})
+		case http.MethodPut:
+			var req map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode put body: %v", err)
+			}
+			putPaths = append(putPaths, r.URL.Path)
+			putBodies[r.URL.Path] = req["content"]
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	})
+	mux.HandleFunc("/workspaces/ws-1/files/skills/authoring/SKILL.md", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		var req map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode put body: %v", err)
+		}
+		putPaths = append(putPaths, r.URL.Path)
+		putBodies[r.URL.Path] = req["content"]
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/workspaces/ws-1/files/skills/authoring/tools/helper.py", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		var req map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode put body: %v", err)
+		}
+		putPaths = append(putPaths, r.URL.Path)
+		putBodies[r.URL.Path] = req["content"]
+		w.WriteHeader(http.StatusOK)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	src := t.TempDir()
+	skillDir := filepath.Join(src, "authoring")
+	if err := os.MkdirAll(filepath.Join(skillDir, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: Authoring
+description: Writes skills
+version: 1.0.0
+---
+Do the thing.
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "tools", "helper.py"), []byte(`print("hi")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	client := NewPlatformClient(server.URL)
+	result, err := installWorkspaceSkillFromDir(client, "ws-1", skillDir)
+	if err != nil {
+		t.Fatalf("installWorkspaceSkillFromDir failed: %v", err)
+	}
+	if result.Skill != "authoring" {
+		t.Fatalf("unexpected skill: %+v", result)
+	}
+	if len(putPaths) != 3 {
+		t.Fatalf("expected 3 PUTs, got %d (%v)", len(putPaths), putPaths)
+	}
+	if _, ok := putBodies["/workspaces/ws-1/files/skills/authoring/SKILL.md"]; !ok {
+		t.Fatal("missing SKILL.md upload")
+	}
+	if !strings.Contains(putBodies["/workspaces/ws-1/files/config.yaml"], "authoring") {
+		t.Fatalf("config.yaml missing installed skill: %s", putBodies["/workspaces/ws-1/files/config.yaml"])
+	}
+}
+
+func TestPublishWorkspaceSkillToDir(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/bundles/export/ws-1", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"schema": "1.0",
+			"id":     "ws-1",
+			"skills": []map[string]any{
+				{
+					"id":          "authoring",
+					"name":        "Authoring",
+					"description": "Writes skills",
+					"files": map[string]string{
+						"SKILL.md":              "---\nname: Authoring\ndescription: Writes skills\nversion: 1.0.0\n---\nDo the thing.\n",
+						"tools/helper.py":        `print("hi")`,
+					},
+				},
+			},
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	dest := t.TempDir()
+	client := NewPlatformClient(server.URL)
+	result, err := publishWorkspaceSkillToDir(client, "ws-1", "authoring", dest)
+	if err != nil {
+		t.Fatalf("publishWorkspaceSkillToDir failed: %v", err)
+	}
+	if result.Destination != filepath.Join(dest, "authoring") {
+		t.Fatalf("unexpected destination: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "authoring", "SKILL.md")); err != nil {
+		t.Fatalf("expected SKILL.md to be written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "authoring", "tools", "helper.py")); err != nil {
+		t.Fatalf("expected helper.py to be written: %v", err)
 	}
 }

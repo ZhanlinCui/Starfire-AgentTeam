@@ -70,6 +70,28 @@ type SessionSearchItem struct {
 	CreatedAt    time.Time       `json:"created_at"`
 }
 
+// WorkspaceBundle represents the exported bundle payload from the platform API.
+type WorkspaceBundle struct {
+	Schema        string              `json:"schema"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	Description   string              `json:"description"`
+	Tier          int                 `json:"tier"`
+	Model         string              `json:"model"`
+	SystemPrompt  string              `json:"system_prompt"`
+	Skills        []WorkspaceBundleSkill `json:"skills"`
+	Prompts       map[string]string   `json:"prompts"`
+	SubWorkspaces []WorkspaceBundle   `json:"sub_workspaces"`
+}
+
+// WorkspaceBundleSkill is a serialized skill entry from a bundle export.
+type WorkspaceBundleSkill struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Files       map[string]string `json:"files"`
+}
+
 // WSEvent represents a WebSocket event message.
 type WSEvent struct {
 	Event       string          `json:"event"`
@@ -232,6 +254,32 @@ func (c *PlatformClient) SearchSession(id, query string, limit int) ([]SessionSe
 		return nil, fmt.Errorf("decode session search: %w", err)
 	}
 	return items, nil
+}
+
+// ExportBundle fetches a workspace bundle via GET /bundles/export/:id.
+func (c *PlatformClient) ExportBundle(id string) (*WorkspaceBundle, error) {
+	endpoint, err := url.JoinPath(c.baseURL, "bundles", "export", id)
+	if err != nil {
+		return nil, fmt.Errorf("build bundle export URL: %w", err)
+	}
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("export bundle: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("export bundle: status %d (body read error: %v)", resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("export bundle: status %d: %s", resp.StatusCode, body)
+	}
+
+	var bundle WorkspaceBundle
+	if err := json.NewDecoder(resp.Body).Decode(&bundle); err != nil {
+		return nil, fmt.Errorf("decode bundle: %w", err)
+	}
+	return &bundle, nil
 }
 
 // DeleteWorkspace deletes a workspace via DELETE /workspaces/:id.
