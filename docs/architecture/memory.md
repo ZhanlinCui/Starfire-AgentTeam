@@ -79,3 +79,16 @@ When consolidation keeps surfacing the same stable workflow, the agent should st
 This keeps the boundary clear: `awareness` stores durable memory, while skills store repeatable procedure. The hot-reload path then makes the new skill available without a restart.
 
 When a promotion packet is committed, the workspace emits a best-effort `skill_promotion` activity to the platform and follows it with a lightweight heartbeat update (`current_task = "Skill promotion: ..."`) so the promotion is visible in runtime telemetry and in the canvas task strip. The runtime does not auto-generate a separate skill registry or hidden lifecycle manager; it only surfaces the signal so the existing skill tools and hot-reload path can act on it.
+
+### 6. Awareness, Recall, and Skill Promotion
+`awareness` is the durable memory backend for a workspace. It stores facts that should survive across turns, while `session-search` gives the workspace a thin recall surface over recent activity and memory rows. Together, they let the agent remember what mattered without introducing a second storage layer.
+
+The division of labor is intentionally narrow:
+
+- `memory-curation` decides what is durable and compresses it into a packet
+- `awareness` persists that packet inside the workspace's isolated namespace
+- `session-search` recovers recent decisions, notes, and activity traces
+- `skill-authoring` only runs when a repeated workflow is stable enough to become a reusable skill
+- `skills runtime` loads the resulting skill package and hot-reloads it into the agent
+
+This keeps the memory stack source-faithful to Hermes-style behavior: memory is for recall and persistence, skills are for repeatable procedure, and promotion is just a signal unless the normal skill lifecycle creates the actual package.
