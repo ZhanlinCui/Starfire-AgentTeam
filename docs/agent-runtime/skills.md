@@ -204,6 +204,22 @@ Canvas updates node to show new skill badge
 
 Live in ~3 seconds, zero restart.
 
+## Skill Audit
+
+You can audit a workspace's configured skills without starting a new backend or registry:
+
+```bash
+molecli agent skill audit <workspace-id>
+```
+
+The audit is intentionally local and file-based. It checks the workspace's `config.yaml`, then validates each listed skill package under `skills/<name>/` for:
+
+- `SKILL.md` presence
+- YAML frontmatter parsing
+- required frontmatter fields: `name`, `description`, `version`
+
+Use this as a lightweight hygiene check before publishing, bundling, or reusing a skill. It is not a marketplace or remote registry.
+
 ## ClawHub Compatibility
 
 ### Installing from ClawHub

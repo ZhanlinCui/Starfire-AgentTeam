@@ -17,7 +17,15 @@ func buildAgentSkillCmd() *cobra.Command {
 	skill.AddCommand(buildAgentSkillListCmd())
 	skill.AddCommand(buildAgentSkillAddCmd())
 	skill.AddCommand(buildAgentSkillRemoveCmd())
+	skill.AddCommand(buildAgentSkillAuditCmd())
 	return skill
+}
+
+type SkillAuditResult struct {
+	Skill  string   `json:"skill"`
+	Status string   `json:"status"`
+	Issues []string `json:"issues,omitempty"`
+	Fix    string   `json:"fix,omitempty"`
 }
 
 func buildAgentSkillListCmd() *cobra.Command {
@@ -107,6 +115,47 @@ func buildAgentSkillRemoveCmd() *cobra.Command {
 	}
 }
 
+func buildAgentSkillAuditCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "audit <id>",
+		Short:        "Audit configured skills for missing files and metadata",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := NewPlatformClient(baseURL())
+			results, err := auditWorkspaceSkills(client, args[0])
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return printJSON(results)
+			}
+
+			allPass := true
+			for _, result := range results {
+				switch result.Status {
+				case "PASS":
+					fmt.Printf("[PASS] %s\n", result.Skill)
+				default:
+					allPass = false
+					fmt.Printf("[FAIL] %s\n", result.Skill)
+					for _, issue := range result.Issues {
+						fmt.Printf("  - %s\n", issue)
+					}
+					if result.Fix != "" {
+						fmt.Printf("  Fix: %s\n", result.Fix)
+					}
+				}
+			}
+			if !allPass {
+				return fmt.Errorf("one or more skills failed audit")
+			}
+			fmt.Printf("All %d skills passed audit\n", len(results))
+			return nil
+		},
+	}
+}
+
 func fetchWorkspaceSkills(client *PlatformClient, id string) ([]string, error) {
 	skills, _, err := fetchWorkspaceSkillsWithRaw(client, id)
 	return skills, err
@@ -152,6 +201,74 @@ func parseSkillsFromConfig(content string) ([]string, error) {
 		return skills, nil
 	}
 	return []string{}, nil
+}
+
+func auditWorkspaceSkills(client *PlatformClient, id string) ([]SkillAuditResult, error) {
+	skills, err := fetchWorkspaceSkills(client, id)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]SkillAuditResult, 0, len(skills))
+	for _, skill := range skills {
+		res := SkillAuditResult{Skill: skill, Status: "PASS"}
+
+		file, err := client.GetWorkspaceFile(id, "skills/"+skill+"/SKILL.md")
+		if err != nil {
+			res.Status = "FAIL"
+			res.Issues = append(res.Issues, "missing skills/"+skill+"/SKILL.md")
+			res.Fix = "Create skills/" + skill + "/SKILL.md with YAML frontmatter and instructions."
+			results = append(results, res)
+			continue
+		}
+
+		issues := auditSkillMarkdown(file.Content)
+		if len(issues) > 0 {
+			res.Status = "FAIL"
+			res.Issues = append(res.Issues, issues...)
+			res.Fix = "Add name, description, and version to SKILL.md frontmatter."
+		}
+		results = append(results, res)
+	}
+
+	return results, nil
+}
+
+func auditSkillMarkdown(content string) []string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return []string{"SKILL.md is empty"}
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		return []string{fmt.Sprintf("failed to parse SKILL.md frontmatter: %v", err)}
+	}
+	if len(root.Content) == 0 {
+		return []string{"SKILL.md is missing frontmatter"}
+	}
+
+	node := root.Content[0]
+	if node.Kind != yaml.MappingNode {
+		return []string{"SKILL.md frontmatter must be a YAML mapping"}
+	}
+
+	fields := map[string]bool{}
+	for i := 0; i < len(node.Content)-1; i += 2 {
+		key := node.Content[i]
+		val := node.Content[i+1]
+		if val.Kind == yaml.ScalarNode && strings.TrimSpace(val.Value) != "" {
+			fields[key.Value] = true
+		}
+	}
+
+	issues := make([]string, 0, 3)
+	for _, field := range []string{"name", "description", "version"} {
+		if !fields[field] {
+			issues = append(issues, fmt.Sprintf("frontmatter missing %q", field))
+		}
+	}
+	return issues
 }
 
 func replaceSkillsInConfig(content string, skills []string) (string, error) {
