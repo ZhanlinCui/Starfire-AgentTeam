@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { summarizeWorkspaceCapabilities, type WorkspaceNodeData } from "@/store/canvas";
+import { useCanvasStore, summarizeWorkspaceCapabilities, type WorkspaceNodeData } from "@/store/canvas";
 
 interface Props {
   data: WorkspaceNodeData;
@@ -18,6 +18,7 @@ interface SkillEntry {
 export function SkillsTab({ data }: Props) {
   const capability = summarizeWorkspaceCapabilities(data);
   const skills = useMemo(() => extractSkills(data.agentCard), [data.agentCard]);
+  const setPanelTab = useCanvasStore((s) => s.setPanelTab);
   const promotionTask = data.currentTask.startsWith("Skill promotion:");
 
   return (
@@ -37,6 +38,20 @@ export function SkillsTab({ data }: Props) {
           This is the live skill surface for the selected workspace. It is derived from the Agent Card,
           so it updates when the workspace hot-reloads skills.
         </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={() => setPanelTab("config")}
+            className="rounded-full border border-zinc-700 bg-zinc-950 px-3 py-1 text-[10px] text-zinc-300 hover:bg-zinc-900"
+          >
+            Open Config
+          </button>
+          <button
+            onClick={() => setPanelTab("files")}
+            className="rounded-full border border-zinc-700 bg-zinc-950 px-3 py-1 text-[10px] text-zinc-300 hover:bg-zinc-900"
+          >
+            Open Files
+          </button>
+        </div>
       </div>
 
       {promotionTask && (
@@ -79,6 +94,21 @@ export function SkillsTab({ data }: Props) {
               {skill.description && (
                 <p className="mt-2 text-[11px] leading-5 text-zinc-400">{skill.description}</p>
               )}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setPanelTab("config")}
+                  className="rounded-full border border-zinc-700/70 bg-zinc-950/70 px-2.5 py-1 text-[9px] text-zinc-300 hover:bg-zinc-900"
+                >
+                  View in Config
+                </button>
+                <button
+                  onClick={() => setPanelTab("files")}
+                  className="rounded-full border border-zinc-700/70 bg-zinc-950/70 px-2.5 py-1 text-[9px] text-zinc-300 hover:bg-zinc-900"
+                >
+                  Open Files
+                </button>
+              </div>
 
               {skill.examples.length > 0 && (
                 <div className="mt-2">

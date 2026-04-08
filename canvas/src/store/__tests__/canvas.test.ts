@@ -576,6 +576,11 @@ describe("setPanelTab", () => {
     useCanvasStore.getState().setPanelTab("config");
     expect(useCanvasStore.getState().panelTab).toBe("config");
   });
+
+  it("can switch to skills tab", () => {
+    useCanvasStore.getState().setPanelTab("skills");
+    expect(useCanvasStore.getState().panelTab).toBe("skills");
+  });
 });
 
 // ---------- getSelectedNode ----------
