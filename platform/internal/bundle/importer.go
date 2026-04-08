@@ -3,6 +3,7 @@ package bundle
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
@@ -58,12 +59,27 @@ func Import(
 	// Build config files in memory for the provisioner
 	configFiles := buildBundleConfigFiles(b)
 
+	// Extract runtime from config.yaml in the bundle
+	bundleRuntime := "langgraph"
+	if configYaml, ok := b.Prompts["config.yaml"]; ok {
+		for _, line := range strings.Split(configYaml, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "runtime:") {
+				bundleRuntime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+				break
+			}
+		}
+	}
+	// Store runtime in DB
+	db.DB.ExecContext(ctx, `UPDATE workspaces SET runtime = $1 WHERE id = $2`, bundleRuntime, wsID)
+
 	// Provision the container if provisioner is available
 	if prov != nil {
 		cfg := provisioner.WorkspaceConfig{
 			WorkspaceID: wsID,
 			ConfigFiles: configFiles,
 			Tier:        b.Tier,
+			Runtime:     bundleRuntime,
 			EnvVars:     map[string]string{},
 			PlatformURL: platformURL,
 			// PluginsPath set by caller if available

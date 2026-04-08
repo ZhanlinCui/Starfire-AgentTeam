@@ -526,6 +526,16 @@ export function ConfigTab({ workspaceId }: Props) {
     try {
       const content = rawMode ? rawDraft : toYaml(config);
       await api.put(`/workspaces/${workspaceId}/files/config.yaml`, { content });
+
+      // If runtime changed, update it in the DB so restart uses the correct image
+      const newRuntime = rawMode
+        ? (parseYaml(rawDraft).runtime as string || "")
+        : (config.runtime || "");
+      const oldRuntime = (parseYaml(originalYaml).runtime as string || "");
+      if (newRuntime && newRuntime !== oldRuntime) {
+        await api.patch(`/workspaces/${workspaceId}`, { runtime: newRuntime });
+      }
+
       setOriginalYaml(content);
       if (rawMode) {
         const parsed = parseYaml(content);

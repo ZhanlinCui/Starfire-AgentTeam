@@ -80,6 +80,9 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 	if payload.Tier == 0 {
 		payload.Tier = 1
 	}
+	if payload.Runtime == "" {
+		payload.Runtime = "langgraph"
+	}
 
 	ctx := c.Request.Context()
 
@@ -89,11 +92,11 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		role = payload.Role
 	}
 
-	// Insert workspace
+	// Insert workspace with runtime persisted in DB
 	_, err := db.DB.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, role, tier, awareness_namespace, status, parent_id)
-		VALUES ($1, $2, $3, $4, $5, 'provisioning', $6)
-	`, id, payload.Name, role, payload.Tier, awarenessNamespace, payload.ParentID)
+		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id)
+		VALUES ($1, $2, $3, $4, $5, $6, 'provisioning', $7)
+	`, id, payload.Name, role, payload.Tier, payload.Runtime, awarenessNamespace, payload.ParentID)
 	if err != nil {
 		log.Printf("Create workspace error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workspace"})
@@ -294,6 +297,11 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 			log.Printf("Update parent_id error for %s: %v", id, err)
 		}
 	}
+	if runtime, ok := body["runtime"]; ok {
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET runtime = $2, updated_at = now() WHERE id = $1`, id, runtime); err != nil {
+			log.Printf("Update runtime error for %s: %v", id, err)
+		}
+	}
 
 	// Update canvas position if both x and y provided
 	if x, xOk := body["x"]; xOk {
@@ -485,11 +493,11 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	id := c.Param("id")
 	ctx := c.Request.Context()
 
-	var status, wsName string
+	var status, wsName, dbRuntime string
 	var tier int
 	err := db.DB.QueryRowContext(ctx,
-		`SELECT status, name, tier FROM workspaces WHERE id = $1`, id,
-	).Scan(&status, &wsName, &tier)
+		`SELECT status, name, tier, COALESCE(runtime, 'langgraph') FROM workspaces WHERE id = $1`, id,
+	).Scan(&status, &wsName, &tier, &dbRuntime)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 		return
@@ -503,20 +511,6 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	if h.provisioner == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provisioner not available"})
 		return
-	}
-
-	// Read runtime from the running container's config BEFORE stopping it
-	// (avoids spinning up a temp container to read from the volume)
-	containerRuntime := ""
-	containerName := provisioner.ContainerName(id)
-	if cfgData, execErr := h.provisioner.ExecRead(ctx, containerName, "/configs/config.yaml"); execErr == nil {
-		for _, line := range strings.Split(string(cfgData), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "runtime:") {
-				containerRuntime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
-				break
-			}
-		}
 	}
 
 	// Stop existing container if any
@@ -563,38 +557,12 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		log.Printf("Restart: using template %s for %s (%s)", templatePath, wsName, id)
 	}
 
-	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
-	// Read runtime from template config.yaml for image selection
-	if templatePath != "" {
-		cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
-		for _, line := range strings.Split(string(cfgData), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "runtime:") {
-				payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
-				break
-			}
-		}
-	}
-	// Fallback 1: use runtime read from the container before we stopped it
-	if payload.Runtime == "" {
-		payload.Runtime = containerRuntime
-	}
-	// Fallback 2: read from config volume if ExecRead also failed (container was already dead)
-	if payload.Runtime == "" && h.provisioner != nil {
-		if cfgData, err := h.provisioner.ReadFromVolume(ctx, provisioner.ConfigVolumeName(id), "config.yaml"); err == nil {
-			for _, line := range strings.Split(string(cfgData), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "runtime:") {
-					payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
-					log.Printf("Restart: detected runtime %q from config volume for %s", payload.Runtime, wsName)
-					break
-				}
-			}
-		}
-	}
+	// Runtime comes from DB — single source of truth, no Docker gymnastics needed
+	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: dbRuntime}
+	log.Printf("Restart: workspace %s (%s) runtime=%q", wsName, id, dbRuntime)
 
-	// If runtime has a default template and no template was found yet, use it
-	// (ensures CLAUDE.md, .claude/settings.json etc. get copied on runtime change)
+	// If runtime has a default template and no template was found yet, apply it
+	// (ensures CLAUDE.md, .claude/settings.json etc. get copied)
 	if templatePath == "" && payload.Runtime != "" {
 		runtimeTemplate := filepath.Join(h.configsDir, payload.Runtime+"-default")
 		if _, err := os.Stat(runtimeTemplate); err == nil {
@@ -626,11 +594,11 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 
 	ctx := context.Background()
 
-	var wsName, status string
+	var wsName, status, dbRuntime string
 	var tier int
 	err := db.DB.QueryRowContext(ctx,
-		`SELECT name, status, tier FROM workspaces WHERE id = $1 AND status != 'removed'`, workspaceID,
-	).Scan(&wsName, &status, &tier)
+		`SELECT name, status, tier, COALESCE(runtime, 'langgraph') FROM workspaces WHERE id = $1 AND status != 'removed'`, workspaceID,
+	).Scan(&wsName, &status, &tier, &dbRuntime)
 	if err != nil {
 		return
 	}
@@ -641,7 +609,7 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 		time.Sleep(10 * time.Second)
 	}
 
-	log.Printf("Auto-restart: restarting %s (%s) after secret change (was: %s)", wsName, workspaceID, status)
+	log.Printf("Auto-restart: restarting %s (%s) runtime=%q after secret change (was: %s)", wsName, workspaceID, dbRuntime, status)
 
 	h.provisioner.Stop(ctx, workspaceID)
 
@@ -651,27 +619,25 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 		"name": wsName, "tier": tier,
 	})
 
+	// Runtime from DB — no more config file parsing
+	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: dbRuntime}
+
 	var templatePath string
 	var configFiles map[string][]byte
-	template := findTemplateByName(h.configsDir, wsName)
-	if template != "" {
-		candidatePath := filepath.Join(h.configsDir, template)
-		if _, err := os.Stat(candidatePath); err == nil {
-			templatePath = candidatePath
-		}
-	}
-
-	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
-	if templatePath != "" {
-		cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
-		for _, line := range strings.Split(string(cfgData), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "runtime:") {
-				payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
-				break
+	// Apply runtime-default template if available
+	runtimeTemplate := filepath.Join(h.configsDir, dbRuntime+"-default")
+	if _, err := os.Stat(runtimeTemplate); err == nil {
+		templatePath = runtimeTemplate
+	} else {
+		template := findTemplateByName(h.configsDir, wsName)
+		if template != "" {
+			candidatePath := filepath.Join(h.configsDir, template)
+			if _, err := os.Stat(candidatePath); err == nil {
+				templatePath = candidatePath
 			}
 		}
 	}
+
 	go h.provisionWorkspace(workspaceID, templatePath, configFiles, payload)
 }
 
