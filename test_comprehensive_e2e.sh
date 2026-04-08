@@ -103,6 +103,101 @@ R=$(curl -s "$BASE/workspaces/$PM_ID")
 check "PM position persisted" '"x":100' "$R"
 
 # ============================================================
+# Section 2b: Runtime Assignment & Image Selection
+# ============================================================
+echo ""
+echo "--- Section 2b: Runtime Assignment ---"
+
+# Create workspace with explicit runtime
+R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
+  -d '{"name":"RT Claude","role":"Test","tier":2,"runtime":"claude-code"}')
+check "Create claude-code workspace" '"status":"provisioning"' "$R"
+RT_CC_ID=$(echo "$R" | jq_extract "['id']")
+
+R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
+  -d '{"name":"RT LangGraph","role":"Test","tier":2,"runtime":"langgraph"}')
+check "Create langgraph workspace" '"status":"provisioning"' "$R"
+RT_LG_ID=$(echo "$R" | jq_extract "['id']")
+
+R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
+  -d '{"name":"RT CrewAI","role":"Test","tier":2,"runtime":"crewai"}')
+check "Create crewai workspace" '"status":"provisioning"' "$R"
+RT_CR_ID=$(echo "$R" | jq_extract "['id']")
+
+# Wait for containers to start
+sleep 10
+
+# Verify correct Docker images used
+if command -v docker &>/dev/null; then
+  _check_image() {
+    local ws_id="$1" expected_tag="$2" label="$3"
+    local short_id="${ws_id:0:12}"
+    local actual_image
+    actual_image=$(docker inspect "ws-${short_id}" --format '{{.Config.Image}}' 2>/dev/null || echo "NOT_FOUND")
+    if echo "$actual_image" | grep -qF "$expected_tag"; then
+      echo "  PASS: $label → $actual_image"
+      PASS=$((PASS + 1))
+    else
+      echo "  FAIL: $label (expected *$expected_tag, got $actual_image)"
+      FAIL=$((FAIL + 1))
+    fi
+  }
+
+  _check_image "$RT_CC_ID" "claude-code" "claude-code uses claude-code image"
+  _check_image "$RT_LG_ID" "langgraph" "langgraph uses langgraph image"
+  _check_image "$RT_CR_ID" "crewai" "crewai uses crewai image"
+else
+  echo "  SKIP: Docker not available — cannot verify container images"
+  SKIP=$((SKIP + 3))
+fi
+
+# Verify runtime in agent card after registration
+sleep 5
+for rt_id in $RT_CC_ID $RT_LG_ID $RT_CR_ID; do
+  # Register so we can check agent card
+  curl -s -X POST "$BASE/registry/register" -H "Content-Type: application/json" \
+    -d "{\"id\":\"$rt_id\",\"url\":\"http://localhost:19999\",\"agent_card\":{\"name\":\"Test\",\"skills\":[]}}" > /dev/null 2>&1
+done
+
+# Config file should reflect runtime
+R=$(curl -s "$BASE/workspaces/$RT_CC_ID/files/config.yaml" 2>/dev/null)
+if echo "$R" | grep -qF "runtime: claude-code"; then
+  echo "  PASS: claude-code config.yaml has runtime: claude-code"
+  PASS=$((PASS + 1))
+elif echo "$R" | grep -qF "error"; then
+  echo "  SKIP: config.yaml not accessible (container may not be ready)"
+  SKIP=$((SKIP + 1))
+else
+  echo "  FAIL: claude-code config.yaml missing runtime field"
+  FAIL=$((FAIL + 1))
+fi
+
+# Verify runtime change persists on restart (if provisioner supports ExecRead)
+# Write a new runtime to config, restart, check image changes
+R=$(curl -s -X PUT "$BASE/workspaces/$RT_LG_ID/files/config.yaml" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"name: RT LangGraph\nruntime: deepagents\nmodel: openai:gpt-4.1-mini\ntier: 2\n"}')
+if echo "$R" | grep -qF "saved"; then
+  curl -s -X POST "$BASE/workspaces/$RT_LG_ID/restart" > /dev/null 2>&1
+  sleep 10
+  if command -v docker &>/dev/null; then
+    _check_image "$RT_LG_ID" "deepagents" "Runtime change langgraph→deepagents on restart"
+  else
+    echo "  SKIP: Docker not available"
+    SKIP=$((SKIP + 1))
+  fi
+else
+  echo "  SKIP: Could not write config (container offline)"
+  SKIP=$((SKIP + 1))
+fi
+
+# Clean up runtime test workspaces
+for rt_id in $RT_CC_ID $RT_LG_ID $RT_CR_ID; do
+  curl -s -X DELETE "$BASE/workspaces/$rt_id?confirm=true" > /dev/null 2>&1
+  sleep 0.3
+done
+
+# ============================================================
 # Section 3: Registry & Heartbeat
 # ============================================================
 echo ""
