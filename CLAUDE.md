@@ -71,9 +71,9 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 
 ### Unit Tests
 ```bash
-cd platform && go test ./...                    # 25 Go handler tests (sqlmock + miniredis)
-cd canvas && npm test                            # 58 Vitest store tests
-cd workspace-template && python -m pytest -v     # 86 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory)
+cd platform && go test ./...                    # 141 Go tests (handlers, registry, CLI — sqlmock + miniredis)
+cd canvas && npm test                            # 61 Vitest store tests
+cd workspace-template && python -m pytest -v     # 148 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli)
 ```
 
 ### Integration Tests
@@ -81,6 +81,7 @@ cd workspace-template && python -m pytest -v     # 86 pytest tests (config, hear
 bash test_api.sh             # Runs 62 API tests against localhost:8080
 bash test_a2a_e2e.sh         # Runs 22 A2A end-to-end tests (requires 2 online agents)
 bash test_activity_e2e.sh    # Runs 25 activity/task E2E tests (requires 1 online agent)
+bash test_comprehensive_e2e.sh # Runs 68 checks — ALL endpoints, memory, runtime, bundles, approvals
 ```
 `test_api.sh` requires platform running. Tests full CRUD, registry, heartbeat, discovery, peers, access control, events, degraded/recovery lifecycle, activity logging, current task tracking, bundle round-trip (export → delete → import → verify).
 
