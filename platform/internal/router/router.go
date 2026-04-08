@@ -122,6 +122,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	// Activity Logs
 	acth := handlers.NewActivityHandler(broadcaster)
 	r.GET("/workspaces/:id/activity", acth.List)
+	r.GET("/workspaces/:id/session-search", acth.SessionSearch)
 	r.POST("/workspaces/:id/activity", acth.Report)
 
 	// Config

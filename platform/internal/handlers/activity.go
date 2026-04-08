@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
@@ -101,6 +102,113 @@ func (h *ActivityHandler) List(c *gin.Context) {
 		activities = append(activities, entry)
 	}
 	c.JSON(http.StatusOK, activities)
+}
+
+// SessionSearch handles GET /workspaces/:id/session-search?q=&limit=
+// It searches the workspace's own activity logs and memories without adding a new storage layer.
+func (h *ActivityHandler) SessionSearch(c *gin.Context) {
+	workspaceID := c.Param("id")
+	query := strings.TrimSpace(c.DefaultQuery("q", ""))
+	limitStr := c.DefaultQuery("limit", "50")
+
+	limit := 50
+	if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+		limit = n
+		if limit > 200 {
+			limit = 200
+		}
+	}
+
+	sqlQuery := `
+		WITH session_items AS (
+			SELECT
+				'activity' AS kind,
+				id,
+				workspace_id,
+				activity_type AS label,
+				COALESCE(summary, '') AS content,
+				COALESCE(method, '') AS method,
+				COALESCE(status, '') AS status,
+				request_body,
+				response_body,
+				created_at
+			FROM activity_logs
+			WHERE workspace_id = $1
+			UNION ALL
+			SELECT
+				'memory' AS kind,
+				id,
+				workspace_id,
+				scope AS label,
+				content,
+				'' AS method,
+				'' AS status,
+				NULL::jsonb AS request_body,
+				NULL::jsonb AS response_body,
+				created_at
+			FROM agent_memories
+			WHERE workspace_id = $1
+		)
+		SELECT kind, id, workspace_id, label, content, method, status, request_body, response_body, created_at
+		FROM session_items
+	`
+
+	args := []interface{}{workspaceID}
+	if query != "" {
+		sqlQuery += `
+		WHERE (
+			content ILIKE $2 OR
+			label ILIKE $2 OR
+			method ILIKE $2 OR
+			status ILIKE $2 OR
+			COALESCE(request_body::text, '') ILIKE $2 OR
+			COALESCE(response_body::text, '') ILIKE $2
+		)`
+		args = append(args, "%"+query+"%")
+	}
+
+	sqlQuery += ` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(len(args)+1)
+	args = append(args, limit)
+
+	rows, err := db.DB.QueryContext(c.Request.Context(), sqlQuery, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "session search failed"})
+		return
+	}
+	defer rows.Close()
+
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var (
+			kind, id, wsID, label, content, method, status string
+			reqBody, respBody                              []byte
+			createdAt                                      time.Time
+		)
+		if err := rows.Scan(&kind, &id, &wsID, &label, &content, &method, &status, &reqBody, &respBody, &createdAt); err != nil {
+			log.Printf("Session search scan error: %v", err)
+			continue
+		}
+
+		item := map[string]interface{}{
+			"kind":         kind,
+			"id":           id,
+			"workspace_id": wsID,
+			"label":        label,
+			"content":      content,
+			"method":       method,
+			"status":       status,
+			"created_at":   createdAt,
+		}
+		if reqBody != nil {
+			item["request_body"] = json.RawMessage(reqBody)
+		}
+		if respBody != nil {
+			item["response_body"] = json.RawMessage(respBody)
+		}
+		items = append(items, item)
+	}
+
+	c.JSON(http.StatusOK, items)
 }
 
 // Report handles POST /workspaces/:id/activity — agents self-report activity logs.

@@ -86,6 +86,14 @@ Pending approvals auto-expire after 10 minutes. Events: `APPROVAL_REQUESTED`, `A
 
 Scopes: `LOCAL` (workspace only), `TEAM` (parent + siblings), `GLOBAL` (all read, root write only). Access enforced via `CanCommunicate()`.
 
+### Session Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/workspaces/:id/session-search` | Search the workspace's recent activity logs and local memories (params: `q`, `limit`) |
+
+This is the Hermes-style recall surface for the workspace: it reuses existing activity logs and memory rows instead of adding a new store. It is meant for looking back at recent decisions, tasks, and notes without reconstructing context from scratch.
+
 ### Agents
 
 | Method | Path | Description |

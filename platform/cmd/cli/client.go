@@ -12,18 +12,18 @@ import (
 
 // WorkspaceInfo represents a workspace from the platform API.
 type WorkspaceInfo struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	Role           *string         `json:"role"`
-	Tier           int             `json:"tier"`
-	Status         string          `json:"status"`
-	URL            string          `json:"url"`
-	ParentID       *string         `json:"parent_id"`
-	AgentCard      json.RawMessage `json:"agent_card"`
-	ActiveTasks    int             `json:"active_tasks"`
-	LastErrorRate  float64         `json:"last_error_rate"`
-	LastSampleError string         `json:"last_sample_error"`
-	UptimeSeconds  int             `json:"uptime_seconds"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Role            *string         `json:"role"`
+	Tier            int             `json:"tier"`
+	Status          string          `json:"status"`
+	URL             string          `json:"url"`
+	ParentID        *string         `json:"parent_id"`
+	AgentCard       json.RawMessage `json:"agent_card"`
+	ActiveTasks     int             `json:"active_tasks"`
+	LastErrorRate   float64         `json:"last_error_rate"`
+	LastSampleError string          `json:"last_sample_error"`
+	UptimeSeconds   int             `json:"uptime_seconds"`
 }
 
 // AgentCardInfo represents parsed fields from the agent_card JSON.
@@ -47,6 +47,20 @@ type EventInfo struct {
 	WorkspaceID *string         `json:"workspace_id"`
 	Payload     json.RawMessage `json:"payload"`
 	CreatedAt   time.Time       `json:"created_at"`
+}
+
+// SessionSearchItem represents a session search result from the platform API.
+type SessionSearchItem struct {
+	Kind         string          `json:"kind"`
+	ID           string          `json:"id"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Label        string          `json:"label"`
+	Content      string          `json:"content"`
+	Method       string          `json:"method"`
+	Status       string          `json:"status"`
+	RequestBody  json.RawMessage `json:"request_body,omitempty"`
+	ResponseBody json.RawMessage `json:"response_body,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 // WSEvent represents a WebSocket event message.
@@ -125,6 +139,43 @@ func (c *PlatformClient) FetchEvents() ([]EventInfo, error) {
 		return nil, fmt.Errorf("decode events: %w", err)
 	}
 	return events, nil
+}
+
+// SearchSession searches a workspace's activity logs and memories.
+func (c *PlatformClient) SearchSession(id, query string, limit int) ([]SessionSearchItem, error) {
+	endpoint, err := url.JoinPath(c.baseURL, "workspaces", id, "session-search")
+	if err != nil {
+		return nil, fmt.Errorf("build session search URL: %w", err)
+	}
+	params := url.Values{}
+	if query != "" {
+		params.Set("q", query)
+	}
+	if limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("search session: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("search session: status %d (body read error: %v)", resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("search session: status %d: %s", resp.StatusCode, body)
+	}
+
+	var items []SessionSearchItem
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		return nil, fmt.Errorf("decode session search: %w", err)
+	}
+	return items, nil
 }
 
 // DeleteWorkspace deletes a workspace via DELETE /workspaces/:id.
