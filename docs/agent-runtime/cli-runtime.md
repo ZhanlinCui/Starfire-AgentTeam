@@ -1,13 +1,15 @@
-# CLI Agent Runtime
+# Agent Runtime Adapters
 
 ## Overview
 
-In addition to the default LangGraph (Python) runtime, workspaces can use **CLI-based agent runtimes** — any command-line AI tool that accepts a prompt and returns text. This enables using Claude Code, OpenAI Codex, Ollama, or any custom CLI agent as the brain inside a workspace.
+The workspace runtime uses a **pluggable adapter architecture** — each agent infrastructure (Claude Code, OpenClaw, LangGraph, CrewAI, AutoGen, etc.) has its own adapter that bridges the A2A protocol to the infra's native interface.
+
+Adapters live in `workspace-template/adapters/<runtime>/` and are auto-discovered at startup. Each adapter implements `BaseAdapter` (from `adapters/base.py`) with `setup()` and `create_executor()` methods.
 
 The runtime is selected via `config.yaml`:
 
 ```yaml
-runtime: claude-code    # or: codex, ollama, custom, langgraph (default)
+runtime: claude-code    # or: langgraph, openclaw, deepagents, crewai, autogen
 runtime_config:
   model: sonnet
   auth_token_file: .auth-token

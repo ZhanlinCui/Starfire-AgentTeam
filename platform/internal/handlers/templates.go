@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
@@ -125,14 +126,10 @@ func normalizeName(name string) string {
 	return result
 }
 
-// resolveConfigDir finds the config directory for a workspace.
-// Priority: ID-based dir (ws-{id[:12]}) → name-based dir → template match by config.yaml name field.
-// If none exist, defaults to ID-based dir (matching provisioner convention for writes).
-func (h *TemplatesHandler) resolveConfigDir(workspaceID, wsName string) string {
-	idDir := filepath.Join(h.configsDir, configDirName(workspaceID))
-	if _, err := os.Stat(idDir); err == nil {
-		return idDir
-	}
+// resolveTemplateDir finds the template directory for a workspace on the host.
+// Only resolves to actual templates (not ws-* dirs since those are now Docker volumes).
+// Returns empty string if no matching template is found.
+func (h *TemplatesHandler) resolveTemplateDir(wsName string) string {
 	nameDir := filepath.Join(h.configsDir, normalizeName(wsName))
 	if _, err := os.Stat(nameDir); err == nil {
 		return nameDir
@@ -141,8 +138,7 @@ func (h *TemplatesHandler) resolveConfigDir(workspaceID, wsName string) string {
 	if tmpl := findTemplateByName(h.configsDir, wsName); tmpl != "" {
 		return filepath.Join(h.configsDir, tmpl)
 	}
-	// Nothing found — default to ID-based dir for writes
-	return idDir
+	return ""
 }
 
 // validateRelPath checks that a relative path doesn't escape the target directory.
@@ -282,34 +278,59 @@ func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
 		return
 	}
 
-	destDir := h.resolveConfigDir(workspaceID, wsName)
-
-	// Create dir if needed, don't clear existing (merge files)
-	os.MkdirAll(destDir, 0o755)
-
-	if err := writeFiles(destDir, body.Files); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Auto-generate config.yaml only if not provided AND doesn't already exist on disk
-	configYamlPath := filepath.Join(destDir, "config.yaml")
-	if _, exists := body.Files["config.yaml"]; !exists {
-		if _, err := os.Stat(configYamlPath); os.IsNotExist(err) {
-			cfg := generateDefaultConfig(wsName, body.Files)
-			if err := os.WriteFile(configYamlPath, []byte(cfg), 0600); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config.yaml"})
-				return
-			}
+	// Validate all paths first
+	for relPath := range body.Files {
+		if err := validateRelPath(relPath); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":     "replaced",
-		"workspace":  workspaceID,
-		"files":      len(body.Files),
-		"config_dir": filepath.Base(destDir),
-	})
+	// Write via Docker CopyToContainer when container is running
+	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
+		if err := h.copyFilesToContainer(ctx, containerName, "/configs", body.Files); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write files: %v", err)})
+			return
+		}
+
+		// Auto-generate config.yaml if not provided
+		if _, exists := body.Files["config.yaml"]; !exists {
+			// Check if config.yaml exists in container
+			if _, err := h.execInContainer(ctx, containerName, []string{"test", "-f", "/configs/config.yaml"}); err != nil {
+				cfg := generateDefaultConfig(wsName, body.Files)
+				singleFile := map[string]string{"config.yaml": cfg}
+				h.copyFilesToContainer(ctx, containerName, "/configs", singleFile)
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "replaced",
+			"workspace": workspaceID,
+			"files":     len(body.Files),
+			"source":    "container",
+		})
+		return
+	}
+
+	// Container offline — try ephemeral container to write to volume
+	volName := provisioner.ConfigVolumeName(workspaceID)
+	if err := h.writeViaEphemeral(ctx, volName, body.Files); err != nil {
+		// Last resort: write to host-side template dir
+		destDir := h.resolveTemplateDir(wsName)
+		if destDir == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write files: %v", err)})
+			return
+		}
+		os.MkdirAll(destDir, 0o755)
+		if err := writeFiles(destDir, body.Files); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "replaced", "workspace": workspaceID, "files": len(body.Files), "source": "template"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "replaced", "workspace": workspaceID, "files": len(body.Files), "source": "volume"})
 }
 
 // ListFiles handles GET /workspaces/:id/files
@@ -373,11 +394,15 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		}
 	}
 
-	// Fallback: host-side config dir
-	configDir := h.resolveConfigDir(workspaceID, wsName)
+	// Fallback: host-side template dir (only for templates, not ws-* workspace volumes)
+	configDir := h.resolveTemplateDir(wsName)
+	if configDir == "" {
+		c.JSON(http.StatusOK, []fileEntry{})
+		return
+	}
 
 	if _, err := os.Stat(configDir); os.IsNotExist(err) {
-		c.JSON(http.StatusOK, []interface{}{})
+		c.JSON(http.StatusOK, []fileEntry{})
 		return
 	}
 
@@ -448,8 +473,13 @@ func (h *TemplatesHandler) ReadFile(c *gin.Context) {
 		}
 	}
 
-	// Fallback: host-side
-	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
+	// Fallback: host-side template dir
+	templateDir := h.resolveTemplateDir(wsName)
+	if templateDir == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found (container offline, no template)"})
+		return
+	}
+	fullPath := filepath.Join(templateDir, filePath)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
@@ -491,14 +521,24 @@ func (h *TemplatesHandler) WriteFile(c *gin.Context) {
 		return
 	}
 
-	// Write to host-side config dir (bind-mounted as /configs in container)
-	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
-	os.MkdirAll(filepath.Dir(fullPath), 0755)
-	if err := os.WriteFile(fullPath, []byte(body.Content), 0600); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write file"})
+	// Write via Docker CopyToContainer when container is running
+	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
+		singleFile := map[string]string{filePath: body.Content}
+		if err := h.copyFilesToContainer(ctx, containerName, "/configs", singleFile); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write file: %v", err)})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "saved", "path": filePath})
 		return
 	}
 
+	// Container offline — write via ephemeral container mounting the config volume
+	volName := provisioner.ConfigVolumeName(workspaceID)
+	singleFile := map[string]string{filePath: body.Content}
+	if err := h.writeViaEphemeral(ctx, volName, singleFile); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write file: %v", err)})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "saved", "path": filePath})
 }
 
@@ -522,29 +562,25 @@ func (h *TemplatesHandler) DeleteFile(c *gin.Context) {
 		return
 	}
 
-	fullPath := filepath.Join(h.resolveConfigDir(workspaceID, wsName), filePath)
-
-	info, err := os.Stat(fullPath)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
-		return
-	}
-
-	if info.IsDir() {
-		if err := os.RemoveAll(fullPath); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete folder"})
+	// Delete via docker exec when container is running
+	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
+		containerPath := "/configs/" + filePath
+		_, err := h.execInContainer(ctx, containerName, []string{"rm", "-rf", containerPath})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete: %v", err)})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath, "type": "directory"})
+		c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath})
 		return
 	}
 
-	if err := os.Remove(fullPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete file"})
+	// Container offline — delete via ephemeral container
+	volName := provisioner.ConfigVolumeName(workspaceID)
+	if err := h.deleteViaEphemeral(ctx, volName, filePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete: %v", err)})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath, "type": "file"})
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "path": filePath})
 }
 
 // SharedContext handles GET /workspaces/:id/shared-context
@@ -559,7 +595,49 @@ func (h *TemplatesHandler) SharedContext(c *gin.Context) {
 		return
 	}
 
-	configDir := h.resolveConfigDir(workspaceID, wsName)
+	type contextFile struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+
+	// Try reading from running container first
+	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
+		configData, err := h.execInContainer(ctx, containerName, []string{"cat", "/configs/config.yaml"})
+		if err != nil {
+			c.JSON(http.StatusOK, []interface{}{})
+			return
+		}
+
+		var cfg struct {
+			SharedContext []string `yaml:"shared_context"`
+		}
+		if err := yaml.Unmarshal([]byte(configData), &cfg); err != nil || len(cfg.SharedContext) == 0 {
+			c.JSON(http.StatusOK, []interface{}{})
+			return
+		}
+
+		files := make([]contextFile, 0, len(cfg.SharedContext))
+		for _, relPath := range cfg.SharedContext {
+			if err := validateRelPath(relPath); err != nil {
+				continue
+			}
+			content, err := h.execInContainer(ctx, containerName, []string{"cat", "/configs/" + relPath})
+			if err != nil {
+				continue
+			}
+			files = append(files, contextFile{Path: relPath, Content: content})
+		}
+		c.JSON(http.StatusOK, files)
+		return
+	}
+
+	// Fallback to host-side template dir
+	configDir := h.resolveTemplateDir(wsName)
+	if configDir == "" {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
 	configData, err := os.ReadFile(filepath.Join(configDir, "config.yaml"))
 	if err != nil {
 		c.JSON(http.StatusOK, []interface{}{})
@@ -572,11 +650,6 @@ func (h *TemplatesHandler) SharedContext(c *gin.Context) {
 	if err := yaml.Unmarshal(configData, &cfg); err != nil || len(cfg.SharedContext) == 0 {
 		c.JSON(http.StatusOK, []interface{}{})
 		return
-	}
-
-	type contextFile struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
 	}
 
 	files := make([]contextFile, 0, len(cfg.SharedContext))
@@ -592,6 +665,101 @@ func (h *TemplatesHandler) SharedContext(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, files)
+}
+
+// copyFilesToContainer creates a tar archive from a map of files and copies it into a container.
+func (h *TemplatesHandler) copyFilesToContainer(ctx context.Context, containerName, destPath string, files map[string]string) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	createdDirs := map[string]bool{}
+	for name, content := range files {
+		// Create parent directories in tar (deduplicated)
+		dir := filepath.Dir(name)
+		if dir != "." && !createdDirs[dir] {
+			tw.WriteHeader(&tar.Header{
+				Typeflag: tar.TypeDir,
+				Name:     dir + "/",
+				Mode:     0755,
+			})
+			createdDirs[dir] = true
+		}
+
+		data := []byte(content)
+		header := &tar.Header{
+			Name: name,
+			Mode: 0644,
+			Size: int64(len(data)),
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			return fmt.Errorf("failed to write tar header for %s: %w", name, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			return fmt.Errorf("failed to write tar data for %s: %w", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	return h.docker.CopyToContainer(ctx, containerName, destPath, &buf, container.CopyToContainerOptions{})
+}
+
+// writeViaEphemeral writes files to a named volume using an ephemeral Alpine container.
+// Used when the workspace container is offline (e.g., during provisioning).
+func (h *TemplatesHandler) writeViaEphemeral(ctx context.Context, volumeName string, files map[string]string) error {
+	if h.docker == nil {
+		return fmt.Errorf("docker not available")
+	}
+
+	// Create ephemeral container mounting the volume
+	resp, err := h.docker.ContainerCreate(ctx, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "10"},
+	}, &container.HostConfig{
+		Binds: []string{volumeName + ":/configs"},
+	}, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("failed to create ephemeral container: %w", err)
+	}
+	defer h.docker.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+
+	if err := h.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("failed to start ephemeral container: %w", err)
+	}
+
+	// Copy files via tar
+	return h.copyFilesToContainer(ctx, resp.ID, "/configs", files)
+}
+
+// deleteViaEphemeral deletes a file from a named volume using an ephemeral container.
+func (h *TemplatesHandler) deleteViaEphemeral(ctx context.Context, volumeName, filePath string) error {
+	if h.docker == nil {
+		return fmt.Errorf("docker not available")
+	}
+
+	resp, err := h.docker.ContainerCreate(ctx, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"rm", "-rf", "/configs/" + filePath},
+	}, &container.HostConfig{
+		Binds: []string{volumeName + ":/configs"},
+	}, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("failed to create ephemeral container: %w", err)
+	}
+	defer h.docker.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+
+	if err := h.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return err
+	}
+	// Wait for the rm command to finish before removing the container
+	statusCh, errCh := h.docker.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case <-statusCh:
+		return nil
+	case err := <-errCh:
+		return err
+	}
 }
 
 // List handles GET /templates

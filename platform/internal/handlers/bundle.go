@@ -6,6 +6,7 @@ import (
 	"github.com/agent-molecule/platform/internal/bundle"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/provisioner"
+	"github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
 )
 
@@ -14,14 +15,16 @@ type BundleHandler struct {
 	provisioner *provisioner.Provisioner
 	platformURL string
 	configsDir  string
+	docker      *client.Client
 }
 
-func NewBundleHandler(b *events.Broadcaster, p *provisioner.Provisioner, platformURL, configsDir string) *BundleHandler {
+func NewBundleHandler(b *events.Broadcaster, p *provisioner.Provisioner, platformURL, configsDir string, dockerCli *client.Client) *BundleHandler {
 	return &BundleHandler{
 		broadcaster: b,
 		provisioner: p,
 		platformURL: platformURL,
 		configsDir:  configsDir,
+		docker:      dockerCli,
 	}
 }
 
@@ -30,7 +33,7 @@ func (h *BundleHandler) Export(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
-	b, err := bundle.Export(ctx, workspaceID, h.configsDir)
+	b, err := bundle.Export(ctx, workspaceID, h.configsDir, h.docker)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

@@ -33,26 +33,18 @@ const maxProxyResponseBody = 10 << 20
 var a2aClient = &http.Client{} // No timeout — agent liveness is checked via heartbeat, not proxy deadline
 
 type WorkspaceHandler struct {
-	broadcaster    *events.Broadcaster
-	provisioner    *provisioner.Provisioner
-	platformURL    string
-	configsDir     string // path to workspace-configs-templates/ (container-side for reading)
-	configsHostDir string // host-side path for Docker volume mounts
+	broadcaster *events.Broadcaster
+	provisioner *provisioner.Provisioner
+	platformURL string
+	configsDir  string // path to workspace-configs-templates/ (for reading templates)
 }
 
 func NewWorkspaceHandler(b *events.Broadcaster, p *provisioner.Provisioner, platformURL, configsDir string) *WorkspaceHandler {
-	// When running inside Docker, CONFIGS_HOST_DIR provides the host-side path
-	// for volume mounts. Falls back to configsDir for local dev.
-	hostDir := os.Getenv("CONFIGS_HOST_DIR")
-	if hostDir == "" {
-		hostDir = configsDir
-	}
 	return &WorkspaceHandler{
-		broadcaster:    b,
-		provisioner:    p,
-		platformURL:    platformURL,
-		configsDir:     configsDir,
-		configsHostDir: hostDir,
+		broadcaster: b,
+		provisioner: p,
+		platformURL: platformURL,
+		configsDir:  configsDir,
 	}
 }
 
@@ -104,14 +96,26 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 
 	// Auto-provision — always start a container
 	if h.provisioner != nil {
-		var configPath string
+		var templatePath string
+		var configFiles map[string][]byte
 		if payload.Template != "" {
-			configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, payload.Template))
+			templatePath = filepath.Join(h.configsDir, payload.Template)
+			// Read runtime from template config.yaml if not specified in request
+			if payload.Runtime == "" {
+				cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
+				for _, line := range strings.Split(string(cfgData), "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "runtime:") {
+						payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+						break
+					}
+				}
+			}
 		} else {
-			// No template — generate a minimal config directory
-			configPath = h.ensureDefaultConfig(id, payload)
+			// No template — generate config files in memory
+			configFiles = h.ensureDefaultConfig(id, payload)
 		}
-		go h.provisionWorkspace(id, configPath, payload)
+		go h.provisionWorkspace(id, templatePath, configFiles, payload)
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"id": id, "status": "provisioning"})
@@ -320,9 +324,12 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	// Cascade delete children
 	for _, child := range children {
 		childID := child["id"]
-		// Stop container if provisioner available
+		// Stop container and remove config volume if provisioner available
 		if h.provisioner != nil {
 			h.provisioner.Stop(ctx, childID)
+			if err := h.provisioner.RemoveVolume(ctx, childID); err != nil {
+				log.Printf("Delete child %s volume removal warning: %v", childID, err)
+			}
 		}
 		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, childID); err != nil {
 			log.Printf("Delete child %s status update error: %v", childID, err)
@@ -336,6 +343,9 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	// Delete the workspace itself
 	if h.provisioner != nil {
 		h.provisioner.Stop(ctx, id)
+		if err := h.provisioner.RemoveVolume(ctx, id); err != nil {
+			log.Printf("Delete %s volume removal warning: %v", id, err)
+		}
 	}
 	if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, id); err != nil {
 		log.Printf("Delete %s status update error: %v", id, err)
@@ -352,7 +362,7 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 }
 
 // provisionWorkspace handles async container deployment with timeout.
-func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, payload models.CreateWorkspacePayload) {
+func (h *WorkspaceHandler) provisionWorkspace(workspaceID, templatePath string, configFiles map[string][]byte, payload models.CreateWorkspacePayload) {
 	ctx, cancel := context.WithTimeout(context.Background(), provisioner.ProvisionTimeout)
 	defer cancel()
 
@@ -376,10 +386,11 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, configPath string, pa
 		}
 	}
 
-	pluginsPath, _ := filepath.Abs(filepath.Join(h.configsHostDir, "..", "plugins"))
+	pluginsPath, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
 	cfg := provisioner.WorkspaceConfig{
 		WorkspaceID:   workspaceID,
-		ConfigPath:    configPath,
+		TemplatePath:  templatePath,
+		ConfigFiles:   configFiles,
 		PluginsPath:   pluginsPath,
 		WorkspacePath: os.Getenv("WORKSPACE_DIR"), // If set, bind-mount host dir as /workspace
 		Tier:          payload.Tier,
@@ -459,55 +470,51 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&body)
 
-	// Resolve config directory in priority order:
-	// 1. Workspace's own config dir (ws-<id>) — has uploaded files
-	// 2. Explicit template from request body
-	// 3. Name-based match
-	// 4. Auto-generate default config
-	idDirName := configDirName(id)
-	configPath := ""
+	// Resolve template path in priority order:
+	// 1. Explicit template from request body
+	// 2. Name-based match in templates directory
+	// 3. No template — the volume already has configs from previous run (or generate defaults)
+	var templatePath string
+	var configFiles map[string][]byte
+	configLabel := "existing-volume"
 
-	// Check for workspace's own config dir — only use it if it has meaningful content
-	// (system-prompt.md, uploaded files, etc.), not just an auto-generated config.yaml stub
-	ownDir := filepath.Join(h.configsDir, idDirName)
-	if info, err := os.Stat(ownDir); err == nil && info.IsDir() {
-		entries, _ := os.ReadDir(ownDir)
-		hasCustomContent := false
-		for _, e := range entries {
-			if e.Name() != "config.yaml" {
-				hasCustomContent = true
-				break
-			}
-		}
-		if hasCustomContent {
-			configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, idDirName))
+	template := body.Template
+	if template == "" {
+		template = findTemplateByName(h.configsDir, wsName)
+	}
+	if template != "" {
+		candidatePath := filepath.Join(h.configsDir, template)
+		if _, err := os.Stat(candidatePath); err == nil {
+			templatePath = candidatePath
+			configLabel = template
 		}
 	}
 
-	// Fall back to explicit template or name-based match
-	if configPath == "" {
-		template := body.Template
-		if template == "" {
-			template = findTemplateByName(h.configsDir, wsName)
-		}
-		if template != "" {
-			configPath, _ = filepath.Abs(filepath.Join(h.configsHostDir, template))
-		}
+	// If no template found and this is a fresh start, generate default config
+	if templatePath == "" {
+		// The named volume may already have configs from the previous run.
+		// Only generate defaults if the volume is new (checked by provisioner).
+		log.Printf("Restart: reusing existing config volume for %s (%s)", wsName, id)
 	}
-
-	// Last resort: auto-generate default config
-	if configPath == "" {
-		log.Printf("Restart: no config found for %s (%s), auto-generating", wsName, id)
-		payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
-		configPath = h.ensureDefaultConfig(id, payload)
-	} else {
-		log.Printf("Restart: using config %s for %s (%s)", configPath, wsName, id)
+	if templatePath != "" {
+		log.Printf("Restart: using template %s for %s (%s)", templatePath, wsName, id)
 	}
 
 	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
-	go h.provisionWorkspace(id, configPath, payload)
+	// Read runtime from template config.yaml for image selection
+	if templatePath != "" {
+		cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
+		for _, line := range strings.Split(string(cfgData), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "runtime:") {
+				payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+				break
+			}
+		}
+	}
+	go h.provisionWorkspace(id, templatePath, configFiles, payload)
 
-	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "config_dir": filepath.Base(configPath)})
+	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "config_dir": configLabel})
 }
 
 // findTemplateByName looks for a workspace-configs-templates directory matching a name.
@@ -549,7 +556,7 @@ func findTemplateByName(configsDir, name string) string {
 }
 
 // configDirName returns the standard config directory name for a workspace ID.
-// Used by ensureDefaultConfig, ReplaceFiles, Restart — must be consistent everywhere.
+// Used by resolveConfigDir in templates.go for host-side template resolution.
 func configDirName(workspaceID string) string {
 	id := workspaceID
 	if len(id) > 12 {
@@ -558,16 +565,10 @@ func configDirName(workspaceID string) string {
 	return "ws-" + id
 }
 
-// ensureDefaultConfig creates a minimal config directory for workspaces without a template.
-// Files are written to the container-side path (which is a volume mount from the host).
-// The host-side path is returned for the provisioner to mount into the workspace container.
-func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload models.CreateWorkspacePayload) string {
-	dirName := configDirName(workspaceID)
-	// Write to the container-side path (which IS the host volume mount)
-	containerPath := filepath.Join(h.configsDir, dirName)
-	os.MkdirAll(containerPath, 0o755)
-	// Return the host-side path for the provisioner to mount
-	configPath := filepath.Join(h.configsHostDir, dirName)
+// ensureDefaultConfig generates minimal config files in memory for workspaces without a template.
+// Returns a map of filename → content to be written into the container's /configs volume.
+func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload models.CreateWorkspacePayload) map[string][]byte {
+	files := make(map[string][]byte)
 
 	// Determine runtime
 	runtime := payload.Runtime
@@ -585,11 +586,26 @@ func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload model
 		}
 	}
 
-	// Sanitize name/role to prevent YAML injection (strip newlines)
+	// Sanitize name/role for YAML safety — quote values that contain special chars
 	safeName := strings.ReplaceAll(strings.ReplaceAll(payload.Name, "\n", " "), "\r", "")
 	safeRole := strings.ReplaceAll(strings.ReplaceAll(payload.Role, "\n", " "), "\r", "")
+	// Quote if contains YAML-breaking chars
+	quoteName := safeName
+	quoteRole := safeRole
+	for _, special := range []string{":", "#", "'", "\"", "{", "}", "[", "]"} {
+		if strings.Contains(safeName, special) {
+			quoteName = fmt.Sprintf("%q", safeName)
+			break
+		}
+	}
+	for _, special := range []string{":", "#", "'", "\"", "{", "}", "[", "]"} {
+		if strings.Contains(safeRole, special) {
+			quoteRole = fmt.Sprintf("%q", safeRole)
+			break
+		}
+	}
 	configYAML := fmt.Sprintf("name: %s\ndescription: %s\nversion: 1.0.0\ntier: %d\nruntime: %s\n",
-		safeName, safeRole, payload.Tier, runtime)
+		quoteName, quoteRole, payload.Tier, runtime)
 
 	if runtime != "langgraph" {
 		configYAML += fmt.Sprintf("runtime_config:\n  model: %s\n  auth_token_file: .auth-token\n  timeout: 300\n", model)
@@ -597,46 +613,18 @@ func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload model
 		configYAML += fmt.Sprintf("model: %s\n", model)
 	}
 
-	// Only write config.yaml if it doesn't already exist (files API may have written one)
-	configYamlPath := filepath.Join(containerPath, "config.yaml")
-	if _, err := os.Stat(configYamlPath); os.IsNotExist(err) {
-		os.WriteFile(configYamlPath, []byte(configYAML), 0o644)
-	}
+	files["config.yaml"] = []byte(configYAML)
 
 	// Copy auth token from the default template if it exists (for CLI runtimes)
 	if runtime != "langgraph" {
-		authPath := filepath.Join(containerPath, ".auth-token")
-		if _, err := os.Stat(authPath); os.IsNotExist(err) {
-			defaultTokenPath := filepath.Join(h.configsDir, "claude-code-default", ".auth-token")
-			if tokenData, err := os.ReadFile(defaultTokenPath); err == nil {
-				os.WriteFile(authPath, tokenData, 0o600)
-			}
+		defaultTokenPath := filepath.Join(h.configsDir, "claude-code-default", ".auth-token")
+		if tokenData, err := os.ReadFile(defaultTokenPath); err == nil {
+			files[".auth-token"] = tokenData
 		}
 	}
 
-	// Check if a name-based dir has files (from files API) and merge them
-	normalizedName := strings.ToLower(strings.ReplaceAll(payload.Name, " ", "-"))
-	namedDir := filepath.Join(h.configsDir, normalizedName)
-	if namedDir != containerPath {
-		if entries, err := os.ReadDir(namedDir); err == nil {
-			for _, e := range entries {
-				if !e.IsDir() {
-					src := filepath.Join(namedDir, e.Name())
-					dst := filepath.Join(containerPath, e.Name())
-					// Don't overwrite existing files
-					if _, err := os.Stat(dst); os.IsNotExist(err) {
-						if data, err := os.ReadFile(src); err == nil {
-							os.WriteFile(dst, data, 0o644)
-						}
-					}
-				}
-			}
-			log.Printf("Provisioner: merged files from %s into %s", namedDir, containerPath)
-		}
-	}
-
-	log.Printf("Provisioner: config at %s for workspace %s (runtime: %s)", configPath, workspaceID, runtime)
-	return configPath
+	log.Printf("Provisioner: generated %d config files for workspace %s (runtime: %s)", len(files), workspaceID, runtime)
+	return files
 }
 
 // ProxyA2A handles POST /workspaces/:id/a2a

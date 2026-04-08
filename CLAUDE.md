@@ -20,7 +20,7 @@ Canvas (Next.js :3000) ←WebSocket→ Platform (Go :8080) ←HTTP→ Postgres +
 Four main components:
 - **Platform** (`platform/`): Go/Gin control plane — workspace CRUD, registry, discovery, WebSocket hub, liveness monitoring
 - **Canvas** (`canvas/`): Next.js 15 + React Flow (@xyflow/react v12) + Zustand + Tailwind — visual workspace graph
-- **Workspace Runtime** (`workspace-template/`): Python template — LangGraph agent wrapped in A2A server, registers with platform, sends heartbeats
+- **Workspace Runtime** (`workspace-template/`): Unified Docker image with pluggable adapter system — supports LangGraph, Claude Code, OpenClaw, DeepAgents, CrewAI, AutoGen. Adapters in `workspace-template/adapters/`. Deps installed at startup via `entrypoint.sh`.
 - **molecli** (`platform/cmd/cli/`): Go TUI dashboard (Bubbletea + Lipgloss) — real-time workspace monitoring, event log, health overview, delete/filter operations
 
 ## Build & Run Commands
@@ -56,9 +56,18 @@ Env vars: `NEXT_PUBLIC_PLATFORM_URL` (default http://localhost:8080), `NEXT_PUBL
 ```bash
 docker build -t workspace-template:latest workspace-template/   # Build unified workspace image
 ```
-The unified image supports both LangGraph (Python) and CLI runtimes (Claude Code, Codex, Ollama). Runtime is selected via `config.yaml` → `runtime:` field. See [CLI Runtime docs](./docs/agent-runtime/cli-runtime.md).
+The unified image is bare-minimum (Python + Node.js + A2A SDK). Runtime-specific deps are installed at container startup by `entrypoint.sh` from `adapters/<runtime>/requirements.txt`. Runtime is selected via `config.yaml` → `runtime:` field.
+
+Templates are framework presets in `workspace-configs-templates/`: `claude-code-default`, `langgraph`, `openclaw`, `deepagents`. Agent roles are configured after deployment via Config tab or API.
 
 For Claude Code runtime, write your OAuth token to `workspace-configs-templates/claude-code-default/.auth-token`.
+
+### Scripts
+```bash
+bash scripts/setup-default-org.sh              # Create PM + 3 teams (Marketing/Research/Dev) via API
+OPENAI_API_KEY=... bash scripts/test-a2a-cross-runtime.sh  # E2E: Claude Code ↔ OpenClaw A2A test
+OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template team + A2A
+```
 
 ### Unit Tests
 ```bash
