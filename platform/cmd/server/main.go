@@ -14,6 +14,7 @@ import (
 	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
+	"github.com/agent-molecule/platform/internal/handlers"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/registry"
 	"github.com/agent-molecule/platform/internal/router"
@@ -61,13 +62,6 @@ func main() {
 	defer cancel()
 	go broadcaster.Subscribe(ctx)
 
-	// Start Liveness Monitor — use broadcaster callback to avoid import cycles
-	go registry.StartLivenessMonitor(ctx, func(innerCtx context.Context, workspaceID string) {
-		if err := broadcaster.RecordAndBroadcast(innerCtx, "WORKSPACE_OFFLINE", workspaceID, map[string]interface{}{}); err != nil {
-			log.Printf("Liveness broadcast error for %s: %v", workspaceID, err)
-		}
-	})
-
 	// Activity log retention — configurable via env vars
 	retentionDays := envOr("ACTIVITY_RETENTION_DAYS", "7")
 	cleanupHours := envOr("ACTIVITY_CLEANUP_INTERVAL_HOURS", "6")
@@ -106,8 +100,31 @@ func main() {
 	platformURL := envOr("PLATFORM_URL", fmt.Sprintf("http://host.docker.internal:%s", port))
 	configsDir := envOr("CONFIGS_DIR", findConfigsDir())
 
+	// Init order: wh → onWorkspaceOffline → liveness/healthSweep → router
+	// WorkspaceHandler is created before the router so RestartByID can be wired into
+	// the offline callbacks used by both the liveness monitor and the health sweep.
+	wh := handlers.NewWorkspaceHandler(broadcaster, prov, platformURL, configsDir)
+
+	// Offline handler: broadcast event + auto-restart the dead workspace
+	onWorkspaceOffline := func(innerCtx context.Context, workspaceID string) {
+		if err := broadcaster.RecordAndBroadcast(innerCtx, "WORKSPACE_OFFLINE", workspaceID, map[string]interface{}{}); err != nil {
+			log.Printf("Offline broadcast error for %s: %v", workspaceID, err)
+		}
+		// Auto-restart: bring the workspace back automatically
+		go wh.RestartByID(workspaceID)
+	}
+
+	// Start Liveness Monitor — Redis TTL expiry-based offline detection + auto-restart
+	go registry.StartLivenessMonitor(ctx, onWorkspaceOffline)
+
+	// Proactive container health sweep — detects dead containers faster than Redis TTL.
+	// Checks all "online" workspaces against Docker every 15 seconds.
+	if prov != nil {
+		go registry.StartHealthSweep(ctx, prov, 15*time.Second, onWorkspaceOffline)
+	}
+
 	// Router
-	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir)
+	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir, wh)
 
 	// HTTP server with graceful shutdown
 	srv := &http.Server{

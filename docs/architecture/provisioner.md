@@ -67,10 +67,11 @@ provisioning -> online <-----> degraded
 - `provisioning -> online`: first heartbeat received
 - `online -> degraded`: error_rate >= 50% (via heartbeat self-report)
 - `degraded -> online`: error_rate < 10% (recovered)
-- `online/degraded -> offline`: heartbeat TTL expired
+- `online/degraded -> offline`: heartbeat TTL expired OR proactive health sweep detects dead container
+- `offline -> provisioning`: auto-restart triggered by liveness monitor or health sweep
 - `provisioning -> failed`: 3min timeout or immediate Docker/EC2 error
 - `failed -> provisioning`: user clicks Retry on canvas
-- `offline -> online`: workspace re-registers
+- `offline -> online`: workspace re-registers (after auto-restart or manual restart)
 - `any -> removed`: user deletes workspace
 
 | Status | Meaning | Canvas Display |
@@ -86,24 +87,28 @@ provisioning -> online <-----> degraded
 
 When a workspace is restarted (`POST /workspaces/:id/restart`):
 
-1. **Read runtime** from the running container's `/configs/config.yaml` via `ExecRead` (docker exec) BEFORE stopping it
+1. **Read runtime** from the `workspaces.runtime` column in Postgres
 2. **Stop** the existing container
 3. **Resolve template** — checks request body, name-based match, then runtime-default template (e.g. `claude-code-default/`)
-4. **Select Docker image** — uses `RuntimeImages[runtime]` (e.g. `workspace-template:claude-code`)
-5. **Re-provision** with the same config volume (configs persist across restarts)
+4. **Re-provision** with the same config volume (configs persist across restarts)
 
-**Runtime template fallback:** When a runtime has a default template directory (e.g. `workspace-configs-templates/claude-code-default/`), it's automatically applied on restart. This copies runtime-specific files like `CLAUDE.md`, `.claude/settings.json` into the container — important when switching runtimes via the Config tab.
+**Runtime stored in DB:** The `runtime` column is set at creation time and persists across restarts. No need to read from the container.
 
-**Image selection:** Each adapter has its own Docker image extending `workspace-template:base`:
+**Template resolution at creation:** When a workspace specifies a template that doesn't exist (e.g. `org-marketing-lead`), the Create handler falls back in order: (1) `{runtime}-default` template (e.g. `claude-code-default/`), (2) `ensureDefaultConfig` (generates minimal config + copies `.auth-token` from `claude-code-default/`).
 
-| Runtime | Image |
-|---------|-------|
-| langgraph | `workspace-template:langgraph` |
-| claude-code | `workspace-template:claude-code` |
-| crewai | `workspace-template:crewai` |
-| autogen | `workspace-template:autogen` |
-| deepagents | `workspace-template:deepagents` |
-| openclaw | `workspace-template:openclaw` |
+## Container Health Detection
+
+Three layers detect dead containers:
+
+1. **Passive (Redis TTL):** Each heartbeat refreshes a 60s Redis key (`ws:{id}`). When the key expires, the liveness monitor marks the workspace offline and triggers auto-restart. Gap: up to 60s of false "online" state.
+
+2. **Proactive (Health Sweep):** A goroutine checks all online/degraded workspaces against Docker API (`ContainerInspect`) every 15 seconds. If a container is gone, it immediately marks the workspace offline, clears Redis caches, and triggers auto-restart. Catches bulk container death (e.g. Docker Desktop crash) within 15s.
+
+3. **Reactive (A2A Proxy):** When the A2A proxy (`POST /workspaces/:id/a2a`) gets a connection error, it checks `provisioner.IsRunning()`. If the container is dead, it marks offline, clears caches, triggers restart, and returns 503 with `"restarting": true`. If the container is running but unresponsive, returns 502.
+
+All three layers use the same `onWorkspaceOffline` callback: broadcast `WORKSPACE_OFFLINE` + `go wh.RestartByID(workspaceID)`. `RestartByID` has a per-workspace mutex (`TryLock`) that deduplicates concurrent restart attempts.
+
+When a workspace goes offline and is auto-restarted, Redis keys are cleaned up via `db.ClearWorkspaceKeys()` which removes `ws:{id}`, `ws:{id}:url`, and `ws:{id}:internal_url`.
 
 ## Failure Handling
 

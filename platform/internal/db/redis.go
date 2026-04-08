@@ -64,6 +64,13 @@ func GetCachedInternalURL(ctx context.Context, workspaceID string) (string, erro
 	return RDB.Get(ctx, key).Result()
 }
 
+// ClearWorkspaceKeys removes all Redis keys for a workspace (liveness, URL cache, internal URL cache).
+func ClearWorkspaceKeys(ctx context.Context, workspaceID string) {
+	for _, suffix := range []string{"", ":url", ":internal_url"} {
+		RDB.Del(ctx, fmt.Sprintf("ws:%s%s", workspaceID, suffix))
+	}
+}
+
 // IsOnline checks if a workspace is online.
 func IsOnline(ctx context.Context, workspaceID string) (bool, error) {
 	key := fmt.Sprintf("ws:%s", workspaceID)

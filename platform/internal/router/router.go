@@ -18,7 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provisioner, platformURL, configsDir string) *gin.Engine {
+func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provisioner, platformURL, configsDir string, wh *handlers.WorkspaceHandler) *gin.Engine {
 	r := gin.Default()
 
 	// CORS origins — configurable via CORS_ORIGINS env var (comma-separated)
@@ -60,7 +60,6 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/metrics", metrics.Handler())
 
 	// Workspaces CRUD
-	wh := handlers.NewWorkspaceHandler(broadcaster, prov, platformURL, configsDir)
 	r.POST("/workspaces", wh.Create)
 	r.GET("/workspaces", wh.List)
 	r.GET("/workspaces/:id", wh.Get)

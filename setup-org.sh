@@ -40,11 +40,8 @@ if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
   fi
 fi
 
-# Copy auth token to all org templates (containers mount these directly)
-for dir in "$SCRIPT_DIR"/workspace-configs-templates/org-*/; do
-  cp "$TOKEN_FILE" "$dir/.auth-token" 2>/dev/null
-done
-log "Auth token distributed to all org templates"
+# Auth token will be auto-distributed to containers via claude-code-default template fallback
+log "Auth token ready (will be propagated via claude-code-default template)"
 
 # Helper: create workspace and return ID
 create_ws() {

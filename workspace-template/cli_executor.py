@@ -203,7 +203,11 @@ You have MCP tools for communicating with other workspaces:
 For quick questions, use delegate_task (synchronous).
 For long-running work (building pages, running audits), use delegate_task_async + check_task_status.
 Always use list_peers first to discover available workspace IDs.
-Access control is enforced — you can only reach siblings and parent/children."""
+Access control is enforced — you can only reach siblings and parent/children.
+
+IMPORTANT: If delegate_task returns a DELEGATION FAILED message, do NOT forward the raw error to the user.
+Instead: (1) try delegating to a different peer, (2) handle the task yourself, or
+(3) tell the user which peer is unavailable and provide your own best answer."""
 
         # For non-MCP runtimes (ollama, custom), provide CLI instructions
         return """## Inter-Agent Communication
@@ -462,10 +466,15 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                                            self.runtime, attempt + 1, max_retries, delay)
                             await asyncio.sleep(delay)
                             continue
-                    # Auth errors poison the session — clear it so next message starts fresh
+                    # Auth errors: clear session and retry (OAuth tokens can have transient failures)
                     if "auth" in error_msg.lower() or "api_key" in error_msg.lower() or "X-Api-Key" in error_msg:
                         self._session_id = None
-                        logger.warning("CLI agent [%s]: auth error, clearing session for fresh start", self.runtime)
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning("CLI agent [%s]: auth error (attempt %d/%d), retrying in %ds",
+                                           self.runtime, attempt + 1, max_retries, delay)
+                            await asyncio.sleep(delay)
+                            continue
 
                     logger.error("CLI agent error [%s]: %s", self.runtime, error_msg[:500])
                     await event_queue.enqueue_event(

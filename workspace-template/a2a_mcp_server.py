@@ -46,6 +46,11 @@ async def discover_peer(target_id: str) -> dict | None:
             return None
 
 
+# Sentinel prefix for errors originating from send_a2a_message / child agents.
+# Used by delegate_task to distinguish real errors from normal response text.
+_A2A_ERROR_PREFIX = "[A2A_ERROR] "
+
+
 async def send_a2a_message(target_url: str, message: str) -> str:
     """Send an A2A message/send to a target workspace."""
     async with httpx.AsyncClient(timeout=None) as client:
@@ -68,12 +73,16 @@ async def send_a2a_message(target_url: str, message: str) -> str:
             data = resp.json()
             if "result" in data:
                 parts = data["result"].get("parts", [])
-                return parts[0].get("text", "") if parts else "(no response)"
+                text = parts[0].get("text", "") if parts else "(no response)"
+                # Tag child-reported errors so the caller can detect them reliably
+                if text.startswith("Agent error:"):
+                    return f"{_A2A_ERROR_PREFIX}{text}"
+                return text
             elif "error" in data:
-                return f"Error: {data['error'].get('message', 'unknown')}"
+                return f"{_A2A_ERROR_PREFIX}{data['error'].get('message', 'unknown')}"
             return str(data)
         except Exception as e:
-            return f"Error: {e}"
+            return f"{_A2A_ERROR_PREFIX}{e}"
 
 
 async def get_peers() -> list[dict]:
@@ -272,11 +281,22 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
 
         # Send A2A message and log the full round-trip
         result = await send_a2a_message(target_url, task)
+
+        # Detect delegation failures — wrap them clearly so the calling agent
+        # can decide to retry, use another peer, or handle the task itself.
+        is_error = result.startswith(_A2A_ERROR_PREFIX)
         await report_activity(
             "a2a_receive", target_id,
-            f"{peer_name} responded ({len(result)} chars)",
+            f"{peer_name} responded ({len(result)} chars)" if not is_error else f"{peer_name} failed",
             task_text=task, response_text=result,
+            status="error" if is_error else "ok",
         )
+        if is_error:
+            return (
+                f"DELEGATION FAILED to {peer_name}: {result}\n"
+                f"You should either: (1) try a different peer, (2) handle this task yourself, "
+                f"or (3) inform the user that {peer_name} is unavailable and provide your best answer."
+            )
         return result
 
     elif name == "delegate_task_async":

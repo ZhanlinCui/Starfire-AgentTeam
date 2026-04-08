@@ -122,16 +122,30 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		var templatePath string
 		var configFiles map[string][]byte
 		if payload.Template != "" {
-			templatePath = filepath.Join(h.configsDir, payload.Template)
-			// Read runtime from template config.yaml if not specified in request
-			if payload.Runtime == "" {
-				cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
-				for _, line := range strings.Split(string(cfgData), "\n") {
-					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "runtime:") {
-						payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
-						break
+			candidatePath := filepath.Join(h.configsDir, payload.Template)
+			if _, err := os.Stat(candidatePath); err == nil {
+				templatePath = candidatePath
+				// Read runtime from template config.yaml if not specified in request
+				if payload.Runtime == "" {
+					cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
+					for _, line := range strings.Split(string(cfgData), "\n") {
+						line = strings.TrimSpace(line)
+						if strings.HasPrefix(line, "runtime:") {
+							payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+							break
+						}
 					}
+				}
+			} else {
+				// Template not found — try runtime-default template, then generate config
+				log.Printf("Create: template %q not found, falling back for %s", payload.Template, payload.Name)
+				runtimeDefault := filepath.Join(h.configsDir, payload.Runtime+"-default")
+				if _, err := os.Stat(runtimeDefault); err == nil {
+					templatePath = runtimeDefault
+					log.Printf("Create: using runtime-default template %s for %s", payload.Runtime+"-default", payload.Name)
+				} else {
+					configFiles = h.ensureDefaultConfig(id, payload)
+					log.Printf("Create: generating default config for %s (runtime=%s)", payload.Name, payload.Runtime)
 				}
 			}
 		} else {
@@ -152,7 +166,7 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 func scanWorkspaceRow(rows interface {
 	Scan(dest ...interface{}) error
 }) (map[string]interface{}, error) {
-	var id, name, role, status, url, sampleError, currentTask string
+	var id, name, role, status, url, sampleError, currentTask, runtime string
 	var tier, activeTasks, uptimeSeconds int
 	var errorRate, x, y float64
 	var collapsed bool
@@ -161,7 +175,7 @@ func scanWorkspaceRow(rows interface {
 
 	err := rows.Scan(&id, &name, &role, &tier, &status, &agentCard, &url,
 		&parentID, &activeTasks, &errorRate, &sampleError, &uptimeSeconds,
-		&currentTask, &x, &y, &collapsed)
+		&currentTask, &runtime, &x, &y, &collapsed)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +192,7 @@ func scanWorkspaceRow(rows interface {
 		"last_sample_error": sampleError,
 		"uptime_seconds":    uptimeSeconds,
 		"current_task":      currentTask,
+		"runtime":           runtime,
 		"x":                 x,
 		"y":                 y,
 		"collapsed":         collapsed,
@@ -205,7 +220,7 @@ const workspaceListQuery = `
 		   COALESCE(w.agent_card, 'null'::jsonb), COALESCE(w.url, ''),
 		   w.parent_id, w.active_tasks, w.last_error_rate,
 		   COALESCE(w.last_sample_error, ''), w.uptime_seconds,
-		   COALESCE(w.current_task, ''),
+		   COALESCE(w.current_task, ''), COALESCE(w.runtime, 'langgraph'),
 		   COALESCE(cl.x, 0), COALESCE(cl.y, 0), COALESCE(cl.collapsed, false)
 	FROM workspaces w
 	LEFT JOIN canvas_layouts cl ON cl.workspace_id = w.id
@@ -244,7 +259,7 @@ func (h *WorkspaceHandler) Get(c *gin.Context) {
 			   COALESCE(w.agent_card, 'null'::jsonb), COALESCE(w.url, ''),
 			   w.parent_id, w.active_tasks, w.last_error_rate,
 			   COALESCE(w.last_sample_error, ''), w.uptime_seconds,
-			   COALESCE(w.current_task, ''),
+			   COALESCE(w.current_task, ''), COALESCE(w.runtime, 'langgraph'),
 			   COALESCE(cl.x, 0), COALESCE(cl.y, 0), COALESCE(cl.collapsed, false)
 		FROM workspaces w
 		LEFT JOIN canvas_layouts cl ON cl.workspace_id = w.id
@@ -867,6 +882,21 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 	durationMs := int(time.Since(startTime).Milliseconds())
 	if err != nil {
 		log.Printf("ProxyA2A forward error: %v", err)
+
+		// Reactive health check: if the request failed, check if the container is actually dead.
+		// If so, mark offline, clear stale caches, and trigger auto-restart.
+		containerDead := false
+		if h.provisioner != nil {
+			if running, _ := h.provisioner.IsRunning(ctx, workspaceID); !running {
+				containerDead = true
+				log.Printf("ProxyA2A: container for %s is dead — marking offline and triggering restart", workspaceID)
+				db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'offline', updated_at = now() WHERE id = $1 AND status NOT IN ('removed', 'provisioning')`, workspaceID)
+				db.ClearWorkspaceKeys(ctx, workspaceID)
+				h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_OFFLINE", workspaceID, map[string]interface{}{})
+				go h.RestartByID(workspaceID)
+			}
+		}
+
 		if logActivity {
 			// Log failed A2A attempt (detached context — request may be done)
 			errMsg := err.Error()
@@ -888,6 +918,12 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 				Status:       "error",
 				ErrorDetail:  &errMsg,
 			})
+		}
+		if containerDead {
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusServiceUnavailable,
+				Response: gin.H{"error": "workspace agent unreachable — container restart triggered", "restarting": true},
+			}
 		}
 		return 0, nil, &proxyA2AError{
 			Status:   http.StatusBadGateway,

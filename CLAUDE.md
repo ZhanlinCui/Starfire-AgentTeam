@@ -116,7 +116,22 @@ docker compose up                                     # Full stack
 The platform uses function injection to avoid Go import cycles between ws, registry, and events packages:
 - `ws.NewHub(canCommunicate AccessChecker)` — Hub accepts `registry.CanCommunicate` as a function
 - `registry.StartLivenessMonitor(ctx, onOffline OfflineHandler)` — Liveness accepts broadcaster callback
-- Wiring happens in `platform/cmd/server/main.go`
+- `registry.StartHealthSweep(ctx, checker ContainerChecker, interval, onOffline)` — Health sweep accepts Docker checker interface
+- Wiring happens in `platform/cmd/server/main.go` — init order: `wh → onWorkspaceOffline → liveness/healthSweep → router`
+
+### Container Health Detection
+Three layers detect dead containers (e.g. Docker Desktop crash):
+1. **Passive (Redis TTL):** 60s heartbeat key expires → liveness monitor → auto-restart
+2. **Proactive (Health Sweep):** `registry.StartHealthSweep` polls Docker API every 15s → catches dead containers faster
+3. **Reactive (A2A Proxy):** On connection error, checks `provisioner.IsRunning()` → immediate offline + restart
+
+All three call `onWorkspaceOffline` which broadcasts `WORKSPACE_OFFLINE` + `go wh.RestartByID()`. Redis cleanup uses shared `db.ClearWorkspaceKeys()`.
+
+### Template Resolution (Create)
+When a workspace specifies a template that doesn't exist, the Create handler falls back:
+1. Check `os.Stat(configsDir/template)` — use if exists
+2. Try `{runtime}-default` template (e.g. `claude-code-default/`)
+3. Generate default config via `ensureDefaultConfig()` (includes `.auth-token` copy for CLI runtimes)
 
 ### Communication Rules (`registry/access.go`)
 `CanCommunicate(callerID, targetID)` determines if two workspaces can talk:
@@ -148,7 +163,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 - Config save: "Save & Restart" writes config.yaml and auto-restarts the workspace. "Save" writes only (shows restart banner). Secrets POST/DELETE auto-restart on the platform side.
 
 ### Workspace Lifecycle
-`provisioning` → `online` (on register) → `degraded` (error_rate > 0.5) → `online` (recovered) → `offline` (Redis TTL expired) → `removed` (deleted)
+`provisioning` → `online` (on register) → `degraded` (error_rate > 0.5) → `online` (recovered) → `offline` (Redis TTL expired OR health sweep detects dead container) → auto-restart → `provisioning` → ... → `removed` (deleted)
 
 ## Platform API Routes
 

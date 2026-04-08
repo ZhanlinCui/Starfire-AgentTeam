@@ -89,8 +89,10 @@ def build_children_description(children: list[dict]) -> str:
             "2. Use `delegate_to_workspace` to send the task to the chosen member",
             "3. If a task requires multiple members, delegate to each and aggregate results",
             "4. If no member is suitable, handle the task yourself",
-            "5. If a member is offline, reassign to another member or handle yourself",
-            "6. Always report back the result to the caller",
+            "5. If a delegation FAILS (error, offline, timeout): do NOT forward raw errors to the user. "
+            "Instead: (a) try another team member, (b) handle the task yourself, or "
+            "(c) tell the user which member is unavailable and provide your own best answer",
+            "6. Always report back the result to the caller — never pass through raw error messages",
         ]
     )
 

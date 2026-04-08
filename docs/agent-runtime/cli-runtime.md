@@ -191,11 +191,17 @@ For MCP-compatible runtimes, an A2A MCP server (`a2a_mcp_server.py`) is automati
 |------|-------------|
 | `list_peers` | Discover sibling/parent/child workspaces (name, ID, status, role) |
 | `delegate_task` | Send a task to a peer and get their response via A2A |
+| `delegate_task_async` | Send a task and return immediately with a task_id (for long tasks) |
+| `check_task_status` | Poll an async task's status and get results when done |
 | `get_workspace_info` | Get this workspace's own metadata |
 
 The agent uses these tools naturally — no special instructions needed. Access control is enforced by the platform registry.
 
 Example flow: Marketing uses `delegate_task(seo_id, "What is your status?")` → A2A message to SEO → SEO responds → result returned to Marketing.
+
+### Delegation Error Handling
+
+When `delegate_task` receives an error from a child (auth failure, timeout, offline), the MCP server wraps it as a `DELEGATION FAILED` message with instructions for the calling agent to: (1) try a different peer, (2) handle the task itself, or (3) inform the user which peer is unavailable and provide its own best answer. Errors are tagged with a `[A2A_ERROR]` sentinel prefix so they can be reliably distinguished from normal response text. Coordinator prompts and A2A instructions reinforce that agents must never forward raw error messages to the user.
 
 ### CLI Commands (Ollama, Custom)
 
@@ -249,6 +255,7 @@ This pushes an immediate heartbeat with `current_task` to the platform, which br
 The CLI executor includes built-in retry logic with exponential backoff:
 - Empty responses (common rate limit signal) → retry up to 3 times (5s, 10s, 20s)
 - Rate limit errors (429, "overloaded") → retry with same backoff
+- Auth errors (OAuth token transient failures) → clear session, retry with backoff
 - Timeouts → kill subprocess and report (no retry)
 
 The A2A CLI (`a2a_cli.py`) also retries delegation calls on rate limits.

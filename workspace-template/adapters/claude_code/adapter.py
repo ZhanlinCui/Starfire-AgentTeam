@@ -33,7 +33,7 @@ class ClaudeCodeAdapter(BaseAdapter):
 
     async def setup(self, config: AdapterConfig) -> None:
         import shutil
-        cmd = config.runtime_config.get("command", "claude")
+        cmd = config.runtime_config.get("command") or "claude"
         if not shutil.which(cmd):
             logger.warning(f"Claude Code CLI '{cmd}' not found in PATH")
 
