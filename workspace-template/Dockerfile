@@ -21,6 +21,7 @@ COPY entrypoint.sh ./
 COPY skills/ ./skills/
 COPY tools/ ./tools/
 COPY adapters/ ./adapters/
+COPY policies/ ./policies/
 
 # Create CLI aliases
 RUN ln -s /app/a2a_cli.py /usr/local/bin/a2a && chmod +x /app/a2a_cli.py /app/a2a_mcp_server.py && \
