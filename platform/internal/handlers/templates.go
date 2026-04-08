@@ -1,11 +1,7 @@
 package handlers
 
 import (
-	"archive/tar"
-	"bytes"
-	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,9 +11,7 @@ import (
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/provisioner"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
@@ -29,9 +23,6 @@ var allowedRoots = map[string]bool{
 	"/home":      true,
 	"/plugins":   true,
 }
-
-// maxExecOutput limits container exec output to 5MB to prevent OOM.
-const maxExecOutput = 5 * 1024 * 1024
 
 // maxUploadFiles limits the number of files in a single import/replace.
 const maxUploadFiles = 200
@@ -45,54 +36,6 @@ func NewTemplatesHandler(configsDir string, dockerCli *client.Client) *Templates
 	return &TemplatesHandler{configsDir: configsDir, docker: dockerCli}
 }
 
-// findContainer finds a running container for the workspace.
-// Checks provisioner name, full ID, and DB workspace name (same candidates as terminal handler).
-func (h *TemplatesHandler) findContainer(ctx context.Context, workspaceID string) string {
-	if h.docker == nil {
-		return ""
-	}
-	name := provisioner.ContainerName(workspaceID)
-	candidates := []string{name}
-	if name != "ws-"+workspaceID {
-		candidates = append(candidates, "ws-"+workspaceID)
-	}
-	// Also check by workspace name from DB
-	var wsName string
-	db.DB.QueryRowContext(ctx, `SELECT LOWER(REPLACE(name, ' ', '-')) FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName)
-	if wsName != "" {
-		candidates = append(candidates, wsName)
-	}
-	for _, c := range candidates {
-		info, err := h.docker.ContainerInspect(ctx, c)
-		if err == nil && info.State.Running {
-			return c
-		}
-	}
-	return ""
-}
-
-// execInContainer runs a command in a container and returns stdout (capped at maxExecOutput).
-func (h *TemplatesHandler) execInContainer(ctx context.Context, containerName string, cmd []string) (string, error) {
-	execCfg := container.ExecOptions{
-		Cmd:          cmd,
-		AttachStdout: true,
-		AttachStderr: true,
-	}
-	execID, err := h.docker.ContainerExecCreate(ctx, containerName, execCfg)
-	if err != nil {
-		return "", err
-	}
-	resp, err := h.docker.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
-	if err != nil {
-		return "", err
-	}
-	defer resp.Close()
-	var stdout bytes.Buffer
-	// Use stdcopy to correctly demux Docker multiplexed stream (stdout/stderr)
-	stdcopy.StdCopy(&stdout, io.Discard, io.LimitReader(resp.Reader, maxExecOutput))
-	return strings.TrimSpace(stdout.String()), nil
-}
-
 type templateSummary struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -101,29 +44,6 @@ type templateSummary struct {
 	Model       string   `json:"model"`
 	Skills      []string `json:"skills"`
 	SkillCount  int      `json:"skill_count"`
-}
-
-// normalizeName converts a display name to a directory-safe lowercase-hyphen string.
-// Only allows alphanumeric, hyphens, and underscores. Strips everything else.
-func normalizeName(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		if r == ' ' || r == '-' {
-			b.WriteRune('-')
-		} else if r >= 'A' && r <= 'Z' {
-			b.WriteRune(r + 32)
-		} else if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-			b.WriteRune(r)
-		}
-		// Skip all other characters (dots, slashes, etc.)
-	}
-	result := b.String()
-	// Prevent path traversal
-	result = strings.ReplaceAll(result, "..", "")
-	if result == "" {
-		result = "unnamed"
-	}
-	return result
 }
 
 // resolveTemplateDir finds the template directory for a workspace on the host.
@@ -150,187 +70,49 @@ func validateRelPath(relPath string) error {
 	return nil
 }
 
-// writeFiles writes a map of relative paths → content into destDir, validating each path.
-func writeFiles(destDir string, files map[string]string) error {
-	for relPath, content := range files {
-		if err := validateRelPath(relPath); err != nil {
-			return err
-		}
-		fullPath := filepath.Join(destDir, relPath)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			return fmt.Errorf("failed to create directory for %s: %w", relPath, err)
-		}
-		if err := os.WriteFile(fullPath, []byte(content), 0600); err != nil {
-			return fmt.Errorf("failed to write %s: %w", relPath, err)
-		}
-	}
-	return nil
-}
-
-// generateDefaultConfig creates a config.yaml from detected prompt files and skills.
-func generateDefaultConfig(name string, files map[string]string) string {
-	promptFiles := []string{}
-	skillSet := map[string]bool{}
-
-	for path := range files {
-		// Root .md files are prompt files
-		if filepath.Dir(path) == "." && filepath.Ext(path) == ".md" {
-			promptFiles = append(promptFiles, path)
-		}
-		// Detect skills from skills/*/SKILL.md
-		if filepath.Base(path) == "SKILL.md" {
-			dir := filepath.Dir(path)
-			if filepath.Dir(dir) == "skills" {
-				skillSet[filepath.Base(dir)] = true
-			}
-		}
-	}
-
-	var cfg strings.Builder
-	cfg.WriteString("name: " + name + "\n")
-	cfg.WriteString("description: Imported agent\n")
-	cfg.WriteString("version: 1.0.0\ntier: 1\n")
-	cfg.WriteString("model: anthropic:claude-haiku-4-5-20251001\n")
-	cfg.WriteString("\nprompt_files:\n")
-	if len(promptFiles) > 0 {
-		for _, f := range promptFiles {
-			cfg.WriteString("  - " + f + "\n")
-		}
-	} else {
-		cfg.WriteString("  - system-prompt.md\n")
-	}
-	cfg.WriteString("\nskills:\n")
-	if len(skillSet) > 0 {
-		for s := range skillSet {
-			cfg.WriteString("  - " + s + "\n")
-		}
-	} else {
-		cfg.WriteString("  []\n")
-	}
-	cfg.WriteString("\ntools: []\n")
-	cfg.WriteString("\na2a:\n  port: 8000\n  streaming: true\n  push_notifications: true\n")
-	cfg.WriteString("\nenv:\n  required:\n    - ANTHROPIC_API_KEY\n  optional: []\n")
-	return cfg.String()
-}
-
-// Import handles POST /templates/import
-func (h *TemplatesHandler) Import(c *gin.Context) {
-	var body struct {
-		Name  string            `json:"name" binding:"required"`
-		Files map[string]string `json:"files" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+// List handles GET /templates
+func (h *TemplatesHandler) List(c *gin.Context) {
+	entries, err := os.ReadDir(h.configsDir)
+	if err != nil {
+		c.JSON(http.StatusOK, []templateSummary{})
 		return
 	}
 
-	if len(body.Files) > maxUploadFiles {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("too many files (%d), max %d", len(body.Files), maxUploadFiles)})
-		return
-	}
-
-	dirName := normalizeName(body.Name)
-	destDir := filepath.Join(h.configsDir, dirName)
-
-	if _, err := os.Stat(destDir); err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "template already exists", "id": dirName})
-		return
-	}
-
-	if err := writeFiles(destDir, body.Files); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Auto-generate config.yaml if not provided
-	if _, exists := body.Files["config.yaml"]; !exists {
-		cfg := generateDefaultConfig(body.Name, body.Files)
-		if err := os.WriteFile(filepath.Join(destDir, "config.yaml"), []byte(cfg), 0600); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write config.yaml"})
-			return
-		}
-	}
-
-	c.JSON(http.StatusCreated, gin.H{"status": "imported", "id": dirName, "name": body.Name})
-}
-
-// ReplaceFiles handles PUT /workspaces/:id/files
-func (h *TemplatesHandler) ReplaceFiles(c *gin.Context) {
-	workspaceID := c.Param("id")
-
-	var body struct {
-		Files map[string]string `json:"files" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if len(body.Files) > maxUploadFiles {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("too many files (%d), max %d", len(body.Files), maxUploadFiles)})
-		return
-	}
-
-	ctx := c.Request.Context()
-	var wsName string
-	if err := db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsName); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-		return
-	}
-
-	// Validate all paths first
-	for relPath := range body.Files {
-		if err := validateRelPath(relPath); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	// Write via Docker CopyToContainer when container is running
-	if containerName := h.findContainer(ctx, workspaceID); containerName != "" {
-		if err := h.copyFilesToContainer(ctx, containerName, "/configs", body.Files); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write files: %v", err)})
-			return
+	templates := make([]templateSummary, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
 
-		// Auto-generate config.yaml if not provided
-		if _, exists := body.Files["config.yaml"]; !exists {
-			// Check if config.yaml exists in container
-			if _, err := h.execInContainer(ctx, containerName, []string{"test", "-f", "/configs/config.yaml"}); err != nil {
-				cfg := generateDefaultConfig(wsName, body.Files)
-				singleFile := map[string]string{"config.yaml": cfg}
-				h.copyFilesToContainer(ctx, containerName, "/configs", singleFile)
-			}
+		configPath := filepath.Join(h.configsDir, entry.Name(), "config.yaml")
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			continue
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "replaced",
-			"workspace": workspaceID,
-			"files":     len(body.Files),
-			"source":    "container",
+		var raw struct {
+			Name        string   `yaml:"name"`
+			Description string   `yaml:"description"`
+			Tier        int      `yaml:"tier"`
+			Model       string   `yaml:"model"`
+			Skills      []string `yaml:"skills"`
+		}
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			continue
+		}
+
+		templates = append(templates, templateSummary{
+			ID:          entry.Name(),
+			Name:        raw.Name,
+			Description: raw.Description,
+			Tier:        raw.Tier,
+			Model:       raw.Model,
+			Skills:      raw.Skills,
+			SkillCount:  len(raw.Skills),
 		})
-		return
 	}
 
-	// Container offline — try ephemeral container to write to volume
-	volName := provisioner.ConfigVolumeName(workspaceID)
-	if err := h.writeViaEphemeral(ctx, volName, body.Files); err != nil {
-		// Last resort: write to host-side template dir
-		destDir := h.resolveTemplateDir(wsName)
-		if destDir == "" {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to write files: %v", err)})
-			return
-		}
-		os.MkdirAll(destDir, 0o755)
-		if err := writeFiles(destDir, body.Files); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "replaced", "workspace": workspaceID, "files": len(body.Files), "source": "template"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "replaced", "workspace": workspaceID, "files": len(body.Files), "source": "volume"})
+	c.JSON(http.StatusOK, templates)
 }
 
 // ListFiles handles GET /workspaces/:id/files
@@ -665,150 +447,4 @@ func (h *TemplatesHandler) SharedContext(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, files)
-}
-
-// copyFilesToContainer creates a tar archive from a map of files and copies it into a container.
-func (h *TemplatesHandler) copyFilesToContainer(ctx context.Context, containerName, destPath string, files map[string]string) error {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-
-	createdDirs := map[string]bool{}
-	for name, content := range files {
-		// Create parent directories in tar (deduplicated)
-		dir := filepath.Dir(name)
-		if dir != "." && !createdDirs[dir] {
-			tw.WriteHeader(&tar.Header{
-				Typeflag: tar.TypeDir,
-				Name:     dir + "/",
-				Mode:     0755,
-			})
-			createdDirs[dir] = true
-		}
-
-		data := []byte(content)
-		header := &tar.Header{
-			Name: name,
-			Mode: 0644,
-			Size: int64(len(data)),
-		}
-		if err := tw.WriteHeader(header); err != nil {
-			return fmt.Errorf("failed to write tar header for %s: %w", name, err)
-		}
-		if _, err := tw.Write(data); err != nil {
-			return fmt.Errorf("failed to write tar data for %s: %w", name, err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return fmt.Errorf("failed to close tar writer: %w", err)
-	}
-
-	return h.docker.CopyToContainer(ctx, containerName, destPath, &buf, container.CopyToContainerOptions{})
-}
-
-// writeViaEphemeral writes files to a named volume using an ephemeral Alpine container.
-// Used when the workspace container is offline (e.g., during provisioning).
-func (h *TemplatesHandler) writeViaEphemeral(ctx context.Context, volumeName string, files map[string]string) error {
-	if h.docker == nil {
-		return fmt.Errorf("docker not available")
-	}
-
-	// Create ephemeral container mounting the volume
-	resp, err := h.docker.ContainerCreate(ctx, &container.Config{
-		Image: "alpine:latest",
-		Cmd:   []string{"sleep", "10"},
-	}, &container.HostConfig{
-		Binds: []string{volumeName + ":/configs"},
-	}, nil, nil, "")
-	if err != nil {
-		return fmt.Errorf("failed to create ephemeral container: %w", err)
-	}
-	defer h.docker.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
-
-	if err := h.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("failed to start ephemeral container: %w", err)
-	}
-
-	// Copy files via tar, then stop container cleanly
-	if err := h.copyFilesToContainer(ctx, resp.ID, "/configs", files); err != nil {
-		return err
-	}
-	// Wait for container to be ready for removal (copy is synchronous, but be safe)
-	timeout := 5
-	h.docker.ContainerStop(ctx, resp.ID, container.StopOptions{Timeout: &timeout})
-	return nil
-}
-
-// deleteViaEphemeral deletes a file from a named volume using an ephemeral container.
-func (h *TemplatesHandler) deleteViaEphemeral(ctx context.Context, volumeName, filePath string) error {
-	if h.docker == nil {
-		return fmt.Errorf("docker not available")
-	}
-
-	resp, err := h.docker.ContainerCreate(ctx, &container.Config{
-		Image: "alpine:latest",
-		Cmd:   []string{"rm", "-rf", "/configs/" + filePath},
-	}, &container.HostConfig{
-		Binds: []string{volumeName + ":/configs"},
-	}, nil, nil, "")
-	if err != nil {
-		return fmt.Errorf("failed to create ephemeral container: %w", err)
-	}
-	defer h.docker.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
-
-	if err := h.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return err
-	}
-	// Wait for the rm command to finish before removing the container
-	statusCh, errCh := h.docker.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
-	select {
-	case <-statusCh:
-		return nil
-	case err := <-errCh:
-		return err
-	}
-}
-
-// List handles GET /templates
-func (h *TemplatesHandler) List(c *gin.Context) {
-	entries, err := os.ReadDir(h.configsDir)
-	if err != nil {
-		c.JSON(http.StatusOK, []templateSummary{})
-		return
-	}
-
-	templates := make([]templateSummary, 0)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		configPath := filepath.Join(h.configsDir, entry.Name(), "config.yaml")
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			continue
-		}
-
-		var raw struct {
-			Name        string   `yaml:"name"`
-			Description string   `yaml:"description"`
-			Tier        int      `yaml:"tier"`
-			Model       string   `yaml:"model"`
-			Skills      []string `yaml:"skills"`
-		}
-		if err := yaml.Unmarshal(data, &raw); err != nil {
-			continue
-		}
-
-		templates = append(templates, templateSummary{
-			ID:          entry.Name(),
-			Name:        raw.Name,
-			Description: raw.Description,
-			Tier:        raw.Tier,
-			Model:       raw.Model,
-			Skills:      raw.Skills,
-			SkillCount:  len(raw.Skills),
-		})
-	}
-
-	c.JSON(http.StatusOK, templates)
 }

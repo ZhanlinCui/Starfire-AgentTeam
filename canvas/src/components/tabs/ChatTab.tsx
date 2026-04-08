@@ -6,51 +6,13 @@ import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { WS_URL } from "@/store/socket";
+import { type ChatMessage, type ChatSession, createMessage } from "./chat/types";
+import { loadSessions, saveSessions } from "./chat/storage";
+import { extractResponseText } from "./chat/message-parser";
 
 interface Props {
   workspaceId: string;
   data: WorkspaceNodeData;
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "agent" | "system";
-  content: string;
-  timestamp: string; // ISO string for serialization
-}
-
-interface ChatSession {
-  id: string;
-  name: string;
-  messages: ChatMessage[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-function createMessage(role: ChatMessage["role"], content: string): ChatMessage {
-  return { id: crypto.randomUUID(), role, content, timestamp: new Date().toISOString() };
-}
-
-// --- LocalStorage persistence ---
-function getStorageKey(workspaceId: string) {
-  return `starfire-chat-${workspaceId}`;
-}
-
-function loadSessions(workspaceId: string): ChatSession[] {
-  try {
-    const raw = localStorage.getItem(getStorageKey(workspaceId));
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSessions(workspaceId: string, sessions: ChatSession[]) {
-  try {
-    localStorage.setItem(getStorageKey(workspaceId), JSON.stringify(sessions));
-  } catch {
-    // localStorage full — silently fail
-  }
 }
 
 export function ChatTab({ workspaceId, data }: Props) {
@@ -576,60 +538,4 @@ export function ChatTab({ workspaceId, data }: Props) {
   );
 }
 
-function extractAgentText(task: Record<string, unknown>): string {
-  try {
-    const directTexts = extractTextsFromParts(task.parts);
-    if (directTexts) return directTexts;
-
-    const artifacts = task.artifacts as Array<Record<string, unknown>> | undefined;
-    if (artifacts && artifacts.length > 0) {
-      const texts = extractTextsFromParts(artifacts[0].parts);
-      if (texts) return texts;
-    }
-
-    const status = task.status as Record<string, unknown> | undefined;
-    if (status?.message) {
-      const msg = status.message as Record<string, unknown>;
-      const texts = extractTextsFromParts(msg.parts);
-      if (texts) return texts;
-    }
-
-    if (typeof task === "string") return task;
-    return "(Could not extract response text)";
-  } catch {
-    return "(Failed to parse response)";
-  }
-}
-
-function extractTextsFromParts(parts: unknown): string | null {
-  if (!Array.isArray(parts)) return null;
-  const texts = parts
-    .filter((p: Record<string, unknown>) => p.type === "text" || p.kind === "text")
-    .map((p: Record<string, unknown>) => String(p.text || ""))
-    .filter(Boolean);
-  return texts.length > 0 ? texts.join("\n") : null;
-}
-
-/** Extract text from an activity log response_body (multiple possible formats) */
-function extractResponseText(body: Record<string, unknown>): string {
-  try {
-    // {result: "text"} — from MCP server delegation logs
-    if (typeof body.result === "string") return body.result;
-
-    // A2A JSON-RPC response: {result: {parts: [{kind: "text", text: "..."}]}}
-    const result = body.result as Record<string, unknown> | undefined;
-    if (result) {
-      const parts = (result.parts || []) as Array<Record<string, unknown>>;
-      for (const p of parts) {
-        const t = (p.text as string) || "";
-        if (t) return t;
-        const root = p.root as Record<string, unknown> | undefined;
-        if (root?.text) return root.text as string;
-      }
-    }
-
-    // {task: "text"} — request body format, shouldn't be in response but handle it
-    if (typeof body.task === "string") return body.task;
-  } catch { /* ignore */ }
-  return "";
-}
+// extractAgentText and extractResponseText are now in ./chat/message-parser.ts

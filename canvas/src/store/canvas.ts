@@ -7,6 +7,12 @@ import {
 } from "@xyflow/react";
 import { api } from "@/lib/api";
 import type { WorkspaceData, WSMessage } from "./socket";
+import { handleCanvasEvent } from "./canvas-events";
+import { buildNodesAndEdges } from "./canvas-topology";
+
+// Re-export extracted types and functions so existing imports from "@/store/canvas" keep working
+export { summarizeWorkspaceCapabilities } from "./canvas-capabilities";
+export type { WorkspaceCapabilitySummary } from "./canvas-capabilities";
 
 export interface WorkspaceNodeData extends Record<string, unknown> {
   name: string;
@@ -22,14 +28,6 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   parentId: string | null;
   currentTask: string;
   needsRestart: boolean;
-}
-
-export interface WorkspaceCapabilitySummary {
-  runtime: string | null;
-  skills: string[];
-  skillCount: number;
-  currentTask: string;
-  hasActiveTask: boolean;
 }
 
 export type PanelTab = "details" | "skills" | "chat" | "terminal" | "config" | "files" | "memory" | "traces" | "events" | "activity";
@@ -71,62 +69,6 @@ interface CanvasState {
   /** Agent-pushed messages keyed by workspace ID. ChatTab consumes and clears these. */
   agentMessages: Record<string, Array<{ id: string; content: string; timestamp: string }>>;
   consumeAgentMessages: (workspaceId: string) => Array<{ id: string; content: string; timestamp: string }>;
-}
-
-export function summarizeWorkspaceCapabilities(data: WorkspaceNodeData): WorkspaceCapabilitySummary {
-  const skills = extractSkillNames(data.agentCard);
-  const currentTask = data.currentTask.trim();
-  const runtime = typeof data.agentCard?.runtime === "string" ? data.agentCard.runtime : null;
-
-  return {
-    runtime,
-    skills,
-    skillCount: skills.length,
-    currentTask,
-    hasActiveTask: currentTask.length > 0,
-  };
-}
-
-function buildNodesAndEdges(workspaces: WorkspaceData[]) {
-  // All workspaces become nodes (children are rendered inside parent via WorkspaceNode)
-  const nodes: Node<WorkspaceNodeData>[] = workspaces.map((ws) => ({
-    id: ws.id,
-    type: "workspaceNode",
-    position: { x: ws.x, y: ws.y },
-    // Don't set React Flow parentId — children render embedded inside the WorkspaceNode component
-    data: {
-      name: ws.name,
-      status: ws.status,
-      tier: ws.tier,
-      agentCard: ws.agent_card,
-      activeTasks: ws.active_tasks,
-      collapsed: ws.collapsed,
-      role: ws.role,
-      lastErrorRate: ws.last_error_rate,
-      lastSampleError: ws.last_sample_error,
-      url: ws.url,
-      parentId: ws.parent_id,
-      currentTask: ws.current_task || "",
-      needsRestart: false,
-    },
-    // Hide child nodes from canvas — they render inside the parent WorkspaceNode
-    hidden: !!ws.parent_id,
-  }));
-
-  // No parent→child edges — children are embedded inside the parent node.
-  // Only create edges between siblings or cross-team connections if needed in future.
-  const edges: Edge[] = [];
-
-  return { nodes, edges };
-}
-
-function extractSkillNames(agentCard: Record<string, unknown> | null): string[] {
-  if (!agentCard) return [];
-  const skills = agentCard.skills;
-  if (!Array.isArray(skills)) return [];
-  return skills
-    .map((skill: Record<string, unknown>) => String(skill.name || skill.id || ""))
-    .filter(Boolean);
 }
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
@@ -271,166 +213,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   applyEvent: (msg: WSMessage) => {
-    const { nodes, edges, selectedNodeId } = get();
-
-    switch (msg.event) {
-      case "WORKSPACE_ONLINE": {
-        const existing = nodes.find((n) => n.id === msg.workspace_id);
-        if (existing) {
-          set({
-            nodes: nodes.map((n) =>
-              n.id === msg.workspace_id
-                ? { ...n, data: { ...n.data, status: "online" } }
-                : n
-            ),
-          });
-        }
-        break;
-      }
-
-      case "WORKSPACE_OFFLINE": {
-        set({
-          nodes: nodes.map((n) =>
-            n.id === msg.workspace_id
-              ? { ...n, data: { ...n.data, status: "offline" } }
-              : n
-          ),
-        });
-        break;
-      }
-
-      case "WORKSPACE_DEGRADED": {
-        set({
-          nodes: nodes.map((n) =>
-            n.id === msg.workspace_id
-              ? {
-                  ...n,
-                  data: {
-                    ...n.data,
-                    status: "degraded",
-                    lastErrorRate: (msg.payload.error_rate as number) ?? 0,
-                    lastSampleError:
-                      (msg.payload.sample_error as string) ?? "",
-                  },
-                }
-              : n
-          ),
-        });
-        break;
-      }
-
-      case "WORKSPACE_PROVISIONING": {
-        const exists = nodes.find((n) => n.id === msg.workspace_id);
-        if (exists) {
-          // Restart — update existing node to provisioning
-          set({
-            nodes: nodes.map((n) =>
-              n.id === msg.workspace_id
-                ? { ...n, data: { ...n.data, status: "provisioning", needsRestart: false, currentTask: "" } }
-                : n
-            ),
-          });
-        } else {
-          set({
-            nodes: [
-              ...nodes,
-              {
-                id: msg.workspace_id,
-                type: "workspaceNode",
-                position: { x: 0, y: 0 },
-                data: {
-                  name: (msg.payload.name as string) ?? "New Workspace",
-                  status: "provisioning",
-                  tier: (msg.payload.tier as number) ?? 1,
-                  agentCard: null,
-                  activeTasks: 0,
-                  collapsed: false,
-                  role: "",
-                  lastErrorRate: 0,
-                  lastSampleError: "",
-                  url: "",
-                  parentId: null,
-                  currentTask: "",
-                  needsRestart: false,
-                },
-              },
-            ],
-          });
-        }
-        break;
-      }
-
-      case "WORKSPACE_REMOVED": {
-        const removedNode = nodes.find((n) => n.id === msg.workspace_id);
-        const parentOfRemoved = removedNode?.data.parentId ?? null;
-        set({
-          nodes: nodes
-            .filter((n) => n.id !== msg.workspace_id)
-            .map((n) =>
-              n.data.parentId === msg.workspace_id
-                ? {
-                    ...n,
-                    hidden: !!parentOfRemoved,
-                    data: { ...n.data, parentId: parentOfRemoved },
-                  }
-                : n
-            ),
-          edges: edges.filter(
-            (e) =>
-              e.source !== msg.workspace_id && e.target !== msg.workspace_id
-          ),
-          selectedNodeId: selectedNodeId === msg.workspace_id ? null : selectedNodeId,
-        });
-        break;
-      }
-
-      case "AGENT_CARD_UPDATED": {
-        const card = msg.payload.agent_card;
-        const agentCard = (typeof card === "object" && card !== null ? card : null) as Record<string, unknown> | null;
-        set({
-          nodes: nodes.map((n) =>
-            n.id === msg.workspace_id
-              ? { ...n, data: { ...n.data, agentCard } }
-              : n
-          ),
-        });
-        break;
-      }
-
-      case "TASK_UPDATED": {
-        const currentTask = (msg.payload.current_task as string) ?? "";
-        const activeTasks = (msg.payload.active_tasks as number) ?? 0;
-        set({
-          nodes: nodes.map((n) =>
-            n.id === msg.workspace_id
-              ? { ...n, data: { ...n.data, currentTask, activeTasks } }
-              : n
-          ),
-        });
-        break;
-      }
-
-      case "AGENT_MESSAGE": {
-        const content = (msg.payload.message as string) ?? "";
-        if (content) {
-          const { agentMessages } = get();
-          const existing = agentMessages[msg.workspace_id] || [];
-          set({
-            agentMessages: {
-              ...agentMessages,
-              [msg.workspace_id]: [
-                ...existing,
-                { id: crypto.randomUUID(), content, timestamp: new Date().toISOString() },
-              ],
-            },
-          });
-        }
-        break;
-      }
-
-      default:
-        break;
-    }
+    handleCanvasEvent(msg, get, set);
   },
 
   onNodesChange: (changes) => {

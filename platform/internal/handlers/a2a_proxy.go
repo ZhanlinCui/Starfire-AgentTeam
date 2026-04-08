@@ -1,0 +1,251 @@
+package handlers
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/agent-molecule/platform/internal/db"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+// maxProxyRequestBody is the maximum size of an A2A proxy request body (1MB).
+const maxProxyRequestBody = 1 << 20
+
+// maxProxyResponseBody is the maximum size of an A2A proxy response body (10MB).
+const maxProxyResponseBody = 10 << 20
+
+// a2aClient is a shared HTTP client for proxying A2A requests to workspace agents.
+var a2aClient = &http.Client{Timeout: 30 * time.Minute}
+
+type proxyA2AError struct {
+	Status   int
+	Response gin.H
+}
+
+func (e *proxyA2AError) Error() string {
+	if e == nil || e.Response == nil {
+		return "proxy a2a error"
+	}
+	if msg, ok := e.Response["error"].(string); ok && msg != "" {
+		return msg
+	}
+	return "proxy a2a error"
+}
+
+// ProxyA2A handles POST /workspaces/:id/a2a
+// Proxies A2A JSON-RPC requests from the canvas to workspace agents,
+// avoiding CORS and Docker network issues.
+func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
+	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	// Read the incoming request body (capped at 1MB)
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxProxyRequestBody))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	status, respBody, proxyErr := h.proxyA2ARequest(ctx, workspaceID, body, c.GetHeader("X-Workspace-ID"), true)
+	if proxyErr != nil {
+		c.JSON(proxyErr.Status, proxyErr.Response)
+		return
+	}
+
+	c.Data(status, "application/json", respBody)
+}
+
+func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID string, body []byte, callerID string, logActivity bool) (int, []byte, *proxyA2AError) {
+	// Resolve workspace URL (cache first, then DB)
+	agentURL, err := db.GetCachedURL(ctx, workspaceID)
+	if err != nil {
+		var urlNullable sql.NullString
+		var status string
+		err := db.DB.QueryRowContext(ctx,
+			`SELECT url, status FROM workspaces WHERE id = $1`, workspaceID,
+		).Scan(&urlNullable, &status)
+		if err == sql.ErrNoRows {
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusNotFound,
+				Response: gin.H{"error": "workspace not found"},
+			}
+		}
+		if err != nil {
+			log.Printf("ProxyA2A lookup error: %v", err)
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusInternalServerError,
+				Response: gin.H{"error": "lookup failed"},
+			}
+		}
+		if !urlNullable.Valid || urlNullable.String == "" {
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusServiceUnavailable,
+				Response: gin.H{"error": "workspace has no URL", "status": status},
+			}
+		}
+		agentURL = urlNullable.String
+		_ = db.CacheURL(ctx, workspaceID, agentURL)
+	}
+
+	// Normalize the request into a valid A2A JSON-RPC 2.0 message
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusBadRequest,
+			Response: gin.H{"error": "invalid JSON"},
+		}
+	}
+
+	// Wrap in JSON-RPC envelope if missing
+	if _, hasJSONRPC := payload["jsonrpc"]; !hasJSONRPC {
+		payload = map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      uuid.New().String(),
+			"method":  payload["method"],
+			"params":  payload["params"],
+		}
+	}
+
+	// Ensure params.message.messageId exists (required by a2a-sdk)
+	if params, ok := payload["params"].(map[string]interface{}); ok {
+		if msg, ok := params["message"].(map[string]interface{}); ok {
+			if _, hasID := msg["messageId"]; !hasID {
+				msg["messageId"] = uuid.New().String()
+			}
+		}
+	}
+
+	marshaledBody, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusInternalServerError,
+			Response: gin.H{"error": "failed to marshal request"},
+		}
+	}
+	body = marshaledBody
+
+	// Extract method for logging
+	var a2aMethod string
+	if m, ok := payload["method"].(string); ok {
+		a2aMethod = m
+	}
+
+	// Forward to the agent — no timeout. Agent liveness is monitored via heartbeat;
+	// if the agent dies, the TCP connection drops and the proxy returns an error.
+	// Delegation chains (PM → Lead → Agent) can take arbitrarily long.
+	// WithoutCancel: survives client disconnect but still cancels on server shutdown.
+	startTime := time.Now()
+	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), "POST", agentURL, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusInternalServerError,
+			Response: gin.H{"error": "failed to create proxy request"},
+		}
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a2aClient.Do(req)
+	durationMs := int(time.Since(startTime).Milliseconds())
+	if err != nil {
+		log.Printf("ProxyA2A forward error: %v", err)
+
+		// Reactive health check: if the request failed, check if the container is actually dead.
+		// If so, mark offline, clear stale caches, and trigger auto-restart.
+		containerDead := false
+		if h.provisioner != nil {
+			if running, _ := h.provisioner.IsRunning(ctx, workspaceID); !running {
+				containerDead = true
+				log.Printf("ProxyA2A: container for %s is dead — marking offline and triggering restart", workspaceID)
+				db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'offline', updated_at = now() WHERE id = $1 AND status NOT IN ('removed', 'provisioning')`, workspaceID)
+				db.ClearWorkspaceKeys(ctx, workspaceID)
+				h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_OFFLINE", workspaceID, map[string]interface{}{})
+				go h.RestartByID(workspaceID)
+			}
+		}
+
+		if logActivity {
+			// Log failed A2A attempt (detached context — request may be done)
+			errMsg := err.Error()
+			var errWsName string
+			db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&errWsName)
+			if errWsName == "" {
+				errWsName = workspaceID
+			}
+			summary := "A2A request to " + errWsName + " failed: " + errMsg
+			go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
+				WorkspaceID:  workspaceID,
+				ActivityType: "a2a_receive",
+				SourceID:     nilIfEmpty(callerID),
+				TargetID:     &workspaceID,
+				Method:       &a2aMethod,
+				Summary:      &summary,
+				RequestBody:  json.RawMessage(body),
+				DurationMs:   &durationMs,
+				Status:       "error",
+				ErrorDetail:  &errMsg,
+			})
+		}
+		if containerDead {
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusServiceUnavailable,
+				Response: gin.H{"error": "workspace agent unreachable — container restart triggered", "restarting": true},
+			}
+		}
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusBadGateway,
+			Response: gin.H{"error": "failed to reach workspace agent"},
+		}
+	}
+	defer resp.Body.Close()
+
+	// Read agent response (capped at 10MB)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyResponseBody))
+	if err != nil {
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusBadGateway,
+			Response: gin.H{"error": "failed to read agent response"},
+		}
+	}
+
+	if logActivity {
+		// Log successful A2A communication
+		logStatus := "ok"
+		if resp.StatusCode >= 400 {
+			logStatus = "error"
+		}
+		// Resolve workspace name for readable summary
+		var wsNameForLog string
+		db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsNameForLog)
+		if wsNameForLog == "" {
+			wsNameForLog = workspaceID
+		}
+		summary := a2aMethod + " → " + wsNameForLog
+		go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
+			WorkspaceID:  workspaceID,
+			ActivityType: "a2a_receive",
+			SourceID:     nilIfEmpty(callerID),
+			TargetID:     &workspaceID,
+			Method:       &a2aMethod,
+			Summary:      &summary,
+			RequestBody:  json.RawMessage(body),
+			ResponseBody: json.RawMessage(respBody),
+			DurationMs:   &durationMs,
+			Status:       logStatus,
+		})
+	}
+	return resp.StatusCode, respBody, nil
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
