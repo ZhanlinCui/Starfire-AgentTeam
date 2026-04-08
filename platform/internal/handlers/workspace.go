@@ -505,6 +505,20 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		return
 	}
 
+	// Read runtime from the running container's config BEFORE stopping it
+	// (avoids spinning up a temp container to read from the volume)
+	containerRuntime := ""
+	containerName := provisioner.ContainerName(id)
+	if cfgData, execErr := h.provisioner.ExecRead(ctx, containerName, "/configs/config.yaml"); execErr == nil {
+		for _, line := range strings.Split(string(cfgData), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "runtime:") {
+				containerRuntime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+				break
+			}
+		}
+	}
+
 	// Stop existing container if any
 	h.provisioner.Stop(ctx, id)
 
@@ -524,8 +538,9 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 
 	// Resolve template path in priority order:
 	// 1. Explicit template from request body
-	// 2. Name-based match in templates directory
-	// 3. No template — the volume already has configs from previous run (or generate defaults)
+	// 2. Runtime-specific default template (e.g. claude-code-default/)
+	// 3. Name-based match in templates directory
+	// 4. No template — the volume already has configs from previous run
 	var templatePath string
 	var configFiles map[string][]byte
 	configLabel := "existing-volume"
@@ -542,13 +557,9 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		}
 	}
 
-	// If no template found and this is a fresh start, generate default config
 	if templatePath == "" {
-		// The named volume may already have configs from the previous run.
-		// Only generate defaults if the volume is new (checked by provisioner).
 		log.Printf("Restart: reusing existing config volume for %s (%s)", wsName, id)
-	}
-	if templatePath != "" {
+	} else {
 		log.Printf("Restart: using template %s for %s (%s)", templatePath, wsName, id)
 	}
 
@@ -564,6 +575,22 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 			}
 		}
 	}
+	// Fallback: use runtime read from the container before we stopped it
+	if payload.Runtime == "" {
+		payload.Runtime = containerRuntime
+	}
+
+	// If runtime has a default template and no template was found yet, use it
+	// (ensures CLAUDE.md, .claude/settings.json etc. get copied on runtime change)
+	if templatePath == "" && payload.Runtime != "" {
+		runtimeTemplate := filepath.Join(h.configsDir, payload.Runtime+"-default")
+		if _, err := os.Stat(runtimeTemplate); err == nil {
+			templatePath = runtimeTemplate
+			configLabel = payload.Runtime + "-default"
+			log.Printf("Restart: applying runtime template %s for %s (%s)", configLabel, wsName, id)
+		}
+	}
+
 	go h.provisionWorkspace(id, templatePath, configFiles, payload)
 
 	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "config_dir": configLabel})

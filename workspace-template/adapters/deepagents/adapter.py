@@ -1,7 +1,9 @@
-"""DeepAgents adapter — LangChain deep research agent with planning and sub-agents.
+"""DeepAgents adapter — LangChain deep research agent with full platform integration.
 
 Uses `deepagents.create_deep_agent()` which provides automatic task planning,
 filesystem access, and sub-agent spawning on top of LangGraph.
+All platform tools (delegation, memory, sandbox, approval), skills, plugins,
+and coordinator support are included via _common_setup().
 
 Requires: pip install deepagents
 """
@@ -19,7 +21,6 @@ class DeepAgentsAdapter(BaseAdapter):
 
     def __init__(self):
         self.agent = None
-        self.system_prompt = None
 
     @staticmethod
     def name() -> str:
@@ -37,28 +38,12 @@ class DeepAgentsAdapter(BaseAdapter):
     def get_config_schema() -> dict:
         return {
             "model": {"type": "string", "description": "LangChain model string (e.g. openai:gpt-4.1-mini)"},
+            "skills": {"type": "array", "items": {"type": "string"}, "description": "Skill folder names to load"},
+            "tools": {"type": "array", "items": {"type": "string"}, "description": "Built-in tools"},
         }
 
-    async def setup(self, config: AdapterConfig) -> None:
-        try:
-            from deepagents import create_deep_agent  # noqa: F401
-        except ImportError:
-            raise RuntimeError("deepagents not installed. Ensure adapters/deepagents/requirements.txt is correct.")
-
-        from tools.a2a_tools import get_peers_summary
-        self.peers_info = await get_peers_summary()
-
-        # Load system prompt
-        prompt_file = os.path.join(config.config_path, "system-prompt.md")
-        if os.path.exists(prompt_file):
-            with open(prompt_file) as f:
-                self.system_prompt = f.read()
-
-        # Create the LLM (same logic as agent.py)
-        from agent import create_agent
-        # We don't use create_agent directly — we use deepagents' own create_deep_agent
-        # But we need the LLM instance
-        model_str = config.model
+    def _create_llm(self, model_str: str):
+        """Create a LangChain LLM instance from a provider:model string."""
         if ":" in model_str:
             provider, model_name = model_str.split(":", 1)
         else:
@@ -66,41 +51,54 @@ class DeepAgentsAdapter(BaseAdapter):
 
         if provider == "openai":
             from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model=model_name)
+            llm_kwargs = {"model": model_name}
+            base_url = os.environ.get("OPENAI_BASE_URL", "")
+            if base_url:
+                llm_kwargs["openai_api_base"] = base_url
+            return ChatOpenAI(**llm_kwargs)
         elif provider == "openrouter":
             from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(
+            return ChatOpenAI(
                 model=model_name,
                 openai_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
                 openai_api_base="https://openrouter.ai/api/v1",
             )
         elif provider == "groq":
             from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(
+            return ChatOpenAI(
                 model=model_name,
                 openai_api_key=os.environ.get("GROQ_API_KEY", ""),
                 openai_api_base="https://api.groq.com/openai/v1",
             )
         elif provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
-            llm = ChatAnthropic(model=model_name)
+            llm_kwargs = {"model": model_name}
+            base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
+            if base_url:
+                llm_kwargs["anthropic_api_url"] = base_url
+            return ChatAnthropic(**llm_kwargs)
         else:
             from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model=model_name)
+            return ChatOpenAI(model=model_name)
 
-        prompt = self.system_prompt or "You are a deep research agent."
-        if hasattr(self, 'peers_info') and self.peers_info:
-            prompt += f"\n\n## Peers\n{self.peers_info}"
+    async def setup(self, config: AdapterConfig) -> None:
+        try:
+            from deepagents import create_deep_agent
+        except ImportError:
+            raise RuntimeError("deepagents not installed. Ensure adapters/deepagents/requirements.txt is correct.")
 
-        from tools.delegation import delegate_to_workspace
-        from tools.memory import commit_memory, search_memory
+        # Full platform setup: plugins, skills, tools, coordinator, system prompt
+        result = await self._common_setup(config)
+        logger.info(f"DeepAgents tools: {[t.name for t in result.langchain_tools]}")
 
+        # DeepAgents uses LangChain tools natively — no conversion needed
+        llm = self._create_llm(config.model)
         self.agent = create_deep_agent(
             model=llm,
-            tools=[delegate_to_workspace, commit_memory, search_memory],
-            system_prompt=prompt,
+            tools=result.langchain_tools,
+            system_prompt=result.system_prompt,
         )
-        logger.info("DeepAgents agent created")
+        logger.info("DeepAgents agent created with %d tools", len(result.langchain_tools))
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
         from a2a_executor import LangGraphA2AExecutor

@@ -39,7 +39,7 @@ go run ./cmd/server          # Run server (requires Postgres + Redis running)
 go build -o molecli ./cmd/cli  # Build TUI dashboard
 ./molecli                    # Run TUI dashboard (requires platform running)
 ```
-Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`), `CORS_ORIGINS` (comma-separated, default `http://localhost:3000,http://localhost:3001`), `RATE_LIMIT` (requests/min, default `100`), `WORKSPACE_DIR` (optional — host path to bind-mount as `/workspace` in all agent containers; if unset, each workspace gets an isolated Docker named volume).
+Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`), `CORS_ORIGINS` (comma-separated, default `http://localhost:3000,http://localhost:3001`), `RATE_LIMIT` (requests/min, default `100`), `WORKSPACE_DIR` (optional — host path to bind-mount as `/workspace` in all agent containers; if unset, each workspace gets an isolated Docker named volume), `AWARENESS_URL` (optional — if set, injected into workspace containers along with a deterministic `AWARENESS_NAMESPACE` derived from workspace ID).
 
 `molecli` reads `MOLECLI_URL` (default http://localhost:8080) to locate the platform. Logs are written to `molecli.log` in the working directory (already covered by `*.log` in `.gitignore`).
 
@@ -73,7 +73,7 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 ```bash
 cd platform && go test ./...                    # 25 Go handler tests (sqlmock + miniredis)
 cd canvas && npm test                            # 58 Vitest store tests
-cd workspace-template && python -m pytest -v     # 80 pytest tests (config, heartbeat, prompt, skills, a2a, executor)
+cd workspace-template && python -m pytest -v     # 86 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory)
 ```
 
 ### Integration Tests
@@ -194,7 +194,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 
 ## Database
 
-9 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, agent_card JSONB, heartbeat columns, current_task), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
+10 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, agent_card JSONB, heartbeat columns, current_task, awareness_namespace), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
 

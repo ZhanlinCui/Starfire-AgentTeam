@@ -335,6 +335,38 @@ func (p *Provisioner) CopyToContainer(ctx context.Context, containerID, dstPath 
 	return p.cli.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{})
 }
 
+// ExecRead runs "cat <filePath>" in an existing container and returns the output.
+// Used to read config files from a running container before stopping it.
+func (p *Provisioner) ExecRead(ctx context.Context, containerName, filePath string) ([]byte, error) {
+	exec, err := p.cli.ContainerExecCreate(ctx, containerName, container.ExecOptions{
+		Cmd:          []string{"cat", filePath},
+		AttachStdout: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	attach, err := p.cli.ContainerExecAttach(ctx, exec.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer attach.Close()
+	data, err := io.ReadAll(attach.Reader)
+	if err != nil {
+		return nil, err
+	}
+	// Docker multiplexed stream: strip 8-byte headers
+	var clean []byte
+	for len(data) >= 8 {
+		size := int(data[4])<<24 | int(data[5])<<16 | int(data[6])<<8 | int(data[7])
+		if 8+size > len(data) {
+			break
+		}
+		clean = append(clean, data[8:8+size]...)
+		data = data[8+size:]
+	}
+	return clean, nil
+}
+
 // RemoveVolume removes the config volume for a workspace.
 func (p *Provisioner) RemoveVolume(ctx context.Context, workspaceID string) error {
 	volName := ConfigVolumeName(workspaceID)

@@ -41,6 +41,8 @@ class LangGraphA2AExecutor(AgentExecutor):
         try:
             # Build message list with conversation history if provided
             messages = _extract_history(context)
+            if messages:
+                logger.info("A2A execute: injecting %d history messages", len(messages))
 
             # Append current user message
             messages.append(("human", user_input))

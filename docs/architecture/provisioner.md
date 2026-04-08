@@ -82,6 +82,29 @@ provisioning -> online <-----> degraded
 | `failed` | Provisioning timed out or immediate launch error | Red node + retry button |
 | `removed` | User deleted it, kept in DB for event log + 410 responses | Node removed from canvas |
 
+## Restart & Runtime Detection
+
+When a workspace is restarted (`POST /workspaces/:id/restart`):
+
+1. **Read runtime** from the running container's `/configs/config.yaml` via `ExecRead` (docker exec) BEFORE stopping it
+2. **Stop** the existing container
+3. **Resolve template** — checks request body, name-based match, then runtime-default template (e.g. `claude-code-default/`)
+4. **Select Docker image** — uses `RuntimeImages[runtime]` (e.g. `workspace-template:claude-code`)
+5. **Re-provision** with the same config volume (configs persist across restarts)
+
+**Runtime template fallback:** When a runtime has a default template directory (e.g. `workspace-configs-templates/claude-code-default/`), it's automatically applied on restart. This copies runtime-specific files like `CLAUDE.md`, `.claude/settings.json` into the container — important when switching runtimes via the Config tab.
+
+**Image selection:** Each adapter has its own Docker image extending `workspace-template:base`:
+
+| Runtime | Image |
+|---------|-------|
+| langgraph | `workspace-template:langgraph` |
+| claude-code | `workspace-template:claude-code` |
+| crewai | `workspace-template:crewai` |
+| autogen | `workspace-template:autogen` |
+| deepagents | `workspace-template:deepagents` |
+| openclaw | `workspace-template:openclaw` |
+
 ## Failure Handling
 
 When provisioning fails:
