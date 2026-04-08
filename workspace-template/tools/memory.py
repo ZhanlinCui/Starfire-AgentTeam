@@ -166,6 +166,17 @@ async def _maybe_log_skill_promotion(content: str, scope: str, memory_result: di
                 f"{platform_url}/workspaces/{workspace_id}/activity",
                 json=payload,
             )
+            await client.post(
+                f"{platform_url}/registry/heartbeat",
+                json={
+                    "workspace_id": workspace_id,
+                    "error_rate": 0,
+                    "sample_error": "",
+                    "active_tasks": 1,
+                    "uptime_seconds": 0,
+                    "current_task": f"Skill promotion: {summary}",
+                },
+            )
     except Exception:
         # Best-effort observability only. Memory commits must never fail because
         # the promotion log could not be written.

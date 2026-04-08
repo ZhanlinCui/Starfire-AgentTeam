@@ -193,18 +193,22 @@ def test_commit_memory_promoted_packet_logs_activity(monkeypatch, memory_modules
     result = asyncio.run(memory.commit_memory(json.dumps(packet), "team"))
 
     assert result == {"success": True, "id": "mem-skill", "scope": "TEAM"}
-    assert len(captured["calls"]) == 2
+    assert len(captured["calls"]) == 3
     memory_url, memory_payload = captured["calls"][0]
     activity_url, activity_payload = captured["calls"][1]
+    heartbeat_url, heartbeat_payload = captured["calls"][2]
     assert memory_url == "http://platform.test/workspaces/ws-test/memories"
     assert memory_payload == {"content": json.dumps(packet), "scope": "TEAM"}
     assert activity_url == "http://platform.test/workspaces/ws-test/activity"
-    assert activity_payload["activity_type"] == "agent_log"
+    assert activity_payload["activity_type"] == "skill_promotion"
     assert activity_payload["method"] == "memory/skill-promotion"
     assert activity_payload["summary"] == "Repeated GitHub webhook handling is now a skill candidate"
     assert activity_payload["metadata"]["promote_to_skill"] is True
     assert activity_payload["metadata"]["memory_id"] == "mem-skill"
     assert activity_payload["metadata"]["repetition_signal"] == packet["repetition_signal"]
+    assert heartbeat_url == "http://platform.test/registry/heartbeat"
+    assert heartbeat_payload["current_task"] == "Skill promotion: Repeated GitHub webhook handling is now a skill candidate"
+    assert heartbeat_payload["active_tasks"] == 1
 
 
 def test_search_memory_rejects_invalid_scope(memory_modules):

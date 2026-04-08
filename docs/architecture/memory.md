@@ -78,4 +78,4 @@ When consolidation keeps surfacing the same stable workflow, the agent should st
 
 This keeps the boundary clear: `awareness` stores durable memory, while skills store repeatable procedure. The hot-reload path then makes the new skill available without a restart.
 
-When a promotion packet is committed, the workspace emits a best-effort `skill_promotion` activity to the platform so the self-improving loop is visible in runtime telemetry without introducing a second storage layer.
+When a promotion packet is committed, the workspace emits a best-effort `skill_promotion` activity to the platform and follows it with a lightweight heartbeat update (`current_task = "Skill promotion: ..."`) so the self-improving loop is visible in runtime telemetry and in the canvas task strip without introducing a second storage layer.
