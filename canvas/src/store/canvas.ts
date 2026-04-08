@@ -130,7 +130,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
-  panelTab: "details",
+  panelTab: "chat",
   dragOverNodeId: null,
   contextMenu: null,
 

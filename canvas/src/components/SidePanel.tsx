@@ -18,10 +18,10 @@ import { ActivityTab } from "./tabs/ActivityTab";
 import { summarizeWorkspaceCapabilities } from "@/store/canvas";
 
 const TABS: { id: PanelTab; label: string; icon: string }[] = [
+  { id: "chat", label: "Chat", icon: "◈" },
+  { id: "activity", label: "Activity", icon: "⊙" },
   { id: "details", label: "Details", icon: "◉" },
   { id: "skills", label: "Skills", icon: "✦" },
-  { id: "activity", label: "Activity", icon: "⊙" },
-  { id: "chat", label: "Chat", icon: "◈" },
   { id: "terminal", label: "Terminal", icon: "▸" },
   { id: "config", label: "Config", icon: "⚙" },
   { id: "files", label: "Files", icon: "⊞" },
