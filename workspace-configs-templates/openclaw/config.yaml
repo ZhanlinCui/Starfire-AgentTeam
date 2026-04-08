@@ -4,7 +4,7 @@ version: 1.0.0
 tier: 2
 
 runtime: openclaw
-model: openrouter:google/gemini-2.5-flash
+model: openai:gpt-4.1-mini
 
 prompt_files:
   - SOUL.md
@@ -21,4 +21,4 @@ a2a:
 
 env:
   required:
-    - OPENROUTER_API_KEY
+    - OPENAI_API_KEY

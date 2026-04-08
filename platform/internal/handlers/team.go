@@ -116,24 +116,24 @@ func (h *TeamHandler) Expand(c *gin.Context) {
 
 		// Provision if template exists
 		if h.provisioner != nil && sub.Config != "" {
-			configPath, _ := filepath.Abs(filepath.Join(h.configsDir, sub.Config))
-			if _, err := os.Stat(configPath); err == nil {
+			templatePath := filepath.Join(h.configsDir, sub.Config)
+			if _, err := os.Stat(templatePath); err == nil {
 				pluginsPath, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
-				go func(wID, cPath, pPath string, t int) {
+				go func(wID, tPath, pPath string, t int) {
 					provCtx, cancel := context.WithTimeout(context.Background(), provisioner.ProvisionTimeout)
 					defer cancel()
 					cfg := provisioner.WorkspaceConfig{
-						WorkspaceID: wID,
-						ConfigPath:  cPath,
-						PluginsPath: pPath,
-						Tier:        t,
-						EnvVars:     map[string]string{"PARENT_ID": parentID},
-						PlatformURL: h.platformURL,
+						WorkspaceID:  wID,
+						TemplatePath: tPath,
+						PluginsPath:  pPath,
+						Tier:         t,
+						EnvVars:      map[string]string{"PARENT_ID": parentID},
+						PlatformURL:  h.platformURL,
 					}
 					if _, err := h.provisioner.Start(provCtx, cfg); err != nil {
 						log.Printf("Expand: provision failed for %s: %v", wID, err)
 					}
-				}(childID, configPath, pluginsPath, tier)
+				}(childID, templatePath, pluginsPath, tier)
 			}
 		}
 

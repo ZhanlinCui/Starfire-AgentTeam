@@ -1,0 +1,1 @@
+# Claude Code CLI is pre-installed via npm in the Docker image — no pip deps needed
