@@ -1,17 +1,15 @@
-"""AutoGen adapter — Microsoft's multi-agent framework with A2A delegation.
+"""AutoGen adapter — Microsoft's multi-agent framework with full platform integration.
 
 Uses AutoGen's AssistantAgent with OpenAIChatCompletionClient,
-includes A2A delegation as a callable tool.
+includes all platform tools (delegation, memory, sandbox, approval), skills, and coordinator support.
 
 Requires: pip install autogen-agentchat autogen-ext[openai]
 """
 
-import os
 import logging
 
 from adapters.base import BaseAdapter, AdapterConfig
 from adapters.shared_runtime import (
-    append_peer_guidance,
     build_task_text,
     brief_task,
     extract_history,
@@ -23,11 +21,22 @@ from a2a.server.agent_execution import AgentExecutor
 logger = logging.getLogger(__name__)
 
 
+def _langchain_to_autogen(lc_tool):
+    """Wrap a LangChain BaseTool as an async callable for AutoGen."""
+    async def wrapper(**kwargs) -> str:
+        result = await lc_tool.ainvoke(kwargs)
+        return str(result)
+
+    wrapper.__name__ = lc_tool.name
+    wrapper.__doc__ = lc_tool.description
+    return wrapper
+
+
 class AutoGenAdapter(BaseAdapter):
 
     def __init__(self):
         self.system_prompt = None
-        self.peers_info = ""
+        self.autogen_tools = []
 
     @staticmethod
     def name() -> str:
@@ -45,6 +54,8 @@ class AutoGenAdapter(BaseAdapter):
     def get_config_schema() -> dict:
         return {
             "model": {"type": "string", "description": "OpenAI model (e.g. openai:gpt-4.1-mini)"},
+            "skills": {"type": "array", "items": {"type": "string"}, "description": "Skill folder names to load"},
+            "tools": {"type": "array", "items": {"type": "string"}, "description": "Built-in tools"},
         }
 
     async def setup(self, config: AdapterConfig) -> None:
@@ -54,30 +65,27 @@ class AutoGenAdapter(BaseAdapter):
         except ImportError:
             raise RuntimeError("autogen-agentchat not installed.")
 
-        prompt_file = os.path.join(config.config_path, "system-prompt.md")
-        if os.path.exists(prompt_file):
-            with open(prompt_file) as f:
-                self.system_prompt = f.read()
-
-        from tools.a2a_tools import get_peers_summary
-        self.peers_info = await get_peers_summary()
+        result = await self._common_setup(config)
+        self.system_prompt = result.system_prompt
+        self.autogen_tools = [_langchain_to_autogen(t) for t in result.langchain_tools]
+        logger.info(f"AutoGen tools: {[t.__name__ for t in self.autogen_tools]}")
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
         return AutoGenA2AExecutor(
             model=config.model,
             system_prompt=self.system_prompt,
-            peers_info=self.peers_info,
+            autogen_tools=self.autogen_tools,
             heartbeat=config.heartbeat,
         )
 
 
 class AutoGenA2AExecutor(AgentExecutor):
-    """Wraps AutoGen's AssistantAgent with A2A delegation tools."""
+    """Wraps AutoGen's AssistantAgent with full platform tools."""
 
-    def __init__(self, model: str, system_prompt: str | None, peers_info: str, heartbeat=None):
+    def __init__(self, model: str, system_prompt: str | None, autogen_tools: list, heartbeat=None):
         self.model = model
         self.system_prompt = system_prompt
-        self.peers_info = peers_info
+        self.autogen_tools = autogen_tools
         self._heartbeat = heartbeat
 
     async def execute(self, context, event_queue):
@@ -94,17 +102,6 @@ class AutoGenA2AExecutor(AgentExecutor):
         try:
             from autogen_agentchat.agents import AssistantAgent
             from autogen_ext.models.openai import OpenAIChatCompletionClient
-            from tools.a2a_tools import delegate_task, list_peers
-
-            # AutoGen tool functions
-            async def delegate_to_peer(workspace_id: str, task: str) -> str:
-                """Delegate a task to a peer workspace via A2A protocol."""
-                return await delegate_task(workspace_id, task)
-
-            async def list_available_peers() -> str:
-                """List all peer workspaces this agent can communicate with."""
-                peers = await list_peers()
-                return "\n".join(f"- {p.get('name','')} (ID: {p.get('id','')}) — {p.get('role','')}" for p in peers) or "No peers"
 
             model_str = self.model
             if ":" in model_str:
@@ -112,22 +109,14 @@ class AutoGenA2AExecutor(AgentExecutor):
             else:
                 model_name = model_str
 
-            sys_msg = append_peer_guidance(
-                self.system_prompt,
-                self.peers_info,
-                default_text="You are a helpful assistant.",
-                tool_name="delegate_to_peer",
-            )
-
-            # Include conversation history in the task
             task_text = build_task_text(user_message, extract_history(context))
 
             client = OpenAIChatCompletionClient(model=model_name)
             agent = AssistantAgent(
                 name="agent",
                 model_client=client,
-                system_message=sys_msg,
-                tools=[delegate_to_peer, list_available_peers],
+                system_message=self.system_prompt or "You are a helpful assistant.",
+                tools=self.autogen_tools,
             )
 
             result = await agent.run(task=task_text)

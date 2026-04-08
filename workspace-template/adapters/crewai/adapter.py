@@ -1,34 +1,38 @@
-"""CrewAI adapter — role-based multi-agent framework with A2A delegation.
+"""CrewAI adapter — role-based multi-agent framework with full platform integration.
 
-Creates a CrewAI Agent + Task + Crew with delegation tools,
-wraps the kickoff() result in an A2A executor.
+Creates a CrewAI Agent + Task + Crew with all platform tools (delegation, memory,
+sandbox, approval), skills, plugins, and coordinator support.
 
 Requires: pip install crewai
 """
 
-import os
-import logging
 import asyncio
+import logging
 
 from adapters.base import BaseAdapter, AdapterConfig
-from adapters.shared_runtime import (
-    append_peer_guidance,
-    build_task_text,
-    brief_task,
-    extract_history,
-    extract_message_text,
-    set_current_task,
-)
 from a2a.server.agent_execution import AgentExecutor
 
 logger = logging.getLogger(__name__)
+
+
+def _langchain_to_crewai(lc_tool):
+    """Wrap a LangChain BaseTool as a sync CrewAI @tool."""
+    from crewai.tools import tool as crewai_tool
+
+    @crewai_tool(lc_tool.name)
+    def wrapper(**kwargs) -> str:
+        result = asyncio.get_event_loop().run_until_complete(lc_tool.ainvoke(kwargs))
+        return str(result)
+
+    wrapper.__doc__ = lc_tool.description
+    return wrapper
 
 
 class CrewAIAdapter(BaseAdapter):
 
     def __init__(self):
         self.system_prompt = None
-        self.peers_info = ""
+        self.crewai_tools = []
 
     @staticmethod
     def name() -> str:
@@ -40,12 +44,14 @@ class CrewAIAdapter(BaseAdapter):
 
     @staticmethod
     def description() -> str:
-        return "CrewAI — role-based agent framework with task delegation and crew orchestration"
+        return "CrewAI — role-based agent with task delegation and crew orchestration"
 
     @staticmethod
     def get_config_schema() -> dict:
         return {
             "model": {"type": "string", "description": "LLM model (e.g. openai:gpt-4.1-mini)"},
+            "skills": {"type": "array", "items": {"type": "string"}, "description": "Skill folder names to load"},
+            "tools": {"type": "array", "items": {"type": "string"}, "description": "Built-in tools"},
         }
 
     async def setup(self, config: AdapterConfig) -> None:
@@ -55,37 +61,34 @@ class CrewAIAdapter(BaseAdapter):
         except ImportError:
             raise RuntimeError("crewai not installed.")
 
-        # Load system prompt
-        prompt_file = os.path.join(config.config_path, "system-prompt.md")
-        if os.path.exists(prompt_file):
-            with open(prompt_file) as f:
-                self.system_prompt = f.read()
-
-        # Get peer info for injection into prompts
-        from tools.a2a_tools import get_peers_summary
-        self.peers_info = await get_peers_summary()
+        result = await self._common_setup(config)
+        self.system_prompt = result.system_prompt
+        self.crewai_tools = [_langchain_to_crewai(t) for t in result.langchain_tools]
+        logger.info(f"CrewAI tools: {[t.name for t in result.langchain_tools]}")
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
         return CrewAIA2AExecutor(
             model=config.model,
             system_prompt=self.system_prompt,
-            peers_info=self.peers_info,
+            crewai_tools=self.crewai_tools,
             heartbeat=config.heartbeat,
         )
 
 
 class CrewAIA2AExecutor(AgentExecutor):
-    """Wraps CrewAI's Agent + Crew.kickoff() with A2A delegation tools."""
+    """Wraps CrewAI's Agent + Crew.kickoff() with full platform tools."""
 
-    def __init__(self, model: str, system_prompt: str | None, peers_info: str, heartbeat=None):
+    def __init__(self, model: str, system_prompt: str | None, crewai_tools: list, heartbeat=None):
         self.model = model
         self.system_prompt = system_prompt
-        self.peers_info = peers_info
+        self.crewai_tools = crewai_tools
         self._heartbeat = heartbeat
 
     async def execute(self, context, event_queue):
         from a2a.utils import new_agent_text_message
+        from adapters.shared_runtime import extract_history, build_task_text, brief_task, set_current_task
 
+        from adapters.shared_runtime import extract_message_text
         user_message = extract_message_text(context)
 
         if not user_message:
@@ -96,41 +99,22 @@ class CrewAIA2AExecutor(AgentExecutor):
 
         try:
             from crewai import Agent, Task, Crew
-            from crewai.tools import tool as crewai_tool
-            from tools.a2a_tools import delegate_task, list_peers
-
-            # Create CrewAI-compatible delegation tools
-            @crewai_tool("delegate_to_peer")
-            def delegate_to_peer(workspace_id: str, task: str) -> str:
-                """Delegate a task to a peer workspace via A2A protocol. Use list_peers first to find available peers."""
-                return asyncio.get_event_loop().run_until_complete(delegate_task(workspace_id, task))
-
-            @crewai_tool("list_available_peers")
-            def list_available_peers() -> str:
-                """List all peer workspaces this agent can communicate with."""
-                peers = asyncio.get_event_loop().run_until_complete(list_peers())
-                return "\n".join(f"- {p.get('name','')} (ID: {p.get('id','')}) — {p.get('role','')}" for p in peers) or "No peers"
 
             model_str = self.model
             if model_str.startswith("openai:"):
                 model_str = model_str.replace("openai:", "openai/")
 
-            backstory = append_peer_guidance(
-                self.system_prompt,
-                self.peers_info,
-                default_text="You are a helpful AI agent.",
-                tool_name="delegate_to_peer",
-            )
+            backstory = self.system_prompt or "You are a helpful AI agent."
 
-            # Include conversation history in the task description
-            task_desc = build_task_text(user_message, extract_history(context))
+            history = extract_history(context)
+            task_desc = build_task_text(user_message, history)
 
             agent = Agent(
                 role=backstory.split("\n")[0][:100],
                 goal="Help the user and coordinate with peer agents when needed",
                 backstory=backstory,
                 llm=model_str,
-                tools=[delegate_to_peer, list_available_peers],
+                tools=self.crewai_tools,
                 verbose=False,
             )
 

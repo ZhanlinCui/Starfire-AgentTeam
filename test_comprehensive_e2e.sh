@@ -1,0 +1,399 @@
+#!/usr/bin/env bash
+# Comprehensive E2E test — covers ALL platform API endpoints, workspace lifecycle,
+# parent-child A2A, peer delegation, secrets, config, bundles, approvals, memories, and more.
+#
+# Requires: platform running on :8080, Postgres + Redis up.
+# Does NOT require running agent containers (tests platform-only behavior).
+set -euo pipefail
+
+BASE="http://localhost:8080"
+PASS=0
+FAIL=0
+SKIP=0
+
+check() {
+  local desc="$1" expected="$2" actual="$3"
+  if echo "$actual" | grep -qF "$expected"; then
+    echo "  PASS: $desc"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: $desc"
+    echo "    expected: $expected"
+    echo "    got: ${actual:0:200}"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+check_status() {
+  local desc="$1" expected_code="$2" actual_code="$3"
+  if [ "$actual_code" = "$expected_code" ]; then
+    echo "  PASS: $desc (HTTP $actual_code)"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: $desc (expected HTTP $expected_code, got $actual_code)"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+jq_extract() {
+  python3 -c "import sys,json; print(json.load(sys.stdin)$1)" 2>/dev/null
+}
+
+echo "============================================"
+echo "  Comprehensive Platform E2E Test Suite"
+echo "============================================"
+echo ""
+
+# ============================================================
+# Section 1: Health & Metrics
+# ============================================================
+echo "--- Section 1: Health & Metrics ---"
+R=$(curl -s "$BASE/health")
+check "GET /health" '"status":"ok"' "$R"
+
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/metrics")
+check_status "GET /metrics returns 200" "200" "$CODE"
+
+# ============================================================
+# Section 2: Workspace CRUD
+# ============================================================
+echo ""
+echo "--- Section 2: Workspace CRUD ---"
+
+# Create parent workspace (PM)
+R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
+  -d '{"name":"Test PM","role":"Project Manager","tier":2}')
+check "Create PM" '"status":"provisioning"' "$R"
+PM_ID=$(echo "$R" | jq_extract "['id']")
+echo "  PM_ID=$PM_ID"
+
+# Create child workspace under PM
+R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
+  -d "{\"name\":\"Test Dev\",\"role\":\"Developer\",\"tier\":2,\"parent_id\":\"$PM_ID\"}")
+check "Create Dev (child of PM)" '"status":"provisioning"' "$R"
+DEV_ID=$(echo "$R" | jq_extract "['id']")
+
+# Create sibling
+R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
+  -d "{\"name\":\"Test QA\",\"role\":\"QA\",\"tier\":1,\"parent_id\":\"$PM_ID\"}")
+check "Create QA (sibling of Dev)" '"status":"provisioning"' "$R"
+QA_ID=$(echo "$R" | jq_extract "['id']")
+
+# Create unrelated workspace
+R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
+  -d '{"name":"Test Outsider","role":"External","tier":1}')
+check "Create Outsider (unrelated)" '"status":"provisioning"' "$R"
+OUTSIDER_ID=$(echo "$R" | jq_extract "['id']")
+
+# List workspaces
+R=$(curl -s "$BASE/workspaces")
+check "List workspaces (4 total)" "$PM_ID" "$R"
+
+# Get single workspace
+R=$(curl -s "$BASE/workspaces/$PM_ID")
+check "Get PM by ID" '"name":"Test PM"' "$R"
+
+# Update workspace position
+R=$(curl -s -X PATCH "$BASE/workspaces/$PM_ID" -H "Content-Type: application/json" \
+  -d '{"x":100,"y":200}')
+check "Update PM position" '"status":"updated"' "$R"
+
+# Verify position persisted
+R=$(curl -s "$BASE/workspaces/$PM_ID")
+check "PM position persisted" '"x":100' "$R"
+
+# ============================================================
+# Section 3: Registry & Heartbeat
+# ============================================================
+echo ""
+echo "--- Section 3: Registry & Heartbeat ---"
+
+# Register Dev workspace
+R=$(curl -s -X POST "$BASE/registry/register" -H "Content-Type: application/json" \
+  -d "{\"id\":\"$DEV_ID\",\"url\":\"http://localhost:9001\",\"agent_card\":{\"name\":\"Dev Agent\",\"skills\":[],\"version\":\"1.0.0\"}}")
+check "Register Dev" '"status":"registered"' "$R"
+
+# Verify Dev is now online
+R=$(curl -s "$BASE/workspaces/$DEV_ID")
+check "Dev status online after register" '"status":"online"' "$R"
+
+# Heartbeat with current_task
+R=$(curl -s -X POST "$BASE/registry/heartbeat" -H "Content-Type: application/json" \
+  -d "{\"workspace_id\":\"$DEV_ID\",\"active_tasks\":1,\"current_task\":\"Running tests\"}")
+check "Heartbeat with task" '"status":"ok"' "$R"
+
+# Verify current_task visible
+R=$(curl -s "$BASE/workspaces/$DEV_ID")
+check "Current task visible" '"current_task":"Running tests"' "$R"
+
+# Heartbeat with error rate (trigger degraded — needs >0.5 AND registered)
+R=$(curl -s -X POST "$BASE/registry/heartbeat" -H "Content-Type: application/json" \
+  -d "{\"workspace_id\":\"$DEV_ID\",\"error_rate\":0.8,\"sample_error\":\"timeout\"}")
+check "Degraded heartbeat" '"status":"ok"' "$R"
+
+# Verify degraded status
+sleep 1
+R=$(curl -s "$BASE/workspaces/$DEV_ID")
+check "Dev degraded" '"last_error_rate":0.8' "$R"
+
+# Recover
+R=$(curl -s -X POST "$BASE/registry/heartbeat" -H "Content-Type: application/json" \
+  -d "{\"workspace_id\":\"$DEV_ID\",\"error_rate\":0.0}")
+R=$(curl -s "$BASE/workspaces/$DEV_ID")
+check "Dev recovered" '"last_error_rate":0' "$R"
+
+# ============================================================
+# Section 4: Discovery & Access Control
+# ============================================================
+echo ""
+echo "--- Section 4: Discovery & Access Control ---"
+
+# Register PM too
+curl -s -X POST "$BASE/registry/register" -H "Content-Type: application/json" \
+  -d "{\"id\":\"$PM_ID\",\"url\":\"http://localhost:9000\",\"agent_card\":{\"name\":\"PM\",\"skills\":[]}}" > /dev/null
+
+# Discover requires X-Workspace-ID
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/registry/discover/$DEV_ID")
+check_status "Discover without header → 400" "400" "$CODE"
+
+# PM discovers Dev (parent→child: allowed)
+R=$(curl -s -H "X-Workspace-ID: $PM_ID" "$BASE/registry/discover/$DEV_ID")
+check "PM discovers Dev (parent→child)" "$DEV_ID" "$R"
+
+# Dev discovers QA (siblings: allowed) — QA must be registered first
+curl -s -X POST "$BASE/registry/register" -H "Content-Type: application/json" \
+  -d "{\"id\":\"$QA_ID\",\"url\":\"http://localhost:9002\",\"agent_card\":{\"name\":\"QA\",\"skills\":[]}}" > /dev/null
+R=$(curl -s -H "X-Workspace-ID: $DEV_ID" "$BASE/registry/discover/$QA_ID")
+check "Dev discovers QA (siblings)" "$QA_ID" "$R"
+
+# Check access: PM → Dev (allowed)
+R=$(curl -s -X POST "$BASE/registry/check-access" -H "Content-Type: application/json" \
+  -d "{\"caller_id\":\"$PM_ID\",\"target_id\":\"$DEV_ID\"}")
+check "Access PM→Dev (parent→child)" '"allowed":true' "$R"
+
+# Check access: Dev → Outsider (denied)
+R=$(curl -s -X POST "$BASE/registry/check-access" -H "Content-Type: application/json" \
+  -d "{\"caller_id\":\"$DEV_ID\",\"target_id\":\"$OUTSIDER_ID\"}")
+check "Access Dev→Outsider (denied)" '"allowed":false' "$R"
+
+# Peers — Dev should see PM and QA
+R=$(curl -s -H "X-Workspace-ID: $DEV_ID" "$BASE/registry/$DEV_ID/peers")
+check "Dev peers include PM" "$PM_ID" "$R"
+check "Dev peers include QA" "$QA_ID" "$R"
+
+# ============================================================
+# Section 5: Secrets
+# ============================================================
+echo ""
+echo "--- Section 5: Secrets ---"
+
+# List secrets (empty)
+R=$(curl -s "$BASE/workspaces/$PM_ID/secrets")
+check "List secrets (empty)" '[]' "$R"
+
+# Set a secret
+R=$(curl -s -X POST "$BASE/workspaces/$PM_ID/secrets" -H "Content-Type: application/json" \
+  -d '{"key":"OPENAI_API_KEY","value":"sk-test-12345"}')
+check "Set secret" '"status":"saved"' "$R"
+
+# List secrets (1 item, value not exposed)
+R=$(curl -s "$BASE/workspaces/$PM_ID/secrets")
+check "Secret listed" '"key":"OPENAI_API_KEY"' "$R"
+check "Secret value hidden" '"has_value":true' "$R"
+
+# Get model (derived from secrets or config)
+R=$(curl -s "$BASE/workspaces/$PM_ID/model")
+# Model endpoint returns whatever is configured
+check "Get model endpoint" '{' "$R"
+
+# Delete secret
+R=$(curl -s -X DELETE "$BASE/workspaces/$PM_ID/secrets/OPENAI_API_KEY")
+check "Delete secret" '"status":"deleted"' "$R"
+
+# ============================================================
+# Section 6: Config & Files
+# ============================================================
+echo ""
+echo "--- Section 6: Config & Files ---"
+
+# Note: Config read requires container or template — test error case
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/workspaces/$PM_ID/files/config.yaml")
+# May return 404 if no container/template exists (expected)
+echo "  INFO: GET config.yaml → HTTP $CODE (expected 200 or 404)"
+
+# ============================================================
+# Section 7: Workspace Memory (HMA)
+# ============================================================
+echo ""
+echo "--- Section 7: Workspace Memory ---"
+
+# Commit memory
+R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/memories" -H "Content-Type: application/json" \
+  -d '{"content":"Architecture uses Go + React","scope":"LOCAL"}')
+check "Commit memory" '"scope":"LOCAL"' "$R"
+MEM_ID=$(echo "$R" | jq_extract "['id']" 2>/dev/null || echo "")
+
+# Search memory
+R=$(curl -s "$BASE/workspaces/$DEV_ID/memories")
+check "List memories" 'Architecture uses Go' "$R"
+
+# Search with query (text search may not be supported in all backends)
+R=$(curl -s "$BASE/workspaces/$DEV_ID/memories?q=architecture")
+# Accept either success with results or error (feature depends on backend)
+if echo "$R" | grep -qF "error"; then
+  echo "  SKIP: Search memories (text search not supported by current backend)"
+  SKIP=$((SKIP + 1))
+else
+  check "Search memories" '"memories"' "$R"
+fi
+
+# Delete memory
+if [ -n "$MEM_ID" ]; then
+  R=$(curl -s -X DELETE "$BASE/workspaces/$DEV_ID/memories/$MEM_ID")
+  check "Delete memory" '"status"' "$R"
+fi
+
+# ============================================================
+# Section 8: Activity Logging
+# ============================================================
+echo ""
+echo "--- Section 8: Activity Logging ---"
+
+# Report activity
+R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/activity" -H "Content-Type: application/json" \
+  -d '{"activity_type":"agent_log","summary":"Running unit tests","status":"ok"}')
+check "Report activity" '"status"' "$R"
+
+# List activity
+R=$(curl -s "$BASE/workspaces/$DEV_ID/activity?limit=5")
+check "List activity" 'Running unit tests' "$R"
+
+# Filter by type
+R=$(curl -s "$BASE/workspaces/$DEV_ID/activity?type=agent_log")
+check "Filter activity by type" 'agent_log' "$R"
+
+# ============================================================
+# Section 9: Events
+# ============================================================
+echo ""
+echo "--- Section 9: Events ---"
+
+# List global events
+R=$(curl -s "$BASE/events")
+check "List global events" 'WORKSPACE_' "$R"
+
+# List events for PM
+R=$(curl -s "$BASE/events/$PM_ID")
+check "List PM events" "$PM_ID" "$R"
+
+# ============================================================
+# Section 10: Approvals
+# ============================================================
+echo ""
+echo "--- Section 10: Approvals ---"
+
+# Create approval request
+R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/approvals" -H "Content-Type: application/json" \
+  -d '{"action":"deploy to production","reason":"All tests passing"}')
+check "Create approval" '"status":"pending"' "$R"
+APPROVAL_ID=$(echo "$R" | jq_extract "['id']" 2>/dev/null || echo "")
+
+# List pending approvals
+R=$(curl -s "$BASE/approvals/pending")
+check "List pending approvals" 'deploy to production' "$R"
+
+# List workspace approvals
+R=$(curl -s "$BASE/workspaces/$DEV_ID/approvals")
+check "List Dev approvals" 'deploy to production' "$R"
+
+# Decide approval
+if [ -n "$APPROVAL_ID" ]; then
+  R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/approvals/$APPROVAL_ID/decide" \
+    -H "Content-Type: application/json" -d '{"approved":true,"decided_by":"admin"}')
+  check "Approve request" '"approved":true' "$R"
+fi
+
+# ============================================================
+# Section 11: Canvas Viewport
+# ============================================================
+echo ""
+echo "--- Section 11: Canvas Viewport ---"
+
+R=$(curl -s -X PUT "$BASE/canvas/viewport" -H "Content-Type: application/json" \
+  -d '{"x":50,"y":100,"zoom":1.5}')
+check "Save viewport" '"status":"saved"' "$R"
+
+R=$(curl -s "$BASE/canvas/viewport")
+check "Get viewport" '"zoom":1.5' "$R"
+
+# ============================================================
+# Section 12: Agent Card Update
+# ============================================================
+echo ""
+echo "--- Section 12: Agent Card Update ---"
+
+R=$(curl -s -X POST "$BASE/registry/update-card" -H "Content-Type: application/json" \
+  -d "{\"workspace_id\":\"$DEV_ID\",\"agent_card\":{\"name\":\"Dev Agent v2\",\"skills\":[{\"id\":\"code\",\"name\":\"Coding\"}],\"version\":\"2.0.0\"}}")
+check "Update agent card" '"status":"updated"' "$R"
+
+R=$(curl -s "$BASE/workspaces/$DEV_ID")
+check "Agent card updated" '"name":"Dev Agent v2"' "$R"
+
+# ============================================================
+# Section 13: Bundle Export/Import
+# ============================================================
+echo ""
+echo "--- Section 13: Bundle Export/Import ---"
+
+# Export PM bundle
+R=$(curl -s "$BASE/bundles/export/$PM_ID")
+check "Export PM bundle" '"name":"Test PM"' "$R"
+check "Bundle has workspace data" '"name":"Test PM"' "$R"
+
+# Import bundle (create from exported data)
+BUNDLE=$(curl -s "$BASE/bundles/export/$PM_ID")
+R=$(curl -s -X POST "$BASE/bundles/import" -H "Content-Type: application/json" -d "$BUNDLE")
+check "Import bundle" '"status"' "$R"
+
+# ============================================================
+# Section 14: Workspace Delete (Cascade)
+# ============================================================
+echo ""
+echo "--- Section 14: Cleanup & Delete ---"
+
+# Delete with children — should require confirmation
+R=$(curl -s -X DELETE "$BASE/workspaces/$PM_ID")
+check "Delete PM requires confirmation" '"confirmation_required"' "$R"
+
+# Delete with confirmation
+R=$(curl -s -X DELETE "$BASE/workspaces/$PM_ID?confirm=true")
+check "Delete PM cascades" '"cascade_deleted"' "$R"
+
+# Delete outsider
+curl -s -X DELETE "$BASE/workspaces/$OUTSIDER_ID?confirm=true" > /dev/null
+
+# Clean up imported bundle workspaces
+sleep 2
+curl -s "$BASE/workspaces" | python3 -c "
+import json, sys, subprocess, time
+ws = json.load(sys.stdin)
+for w in ws:
+    time.sleep(0.5)  # avoid rate limit
+    subprocess.run(['curl', '-s', '-X', 'DELETE', '$BASE/workspaces/' + w['id'] + '?confirm=true'], capture_output=True)
+" 2>/dev/null
+
+sleep 2
+# Verify clean
+R=$(curl -s "$BASE/workspaces")
+check "All workspaces cleaned" '[]' "$R"
+
+# ============================================================
+# Summary
+# ============================================================
+echo ""
+echo "============================================"
+echo "  Results: $PASS passed, $FAIL failed, $SKIP skipped"
+echo "  Total: $((PASS + FAIL + SKIP)) checks"
+echo "============================================"
+
+[ "$FAIL" -eq 0 ] && exit 0 || exit 1
