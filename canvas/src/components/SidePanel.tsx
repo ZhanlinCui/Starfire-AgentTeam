@@ -14,6 +14,7 @@ import { MemoryTab } from "./tabs/MemoryTab";
 import { TracesTab } from "./tabs/TracesTab";
 import { EventsTab } from "./tabs/EventsTab";
 import { ActivityTab } from "./tabs/ActivityTab";
+import { summarizeWorkspaceCapabilities } from "@/store/canvas";
 
 const TABS: { id: PanelTab; label: string; icon: string }[] = [
   { id: "details", label: "Details", icon: "◉" },
@@ -74,6 +75,7 @@ export function SidePanel() {
   if (!selectedNodeId || !node) return null;
 
   const isOnline = node.data.status === "online";
+  const capability = summarizeWorkspaceCapabilities(node.data);
 
   return (
     <div
@@ -117,6 +119,22 @@ export function SidePanel() {
             <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
+      </div>
+
+      {/* Capability summary */}
+      <div className="px-5 py-3 border-b border-zinc-800/40 bg-zinc-900/20">
+        <div className="flex flex-wrap gap-2">
+          <MetaPill label="Tier" value={`T${node.data.tier}`} />
+          <MetaPill label="Runtime" value={capability.runtime || "unknown"} />
+          <MetaPill label="Skills" value={capability.skillCount > 0 ? `${capability.skillCount}` : "none"} />
+          <MetaPill label="Status" value={node.data.status} tone={isOnline ? "emerald" : "zinc"} />
+          {capability.hasActiveTask && <MetaPill label="Resume" value="active run" tone="amber" />}
+        </div>
+        {capability.hasActiveTask && (
+          <p className="mt-2 text-[10px] text-amber-300/80 truncate">
+            Resuming: {capability.currentTask}
+          </p>
+        )}
       </div>
 
       {/* Tabs */}
@@ -184,5 +202,20 @@ export function SidePanel() {
         </span>
       </div>
     </div>
+  );
+}
+
+function MetaPill({ label, value, tone = "zinc" }: { label: string; value: string; tone?: "zinc" | "emerald" | "amber" }) {
+  const toneClasses = {
+    zinc: "border-zinc-700/50 bg-zinc-900/70 text-zinc-400",
+    emerald: "border-emerald-500/20 bg-emerald-950/20 text-emerald-300",
+    amber: "border-amber-500/20 bg-amber-950/20 text-amber-300",
+  }[tone];
+
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] ${toneClasses}`}>
+      <span className="uppercase tracking-[0.18em] text-[8px] opacity-70">{label}</span>
+      <span className="font-medium">{value}</span>
+    </span>
   );
 }

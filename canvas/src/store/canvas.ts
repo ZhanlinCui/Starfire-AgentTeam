@@ -24,6 +24,14 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   needsRestart: boolean;
 }
 
+export interface WorkspaceCapabilitySummary {
+  runtime: string | null;
+  skills: string[];
+  skillCount: number;
+  currentTask: string;
+  hasActiveTask: boolean;
+}
+
 export type PanelTab = "details" | "chat" | "terminal" | "config" | "files" | "memory" | "traces" | "events" | "activity";
 
 export interface ContextMenuState {
@@ -62,6 +70,20 @@ interface CanvasState {
   saveViewport: (x: number, y: number, zoom: number) => void;
 }
 
+export function summarizeWorkspaceCapabilities(data: WorkspaceNodeData): WorkspaceCapabilitySummary {
+  const skills = extractSkillNames(data.agentCard);
+  const currentTask = data.currentTask.trim();
+  const runtime = typeof data.agentCard?.runtime === "string" ? data.agentCard.runtime : null;
+
+  return {
+    runtime,
+    skills,
+    skillCount: skills.length,
+    currentTask,
+    hasActiveTask: currentTask.length > 0,
+  };
+}
+
 function buildNodesAndEdges(workspaces: WorkspaceData[]) {
   // All workspaces become nodes (children are rendered inside parent via WorkspaceNode)
   const nodes: Node<WorkspaceNodeData>[] = workspaces.map((ws) => ({
@@ -93,6 +115,15 @@ function buildNodesAndEdges(workspaces: WorkspaceData[]) {
   const edges: Edge[] = [];
 
   return { nodes, edges };
+}
+
+function extractSkillNames(agentCard: Record<string, unknown> | null): string[] {
+  if (!agentCard) return [];
+  const skills = agentCard.skills;
+  if (!Array.isArray(skills)) return [];
+  return skills
+    .map((skill: Record<string, unknown>) => String(skill.name || skill.id || ""))
+    .filter(Boolean);
 }
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
