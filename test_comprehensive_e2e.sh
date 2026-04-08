@@ -320,32 +320,87 @@ echo "  INFO: GET config.yaml → HTTP $CODE (expected 200 or 404)"
 # Section 7: Workspace Memory (HMA)
 # ============================================================
 echo ""
+# Pause before memory tests to avoid rate limits from prior sections
+sleep 3
 echo "--- Section 7: Workspace Memory ---"
 
-# Commit memory
+# Commit LOCAL memory
 R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/memories" -H "Content-Type: application/json" \
   -d '{"content":"Architecture uses Go + React","scope":"LOCAL"}')
-check "Commit memory" '"scope":"LOCAL"' "$R"
+check "Commit LOCAL memory" '"scope":"LOCAL"' "$R"
 MEM_ID=$(echo "$R" | jq_extract "['id']" 2>/dev/null || echo "")
 
-# Search memory
-R=$(curl -s "$BASE/workspaces/$DEV_ID/memories")
-check "List memories" 'Architecture uses Go' "$R"
+# Commit TEAM memory
+R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/memories" -H "Content-Type: application/json" \
+  -d '{"content":"Sprint goal: ship v2.0 by Friday","scope":"TEAM"}')
+check "Commit TEAM memory" '"scope":"TEAM"' "$R"
+TEAM_MEM_ID=$(echo "$R" | jq_extract "['id']" 2>/dev/null || echo "")
 
-# Search with query (text search may not be supported in all backends)
-R=$(curl -s "$BASE/workspaces/$DEV_ID/memories?q=architecture")
-# Accept either success with results or error (feature depends on backend)
-if echo "$R" | grep -qF "error"; then
-  echo "  SKIP: Search memories (text search not supported by current backend)"
-  SKIP=$((SKIP + 1))
-else
-  check "Search memories" '"memories"' "$R"
-fi
+# List all memories
+R=$(curl -s "$BASE/workspaces/$DEV_ID/memories")
+check "List all memories" 'Architecture uses Go' "$R"
+check "List includes TEAM memory" 'Sprint goal' "$R"
+
+# Filter by scope
+R=$(curl -s "$BASE/workspaces/$DEV_ID/memories?scope=LOCAL")
+check "Filter LOCAL scope" 'Architecture' "$R"
+
+R=$(curl -s "$BASE/workspaces/$DEV_ID/memories?scope=TEAM")
+check "Filter TEAM scope" 'Sprint goal' "$R"
+
+# Invalid scope rejected
+R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/memories" -H "Content-Type: application/json" \
+  -d '{"content":"test","scope":"INVALID"}')
+check "Invalid scope rejected" 'error' "$R"
+
+# Empty content rejected
+R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/memories" -H "Content-Type: application/json" \
+  -d '{"content":"","scope":"LOCAL"}')
+check "Empty content rejected" 'error' "$R"
+
+# Memory persists across API calls (simulate recall after restart)
+R=$(curl -s "$BASE/workspaces/$DEV_ID/memories")
+check "Memory persists (recall)" 'Architecture' "$R"
 
 # Delete memory
 if [ -n "$MEM_ID" ]; then
   R=$(curl -s -X DELETE "$BASE/workspaces/$DEV_ID/memories/$MEM_ID")
-  check "Delete memory" '"status"' "$R"
+  check "Delete LOCAL memory" '"status"' "$R"
+fi
+
+# Verify deleted memory is gone
+R=$(curl -s "$BASE/workspaces/$DEV_ID/memories?scope=LOCAL")
+if echo "$R" | grep -qF "Architecture"; then
+  echo "  FAIL: Deleted memory still visible"
+  FAIL=$((FAIL + 1))
+else
+  echo "  PASS: Deleted memory removed"
+  PASS=$((PASS + 1))
+fi
+
+# Clean up TEAM memory
+if [ -n "$TEAM_MEM_ID" ]; then
+  curl -s -X DELETE "$BASE/workspaces/$DEV_ID/memories/$TEAM_MEM_ID" > /dev/null
+fi
+
+sleep 2
+# Cross-workspace memory isolation — PM should NOT see Dev's LOCAL memories
+R=$(curl -s -X POST "$BASE/workspaces/$DEV_ID/memories" -H "Content-Type: application/json" \
+  -d '{"content":"Dev secret note","scope":"LOCAL"}')
+DEV_SECRET_ID=$(echo "$R" | jq_extract "['id']" 2>/dev/null || echo "")
+
+R=$(curl -s "$BASE/workspaces/$PM_ID/memories")
+if echo "$R" | grep -qF "Dev secret note"; then
+  echo "  FAIL: PM can see Dev's LOCAL memory (isolation broken)"
+  FAIL=$((FAIL + 1))
+else
+  echo "  PASS: Memory isolation — PM cannot see Dev's LOCAL"
+  PASS=$((PASS + 1))
+fi
+
+# Clean up
+if [ -n "$DEV_SECRET_ID" ]; then
+  curl -s -X DELETE "$BASE/workspaces/$DEV_ID/memories/$DEV_SECRET_ID" > /dev/null
 fi
 
 # ============================================================
@@ -438,6 +493,7 @@ check "Agent card updated" '"name":"Dev Agent v2"' "$R"
 # Section 13: Bundle Export/Import
 # ============================================================
 echo ""
+sleep 3
 echo "--- Section 13: Bundle Export/Import ---"
 
 # Export PM bundle
