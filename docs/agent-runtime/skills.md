@@ -234,6 +234,20 @@ molecli agent skill publish <workspace-id> <skill-name> --to <output-dir>
 
 Both commands stay intentionally small and reuse the existing workspace Files API and bundle export path. They are convenience wrappers, not a separate skill registry.
 
+## Skill Promotion Loop
+
+When the agent sees the same workflow succeed repeatedly, it should compress that workflow into memory first and then promote it into a skill without waiting for a later review pass.
+
+The handoff is:
+
+1. `memory-curation` decides the workflow is durable
+2. The memory packet sets `promote_to_skill = true`
+3. The packet also carries a `repetition_signal` proving the workflow has repeated cleanly
+4. `skill-authoring` turns that packet into a narrow `SKILL.md`
+5. The existing file watcher hot-reloads the new skill and rebuilds the Agent Card
+
+This is intentionally a local runtime loop, not a remote registry or human approval queue. The goal is to let repeated work become reusable behavior as soon as it is stable enough to write down.
+
 ## ClawHub Compatibility
 
 ### Installing from ClawHub

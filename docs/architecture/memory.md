@@ -67,3 +67,13 @@ See [Config Format — shared_context](../agent-runtime/config-format.md) and [S
 
 ### 4. Asynchronous Cognitive Consolidation
 Since Local Memory degrades as the context window fills, agents feature an independent Consolidation Loop. Similar to human sleep, when an agent reaches a configurable TTL of heartbeat-idleness, it can wake up a background goroutine/LangGraph thread to summarize noisy local scratchpad entries into dense, high-value knowledge facts, committing them back to L1 or L2 memory.
+
+### 5. Memory-to-Skill Promotion
+When consolidation keeps surfacing the same stable workflow, the agent should stop treating it as a one-off memory entry and promote it into a reusable skill. The promotion signal is intentionally simple:
+
+- `memory-curation` compresses the durable result into a packet
+- repeated success evidence is recorded as `repetition_signal`
+- once the workflow has succeeded at least twice, `promote_to_skill = true`
+- `skill-authoring` turns the packet into a narrow `SKILL.md`
+
+This keeps the boundary clear: `awareness` stores durable memory, while skills store repeatable procedure. The hot-reload path then makes the new skill available without a restart.
