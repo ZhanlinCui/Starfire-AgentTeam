@@ -26,7 +26,7 @@ export function SkillsTab({ data }: Props) {
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-zinc-500">Local catalog</div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-zinc-500">Workspace skills</div>
             <h3 className="mt-1 text-sm font-semibold text-zinc-100">Installed skills</h3>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -35,7 +35,7 @@ export function SkillsTab({ data }: Props) {
           </div>
         </div>
         <p className="mt-2 text-[11px] leading-5 text-zinc-500">
-          This is the live skill surface for the selected workspace. It is derived from the Agent Card,
+          This is the live skill directory for the selected workspace. It is derived from the Agent Card,
           so it updates when the workspace hot-reloads skills.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
