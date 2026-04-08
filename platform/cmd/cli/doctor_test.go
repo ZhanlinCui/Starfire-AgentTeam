@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,4 +60,51 @@ func TestDoctorSummaryHasFailures(t *testing.T) {
 	if summary.PassCount != 1 {
 		t.Fatalf("PassCount = %d, want 1", summary.PassCount)
 	}
+}
+
+func TestFindDoctorMigrationsDirPrefersExistingDirectory(t *testing.T) {
+	tmp := t.TempDir()
+
+	missing := filepath.Join(tmp, "missing")
+	valid := filepath.Join(tmp, "platform", "migrations")
+	if err := os.MkdirAll(valid, 0o755); err != nil {
+		t.Fatalf("mkdir migrations dir: %v", err)
+	}
+
+	got := findDoctorMigrationsDir([]string{missing, valid})
+	if got != valid {
+		t.Fatalf("findDoctorMigrationsDir() = %q, want %q", got, valid)
+	}
+}
+
+func TestDoctorNextStepGuidance(t *testing.T) {
+	t.Run("has failures", func(t *testing.T) {
+		report := DoctorReport{
+			Summary: DoctorSummary{HasFailures: true},
+		}
+		got := doctorNextStep(report)
+		if !strings.Contains(got, "Fix FAIL items first") {
+			t.Fatalf("doctorNextStep() = %q, want failure guidance", got)
+		}
+	})
+
+	t.Run("only warnings", func(t *testing.T) {
+		report := DoctorReport{
+			Summary: DoctorSummary{WarnCount: 1},
+		}
+		got := doctorNextStep(report)
+		if !strings.Contains(got, "warnings before provisioning") {
+			t.Fatalf("doctorNextStep() = %q, want warning guidance", got)
+		}
+	})
+
+	t.Run("all clear", func(t *testing.T) {
+		report := DoctorReport{
+			Summary: DoctorSummary{PassCount: 6},
+		}
+		got := doctorNextStep(report)
+		if !strings.Contains(got, "start the platform") {
+			t.Fatalf("doctorNextStep() = %q, want success guidance", got)
+		}
+	})
 }

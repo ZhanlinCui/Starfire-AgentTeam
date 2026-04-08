@@ -52,7 +52,7 @@ type doctorCheck struct {
 }
 
 func runDoctor(ctx context.Context, baseURL string) DoctorReport {
-	results := make([]DoctorResult, 0, 5)
+	results := make([]DoctorResult, 0, 6)
 	for _, check := range buildDoctorChecks(baseURL) {
 		results = append(results, check.Run(ctx))
 	}
@@ -84,6 +84,7 @@ func buildDoctorChecks(baseURL string) []doctorCheck {
 		{Name: "Platform health", Run: func(ctx context.Context) DoctorResult { return checkPlatformHealth(ctx, baseURL) }},
 		{Name: "Postgres connection", Run: checkPostgres},
 		{Name: "Redis connection", Run: checkRedis},
+		{Name: "Platform migrations", Run: checkMigrationsDir},
 		{Name: "Workspace templates", Run: checkTemplatesDir},
 		{Name: "Docker / provisioner", Run: checkDocker},
 	}
@@ -235,6 +236,53 @@ func checkTemplatesDir(ctx context.Context) DoctorResult {
 	return result
 }
 
+func checkMigrationsDir(ctx context.Context) DoctorResult {
+	_ = ctx
+	result := DoctorResult{Name: "Platform migrations"}
+	dir := findDoctorMigrationsDir([]string{
+		"migrations",
+		"platform/migrations",
+		"../migrations",
+		"../../migrations",
+	})
+
+	if dir == "" {
+		result.Status = DoctorStatusFail
+		result.Summary = "Could not find a platform migrations directory"
+		result.Fix = "Run molecli from the repo root or restore platform/migrations."
+		return result
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		result.Status = DoctorStatusFail
+		result.Summary = fmt.Sprintf("Could not read migrations directory: %v", err)
+		result.Fix = "Check filesystem permissions for the migrations directory."
+		return result
+	}
+
+	var sqlCount int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".sql") {
+			sqlCount++
+		}
+	}
+
+	if sqlCount == 0 {
+		result.Status = DoctorStatusWarn
+		result.Summary = fmt.Sprintf("Migrations directory exists at %s but has no .sql files", dir)
+		result.Fix = "Restore the platform migration files before starting the server."
+		return result
+	}
+
+	result.Status = DoctorStatusPass
+	result.Summary = fmt.Sprintf("Found %d migration file(s) in %s", sqlCount, dir)
+	return result
+}
+
 func checkDocker(ctx context.Context) DoctorResult {
 	result := DoctorResult{Name: "Docker / provisioner"}
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -284,6 +332,18 @@ func findDoctorConfigsDir(candidates []string) string {
 	return "workspace-configs-templates"
 }
 
+func findDoctorMigrationsDir(candidates []string) string {
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		abs, _ := filepath.Abs(candidate)
+		return abs
+	}
+	return ""
+}
+
 func envOrLocal(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -302,6 +362,19 @@ func printDoctorReport(report DoctorReport) {
 			fmt.Printf("  Fix: %s\n", result.Fix)
 		}
 		fmt.Println()
+	}
+
+	fmt.Println(doctorNextStep(report))
+}
+
+func doctorNextStep(report DoctorReport) string {
+	switch {
+	case report.Summary.HasFailures:
+		return "Next: Fix FAIL items first, then rerun `molecli doctor`."
+	case report.Summary.WarnCount > 0:
+		return "Next: Review warnings before provisioning new workspaces."
+	default:
+		return "Next: Environment looks good. You can start the platform and Canvas, then deploy a workspace template."
 	}
 }
 
