@@ -49,8 +49,9 @@ class ReconnectingSocket {
       setTimeout(() => this.connect(), delay);
     };
 
-    this.ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
+    this.ws.onerror = () => {
+      // Suppressed — onclose handles reconnection. onerror fires before onclose
+      // and the Event object doesn't contain useful info (serializes to {}).
     };
   }
 

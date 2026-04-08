@@ -177,6 +177,20 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "send_message_to_user",
+        "description": "Send a message directly to the user's canvas chat — pushed instantly via WebSocket. Use this to: (1) acknowledge a task immediately ('Got it, I'll start working on this'), (2) send interim progress updates while doing long work, (3) deliver follow-up results after delegation completes. The message appears in the user's chat as if you're proactively reaching out.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The message to send to the user",
+                },
+            },
+            "required": ["message"],
+        },
+    },
+    {
         "name": "commit_memory",
         "description": "Save important information to persistent memory. Use this to remember decisions, conversation context, task results, and anything that should survive a restart. Scope: LOCAL (this workspace only), TEAM (parent + siblings), GLOBAL (entire org).",
         "inputSchema": {
@@ -387,6 +401,22 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
                     return f"Error: {data['error'].get('message', 'unknown')}"
             except Exception as e:
                 return f"Error checking status: {e}"
+
+    elif name == "send_message_to_user":
+        message = arguments.get("message", "")
+        if not message:
+            return "Error: message is required"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/notify",
+                    json={"message": message},
+                )
+                if resp.status_code == 200:
+                    return "Message sent to user"
+                return f"Error: platform returned {resp.status_code}"
+        except Exception as e:
+            return f"Error sending message: {e}"
 
     elif name == "list_peers":
         peers = await get_peers()

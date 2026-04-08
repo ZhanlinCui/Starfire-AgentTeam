@@ -124,6 +124,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/workspaces/:id/activity", acth.List)
 	r.GET("/workspaces/:id/session-search", acth.SessionSearch)
 	r.POST("/workspaces/:id/activity", acth.Report)
+	r.POST("/workspaces/:id/notify", acth.Notify)
 
 	// Config
 	cfgh := handlers.NewConfigHandler()

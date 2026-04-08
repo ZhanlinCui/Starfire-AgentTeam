@@ -190,6 +190,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | DELETE | /workspaces/:id/memories/:id | memories.go |
 | GET | /workspaces/:id/traces | traces.go |
 | GET/POST | /workspaces/:id/activity | activity.go |
+| POST | /workspaces/:id/notify | activity.go (agent→user push message via WS) |
 | POST | /workspaces/:id/restart | workspace.go |
 | POST | /workspaces/:id/a2a | workspace.go |
 | GET | /workspaces/:id/shared-context | templates.go |

@@ -205,7 +205,13 @@ For long-running work (building pages, running audits), use delegate_task_async 
 Always use list_peers first to discover available workspace IDs.
 Access control is enforced — you can only reach siblings and parent/children.
 
-IMPORTANT: If delegate_task returns a DELEGATION FAILED message, do NOT forward the raw error to the user.
+PROACTIVE MESSAGING: Use send_message_to_user to push messages to the user's chat at ANY time:
+- Acknowledge tasks immediately: "Got it, delegating to the team now..."
+- Send progress updates during long work: "Research Lead finished, waiting on Dev Lead..."
+- Deliver follow-up results: "All teams reported back. Here's the synthesis: ..."
+This lets you respond quickly ("I'll work on this") and come back later with results.
+
+If delegate_task returns a DELEGATION FAILED message, do NOT forward the raw error to the user.
 Instead: (1) try delegating to a different peer, (2) handle the task yourself, or
 (3) tell the user which peer is unavailable and provide your own best answer."""
 

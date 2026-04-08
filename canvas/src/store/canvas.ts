@@ -68,6 +68,9 @@ interface CanvasState {
   viewport: { x: number; y: number; zoom: number };
   setViewport: (v: { x: number; y: number; zoom: number }) => void;
   saveViewport: (x: number, y: number, zoom: number) => void;
+  /** Agent-pushed messages keyed by workspace ID. ChatTab consumes and clears these. */
+  agentMessages: Record<string, Array<{ id: string; content: string; timestamp: string }>>;
+  consumeAgentMessages: (workspaceId: string) => Array<{ id: string; content: string; timestamp: string }>;
 }
 
 export function summarizeWorkspaceCapabilities(data: WorkspaceNodeData): WorkspaceCapabilitySummary {
@@ -141,6 +144,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   closeContextMenu: () => set({ contextMenu: null }),
   searchOpen: false,
   setSearchOpen: (open) => set({ searchOpen: open }),
+  agentMessages: {},
+  consumeAgentMessages: (workspaceId) => {
+    const msgs = get().agentMessages[workspaceId] || [];
+    if (msgs.length > 0) {
+      const { agentMessages } = get();
+      const { [workspaceId]: _, ...rest } = agentMessages;
+      set({ agentMessages: rest });
+    }
+    return msgs;
+  },
   setViewport: (v) => set({ viewport: v }),
   saveViewport: async (x, y, zoom) => {
     set({ viewport: { x, y, zoom } });
@@ -394,6 +407,24 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
               : n
           ),
         });
+        break;
+      }
+
+      case "AGENT_MESSAGE": {
+        const content = (msg.payload.message as string) ?? "";
+        if (content) {
+          const { agentMessages } = get();
+          const existing = agentMessages[msg.workspace_id] || [];
+          set({
+            agentMessages: {
+              ...agentMessages,
+              [msg.workspace_id]: [
+                ...existing,
+                { id: crypto.randomUUID(), content, timestamp: new Date().toISOString() },
+              ],
+            },
+          });
+        }
         break;
       }
 

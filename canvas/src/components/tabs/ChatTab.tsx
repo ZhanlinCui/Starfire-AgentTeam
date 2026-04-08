@@ -241,6 +241,18 @@ export function ChatTab({ workspaceId, data }: Props) {
     [activeSessionId]
   );
 
+  // Consume agent-pushed messages from the global store (routed via existing WS → applyEvent).
+  // No extra WebSocket connection needed — the main canvas WS handles AGENT_MESSAGE.
+  const pendingAgentMsgs = useCanvasStore((s) => s.agentMessages[workspaceId]);
+  useEffect(() => {
+    if (!pendingAgentMsgs || pendingAgentMsgs.length === 0) return;
+    const consume = useCanvasStore.getState().consumeAgentMessages;
+    const msgs = consume(workspaceId);
+    for (const m of msgs) {
+      addMessage(createMessage("agent", m.content));
+    }
+  }, [pendingAgentMsgs, workspaceId, addMessage]);
+
   // Poll activity log for agent response — survives page refresh, tab switches, etc.
   const pollForResponse = useCallback(
     (sentAfter: string) => {

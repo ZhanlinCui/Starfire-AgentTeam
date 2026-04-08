@@ -211,6 +211,38 @@ func (h *ActivityHandler) SessionSearch(c *gin.Context) {
 	c.JSON(http.StatusOK, items)
 }
 
+// Notify handles POST /workspaces/:id/notify — agents push messages to the canvas chat.
+// This enables agents to send interim updates ("I'll check on it") and follow-up results
+// without waiting for the user to poll. Messages are broadcast via WebSocket only.
+func (h *ActivityHandler) Notify(c *gin.Context) {
+	workspaceID := c.Param("id")
+	var body struct {
+		Message string `json:"message" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "message is required"})
+		return
+	}
+
+	// Verify workspace exists
+	var wsName string
+	err := db.DB.QueryRowContext(c.Request.Context(),
+		`SELECT name FROM workspaces WHERE id = $1 AND status != 'removed'`, workspaceID,
+	).Scan(&wsName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+
+	h.broadcaster.BroadcastOnly(workspaceID, "AGENT_MESSAGE", map[string]interface{}{
+		"message":      body.Message,
+		"workspace_id": workspaceID,
+		"name":         wsName,
+	})
+
+	c.JSON(http.StatusOK, gin.H{"status": "sent"})
+}
+
 // Report handles POST /workspaces/:id/activity — agents self-report activity logs.
 func (h *ActivityHandler) Report(c *gin.Context) {
 	workspaceID := c.Param("id")
