@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,6 +17,13 @@ func main() {
 	}
 
 	if err := buildRootCmd().Execute(); err != nil {
+		var exitErr exitCoder
+		if errors.As(err, &exitErr) {
+			if msg := err.Error(); msg != "" {
+				fmt.Fprintln(os.Stderr, msg)
+			}
+			os.Exit(exitErr.ExitCode())
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
