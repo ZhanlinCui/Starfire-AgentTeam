@@ -1,0 +1,33 @@
+[awareness-local] Embedder loaded — hybrid vector+FTS5 search enabled
+[awareness-local] indexed 13 files, skipped 0
+[awareness-local] daemon running at http://localhost:37800
+[awareness-local] MCP endpoint: http://localhost:37800/mcp
+[awareness-local] Pre-warming embedding model "Xenova/all-MiniLM-L6-v2" (first run downloads ~23MB)...
+[awareness-local] Embedding warmup failed: fetch failed
+[awareness-local] Common causes: network timeout, disk full, or corrupted cache.
+[awareness-local] Try: rm -rf ~/.cache/huggingface/hub && restart daemon
+[awareness-local] auto-indexed 1 changed files
+
+[awareness-local] shutting down...
+[awareness-local] daemon stopped
+[awareness-local] Embedder loaded — hybrid vector+FTS5 search enabled
+[awareness-local] indexed 0 files, skipped 14
+[awareness-local] daemon running at http://localhost:37800
+[awareness-local] MCP endpoint: http://localhost:37800/mcp
+[awareness-local] Pre-warming embedding model "Xenova/all-MiniLM-L6-v2" (first run downloads ~23MB)...
+[awareness-local] Embedding warmup failed: fetch failed
+[awareness-local] Common causes: network timeout, disk full, or corrupted cache.
+[awareness-local] Try: rm -rf ~/.cache/huggingface/hub && restart daemon
+[awareness-local] auto-indexed 1 changed files
+
+[awareness-local] shutting down...
+[awareness-local] daemon stopped
+[awareness-local] Embedder loaded — hybrid vector+FTS5 search enabled
+[awareness-local] indexed 0 files, skipped 15
+[awareness-local] daemon running at http://localhost:37800
+[awareness-local] MCP endpoint: http://localhost:37800/mcp
+[awareness-local] Pre-warming embedding model "Xenova/all-MiniLM-L6-v2" (first run downloads ~23MB)...
+[awareness-local] Embedding model ready in 4.6s — hybrid search active
+[awareness-local] Multilingual model (Xenova/multilingual-e5-small) available — auto-loads on CJK content
+[awareness-local] backfilling embeddings for 15 memories...
+[awareness-local] embedding backfill complete: 15/15 memories embedded
