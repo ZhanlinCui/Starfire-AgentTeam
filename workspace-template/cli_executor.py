@@ -461,6 +461,11 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                                            self.runtime, attempt + 1, max_retries, delay)
                             await asyncio.sleep(delay)
                             continue
+                    # Auth errors poison the session — clear it so next message starts fresh
+                    if "auth" in error_msg.lower() or "api_key" in error_msg.lower() or "X-Api-Key" in error_msg:
+                        self._session_id = None
+                        logger.warning("CLI agent [%s]: auth error, clearing session for fresh start", self.runtime)
+
                     logger.error("CLI agent error [%s]: %s", self.runtime, error_msg[:500])
                     await event_queue.enqueue_event(
                         new_agent_text_message(f"Agent error: {error_msg[:500]}")

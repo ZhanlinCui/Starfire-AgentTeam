@@ -151,7 +151,33 @@ def brief_task(text: str, limit: int = 60) -> str:
 
 
 async def set_current_task(heartbeat: Any, task: str) -> None:
-    """Update current task on heartbeat. Shared by all executors."""
+    """Update current task on heartbeat and push immediately to platform.
+
+    The heartbeat loop only fires every 30s, so quick tasks would finish
+    before the canvas ever sees them. This pushes immediately via HTTP.
+    """
     if heartbeat:
         heartbeat.current_task = task
         heartbeat.active_tasks = 1 if task else 0
+
+    # Push immediately so the canvas shows the task in real-time
+    import os
+    workspace_id = os.environ.get("WORKSPACE_ID", "")
+    platform_url = os.environ.get("PLATFORM_URL", "")
+    if workspace_id and platform_url:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(
+                    f"{platform_url}/registry/heartbeat",
+                    json={
+                        "workspace_id": workspace_id,
+                        "current_task": task,
+                        "active_tasks": 1 if task else 0,
+                        "error_rate": 0,
+                        "sample_error": "",
+                        "uptime_seconds": 0,
+                    },
+                )
+        except Exception:
+            pass  # Best-effort
