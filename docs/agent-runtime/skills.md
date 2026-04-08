@@ -2,7 +2,7 @@
 
 A skill is a package that gives an agent knowledge, instructions, and optionally executable tools. Skills are the primary way to customize what a workspace agent can do.
 
-The skill format is compatible with [ClawHub](https://clawhub.ai/) — the open skill registry for AI agents. Skills can be installed from ClawHub and published to it.
+The skill package shape follows the same `SKILL.md`/frontmatter conventions used by [ClawHub](https://clawhub.ai/)-style skills, but this runtime keeps the lifecycle local: skills are installed, audited, published, and hot-reloaded inside a workspace rather than managed through a separate registry layer.
 
 ## Skill Package Structure
 
@@ -252,7 +252,7 @@ For observability, the workspace writes a `skill_promotion` activity when a prom
 
 ## ClawHub Compatibility
 
-### Installing from ClawHub
+### Using ClawHub-Style Skills
 
 ```bash
 npx clawhub@latest install <skill-name>
@@ -260,11 +260,11 @@ npx clawhub@latest install <skill-name>
 
 ClawHub skills are context-only (no `tools/` folder). They work in Agent Molecule as pure context skills — the `SKILL.md` instructions get appended to the agent's system prompt.
 
-### Publishing to ClawHub
+### Reusing ClawHub-Style Skills
 
-Agent Molecule skills can be published to ClawHub. The `tools/` folder and its MCP tools are included as supporting files. Note that `tools/` only execute inside the Agent Molecule runtime — ClawHub itself doesn't run them, but it stores and distributes them.
+ClawHub-style skills can be reused here as pure context skills. The `tools/` folder and its MCP tools are included as supporting files when present. Note that `tools/` only execute inside the Agent Molecule runtime — outside this runtime, the same `SKILL.md` instructions are still useful, but execution remains local.
 
-**Constraints for ClawHub publishing:**
+**Constraints for ClawHub-style bundles:**
 - Only text-based files are allowed (no binaries)
 - Maximum total bundle size: 50MB
 - Skill slug must be lowercase and URL-safe: `^[a-z0-9][a-z0-9-]*$`
