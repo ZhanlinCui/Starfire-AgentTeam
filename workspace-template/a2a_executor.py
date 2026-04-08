@@ -5,39 +5,14 @@ import logging
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.utils import new_agent_text_message
+from adapters.shared_runtime import (
+    extract_history as _extract_history,
+    extract_message_text,
+    brief_task,
+    set_current_task,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_history(context: RequestContext) -> list[tuple[str, str]]:
-    """Extract conversation history from A2A request metadata.
-
-    Returns list of (role, text) tuples where role is 'human' or 'ai'.
-    """
-    messages = []
-    metadata = getattr(context, "metadata", None) or {}
-    history = metadata.get("history", []) if isinstance(metadata, dict) else []
-    if not isinstance(history, list):
-        return messages
-    for h in history:
-        if not isinstance(h, dict):
-            continue
-        role = h.get("role", "user")
-        parts = h.get("parts", [])
-        h_text = " ".join(
-            p.get("text", "") for p in parts if isinstance(p, dict)
-        ).strip()
-        if h_text:
-            lg_role = "human" if role == "user" else "ai"
-            messages.append((lg_role, h_text))
-    return messages
-
-
-async def set_current_task(heartbeat, task: str):
-    """Update current task on heartbeat. Shared by all executors."""
-    if heartbeat:
-        heartbeat.current_task = task
-        heartbeat.active_tasks = 1 if task else 0
 
 
 class LangGraphA2AExecutor(AgentExecutor):
@@ -49,17 +24,9 @@ class LangGraphA2AExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue):
         """Execute a task from an A2A request."""
-        # Extract text from message parts
-        parts = context.message.parts
-        text_parts = []
-        for part in parts:
-            if hasattr(part, "text") and part.text:
-                text_parts.append(part.text)
-            elif hasattr(part, "root") and hasattr(part.root, "text"):
-                text_parts.append(part.root.text)
-
-        user_input = " ".join(text_parts).strip()
+        user_input = extract_message_text(context)
         if not user_input:
+            parts = getattr(getattr(context, "message", None), "parts", None)
             logger.warning("A2A execute: no text content in message parts: %s", parts)
             await event_queue.enqueue_event(
                 new_agent_text_message("Error: message contained no text content.")
@@ -69,8 +36,7 @@ class LangGraphA2AExecutor(AgentExecutor):
         logger.info("A2A execute: user_input=%s", user_input[:200])
 
         # Show current task on canvas
-        brief = user_input[:60] + ("..." if len(user_input) > 60 else "")
-        await set_current_task(self._heartbeat, brief)
+        await set_current_task(self._heartbeat, brief_task(user_input))
 
         try:
             # Build message list with conversation history if provided

@@ -103,6 +103,11 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/registry/heartbeat", rh.Heartbeat)
 	r.POST("/registry/update-card", rh.UpdateCard)
 
+	// Webhooks
+	whh := handlers.NewWebhookHandlerWithWorkspace(wh)
+	r.POST("/webhooks/github", whh.GitHub)
+	r.POST("/webhooks/github/:id", whh.GitHub)
+
 	// Discovery
 	dh := handlers.NewDiscoveryHandler()
 	r.GET("/registry/discover/:id", dh.Discover)
@@ -117,6 +122,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	// Activity Logs
 	acth := handlers.NewActivityHandler(broadcaster)
 	r.GET("/workspaces/:id/activity", acth.List)
+	r.GET("/workspaces/:id/session-search", acth.SessionSearch)
 	r.POST("/workspaces/:id/activity", acth.Report)
 
 	// Config

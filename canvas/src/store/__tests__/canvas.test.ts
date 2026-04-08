@@ -5,7 +5,7 @@ global.fetch = vi.fn(() =>
   Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
 );
 
-import { useCanvasStore } from "../canvas";
+import { useCanvasStore, summarizeWorkspaceCapabilities } from "../canvas";
 import type { WorkspaceData, WSMessage } from "../socket";
 
 // Helper to build a WorkspaceData object with sensible defaults
@@ -148,6 +148,59 @@ describe("hydrate", () => {
     // current_task is "" from makeWS default
     useCanvasStore.getState().hydrate([ws]);
     expect(useCanvasStore.getState().nodes[0].data.currentTask).toBe("");
+  });
+});
+
+describe("summarizeWorkspaceCapabilities", () => {
+  it("derives runtime, skills, and resume state from node data", () => {
+    const summary = summarizeWorkspaceCapabilities({
+      name: "Echo",
+      status: "online",
+      tier: 2,
+      agentCard: {
+        runtime: "claude-code",
+        skills: [{ id: "write", name: "Writing" }, { id: "plan" }],
+      },
+      activeTasks: 1,
+      collapsed: false,
+      role: "agent",
+      lastErrorRate: 0,
+      lastSampleError: "",
+      url: "http://localhost:9000",
+      parentId: null,
+      currentTask: "Reviewing docs",
+      needsRestart: false,
+    });
+
+    expect(summary.runtime).toBe("claude-code");
+    expect(summary.skills).toEqual(["Writing", "plan"]);
+    expect(summary.skillCount).toBe(2);
+    expect(summary.currentTask).toBe("Reviewing docs");
+    expect(summary.hasActiveTask).toBe(true);
+  });
+
+  it("handles missing agent card and whitespace-only task", () => {
+    const summary = summarizeWorkspaceCapabilities({
+      name: "Echo",
+      status: "online",
+      tier: 1,
+      agentCard: null,
+      activeTasks: 0,
+      collapsed: false,
+      role: "agent",
+      lastErrorRate: 0,
+      lastSampleError: "",
+      url: "http://localhost:9000",
+      parentId: null,
+      currentTask: "   ",
+      needsRestart: false,
+    });
+
+    expect(summary.runtime).toBeNull();
+    expect(summary.skills).toEqual([]);
+    expect(summary.skillCount).toBe(0);
+    expect(summary.currentTask).toBe("");
+    expect(summary.hasActiveTask).toBe(false);
   });
 });
 
@@ -494,6 +547,7 @@ describe("context menu", () => {
       url: "",
       parentId: null,
       currentTask: "",
+      needsRestart: false,
     },
   };
 
@@ -521,6 +575,11 @@ describe("setPanelTab", () => {
     useCanvasStore.getState().setPanelTab("terminal");
     useCanvasStore.getState().setPanelTab("config");
     expect(useCanvasStore.getState().panelTab).toBe("config");
+  });
+
+  it("can switch to skills tab", () => {
+    useCanvasStore.getState().setPanelTab("skills");
+    expect(useCanvasStore.getState().panelTab).toBe("skills");
   });
 });
 

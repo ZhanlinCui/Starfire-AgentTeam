@@ -2,7 +2,7 @@
 
 A skill is a package that gives an agent knowledge, instructions, and optionally executable tools. Skills are the primary way to customize what a workspace agent can do.
 
-The skill format is compatible with [ClawHub](https://clawhub.ai/) — the open skill registry for AI agents. Skills can be installed from ClawHub and published to it.
+The skill package shape follows the same `SKILL.md`/frontmatter conventions used by [ClawHub](https://clawhub.ai/)-style skills, but this runtime keeps the lifecycle local: skills are installed, audited, published, and hot-reloaded inside a workspace rather than managed through a separate registry layer.
 
 ## Skill Package Structure
 
@@ -204,9 +204,55 @@ Canvas updates node to show new skill badge
 
 Live in ~3 seconds, zero restart.
 
+## Skill Audit
+
+You can audit a workspace's configured skills without starting a new backend or registry:
+
+```bash
+molecli agent skill audit <workspace-id>
+```
+
+The audit is intentionally local and file-based. It checks the workspace's `config.yaml`, then validates each listed skill package under `skills/<name>/` for:
+
+- `SKILL.md` presence
+- YAML frontmatter parsing
+- required frontmatter fields: `name`, `description`, `version`
+
+Use this as a lightweight hygiene check before publishing, bundling, or reusing a skill. It is not a marketplace or remote registry.
+
+## Skill Install and Publish
+
+The CLI also exposes a thin local workflow for moving skills between a workspace and your machine:
+
+```bash
+molecli agent skill install <workspace-id> <local-skill-dir>
+molecli agent skill publish <workspace-id> <skill-name> --to <output-dir>
+```
+
+- `install` copies a local skill folder into a workspace and updates `config.yaml`
+- `publish` exports a workspace skill from the bundle endpoint into a local directory
+
+Both commands stay intentionally small and reuse the existing workspace Files API and bundle export path. They are convenience wrappers, not a separate skill registry.
+
+## Skill Promotion Loop
+
+When the agent sees the same workflow succeed repeatedly, it should compress that workflow into memory first and then promote it into a skill without waiting for a later review pass. Hermes-style promotion stays intentionally thin: the runtime records the promotion as a signal, and the actual skill package lifecycle remains a separate skill-management concern rather than a second hidden control plane.
+
+The handoff is:
+
+1. `memory-curation` decides the workflow is durable
+2. The memory packet sets `promote_to_skill = true`
+3. The packet also carries a `repetition_signal` proving the workflow has repeated cleanly
+4. `skill-authoring` turns that packet into a narrow `SKILL.md`
+5. The existing skill loader / hot-reload path picks up the skill package when it has been created through the normal skill lifecycle
+
+This is intentionally a local runtime signal, not a remote registry or human approval queue. The goal is to keep the promotion observable and narrowly scoped, while avoiding a custom auto-generation layer that would duplicate the skill system itself.
+
+For observability, the workspace writes a `skill_promotion` activity when a promotion packet is committed, and then sends a lightweight heartbeat with `current_task = "Skill promotion: ..."` so the canvas can treat the promotion as an explicit in-flight task.
+
 ## ClawHub Compatibility
 
-### Installing from ClawHub
+### Using ClawHub-Style Skills
 
 ```bash
 npx clawhub@latest install <skill-name>
@@ -214,11 +260,11 @@ npx clawhub@latest install <skill-name>
 
 ClawHub skills are context-only (no `tools/` folder). They work in Agent Molecule as pure context skills — the `SKILL.md` instructions get appended to the agent's system prompt.
 
-### Publishing to ClawHub
+### Reusing ClawHub-Style Skills
 
-Agent Molecule skills can be published to ClawHub. The `tools/` folder and its MCP tools are included as supporting files. Note that `tools/` only execute inside the Agent Molecule runtime — ClawHub itself doesn't run them, but it stores and distributes them.
+ClawHub-style skills can be reused here as pure context skills. The `tools/` folder and its MCP tools are included as supporting files when present. Note that `tools/` only execute inside the Agent Molecule runtime — outside this runtime, the same `SKILL.md` instructions are still useful, but execution remains local.
 
-**Constraints for ClawHub publishing:**
+**Constraints for ClawHub-style bundles:**
 - Only text-based files are allowed (no binaries)
 - Maximum total bundle size: 50MB
 - Skill slug must be lowercase and URL-safe: `^[a-z0-9][a-z0-9-]*$`

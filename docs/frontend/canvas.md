@@ -126,7 +126,7 @@ Press `Cmd+K` or click the search button to open the search dialog. Fuzzy search
 
 ### Empty State
 
-When no workspaces exist, shows a visual getting-started guide with keyboard shortcut reference (template palette, ⌘K search, right-click, drag-to-nest).
+When no workspaces exist, shows a three-step getting-started guide that points users to the template palette, ⌘K search, right-click actions, and drag-to-nest.
 
 ### Toast Notifications
 

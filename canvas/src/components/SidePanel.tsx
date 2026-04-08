@@ -6,6 +6,7 @@ import { showToast } from "@/components/Toaster";
 import { StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
 import { DetailsTab } from "./tabs/DetailsTab";
+import { SkillsTab } from "./tabs/SkillsTab";
 import { ChatTab } from "./tabs/ChatTab";
 import { ConfigTab } from "./tabs/ConfigTab";
 import { TerminalTab } from "./tabs/TerminalTab";
@@ -14,9 +15,11 @@ import { MemoryTab } from "./tabs/MemoryTab";
 import { TracesTab } from "./tabs/TracesTab";
 import { EventsTab } from "./tabs/EventsTab";
 import { ActivityTab } from "./tabs/ActivityTab";
+import { summarizeWorkspaceCapabilities } from "@/store/canvas";
 
 const TABS: { id: PanelTab; label: string; icon: string }[] = [
   { id: "details", label: "Details", icon: "◉" },
+  { id: "skills", label: "Skills", icon: "✦" },
   { id: "activity", label: "Activity", icon: "⊙" },
   { id: "chat", label: "Chat", icon: "◈" },
   { id: "terminal", label: "Terminal", icon: "▸" },
@@ -74,6 +77,7 @@ export function SidePanel() {
   if (!selectedNodeId || !node) return null;
 
   const isOnline = node.data.status === "online";
+  const capability = summarizeWorkspaceCapabilities(node.data);
 
   return (
     <div
@@ -117,6 +121,22 @@ export function SidePanel() {
             <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
+      </div>
+
+      {/* Capability summary */}
+      <div className="px-5 py-3 border-b border-zinc-800/40 bg-zinc-900/20">
+        <div className="flex flex-wrap gap-2">
+          <MetaPill label="Tier" value={`T${node.data.tier}`} />
+          <MetaPill label="Runtime" value={capability.runtime || "unknown"} />
+          <MetaPill label="Skills" value={capability.skillCount > 0 ? `${capability.skillCount}` : "none"} />
+          <MetaPill label="Status" value={node.data.status} tone={isOnline ? "emerald" : "zinc"} />
+          {capability.hasActiveTask && <MetaPill label="Resume" value="active run" tone="amber" />}
+        </div>
+        {capability.hasActiveTask && (
+          <p className="mt-2 text-[10px] text-amber-300/80 truncate">
+            Resuming: {capability.currentTask}
+          </p>
+        )}
       </div>
 
       {/* Tabs */}
@@ -167,6 +187,7 @@ export function SidePanel() {
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto">
         {panelTab === "details" && <DetailsTab workspaceId={selectedNodeId} data={node.data} />}
+        {panelTab === "skills" && <SkillsTab data={node.data} />}
         {panelTab === "activity" && <ActivityTab workspaceId={selectedNodeId} />}
         {panelTab === "chat" && <ChatTab workspaceId={selectedNodeId} data={node.data} />}
         {panelTab === "terminal" && <TerminalTab workspaceId={selectedNodeId} />}
@@ -184,5 +205,20 @@ export function SidePanel() {
         </span>
       </div>
     </div>
+  );
+}
+
+function MetaPill({ label, value, tone = "zinc" }: { label: string; value: string; tone?: "zinc" | "emerald" | "amber" }) {
+  const toneClasses = {
+    zinc: "border-zinc-700/50 bg-zinc-900/70 text-zinc-400",
+    emerald: "border-emerald-500/20 bg-emerald-950/20 text-emerald-300",
+    amber: "border-amber-500/20 bg-amber-950/20 text-amber-300",
+  }[tone];
+
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] ${toneClasses}`}>
+      <span className="uppercase tracking-[0.18em] text-[8px] opacity-70">{label}</span>
+      <span className="font-medium">{value}</span>
+    </span>
   );
 }

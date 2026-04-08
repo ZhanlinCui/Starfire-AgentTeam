@@ -43,6 +43,21 @@ type WorkspaceHandler struct {
 	configsDir  string // path to workspace-configs-templates/ (for reading templates)
 }
 
+type proxyA2AError struct {
+	Status   int
+	Response gin.H
+}
+
+func (e *proxyA2AError) Error() string {
+	if e == nil || e.Response == nil {
+		return "proxy a2a error"
+	}
+	if msg, ok := e.Response["error"].(string); ok && msg != "" {
+		return msg
+	}
+	return "proxy a2a error"
+}
+
 func NewWorkspaceHandler(b *events.Broadcaster, p *provisioner.Provisioner, platformURL, configsDir string) *WorkspaceHandler {
 	return &WorkspaceHandler{
 		broadcaster: b,
@@ -737,6 +752,23 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
+	// Read the incoming request body (capped at 1MB)
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxProxyRequestBody))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	status, respBody, proxyErr := h.proxyA2ARequest(ctx, workspaceID, body, c.GetHeader("X-Workspace-ID"), true)
+	if proxyErr != nil {
+		c.JSON(proxyErr.Status, proxyErr.Response)
+		return
+	}
+
+	c.Data(status, "application/json", respBody)
+}
+
+func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID string, body []byte, callerID string, logActivity bool) (int, []byte, *proxyA2AError) {
 	// Resolve workspace URL (cache first, then DB)
 	agentURL, err := db.GetCachedURL(ctx, workspaceID)
 	if err != nil {
@@ -746,34 +778,35 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 			`SELECT url, status FROM workspaces WHERE id = $1`, workspaceID,
 		).Scan(&urlNullable, &status)
 		if err == sql.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-			return
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusNotFound,
+				Response: gin.H{"error": "workspace not found"},
+			}
 		}
 		if err != nil {
 			log.Printf("ProxyA2A lookup error: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
-			return
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusInternalServerError,
+				Response: gin.H{"error": "lookup failed"},
+			}
 		}
 		if !urlNullable.Valid || urlNullable.String == "" {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace has no URL", "status": status})
-			return
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusServiceUnavailable,
+				Response: gin.H{"error": "workspace has no URL", "status": status},
+			}
 		}
 		agentURL = urlNullable.String
-		db.CacheURL(ctx, workspaceID, agentURL)
-	}
-
-	// Read the incoming request body (capped at 1MB)
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxProxyRequestBody))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
-		return
+		_ = db.CacheURL(ctx, workspaceID, agentURL)
 	}
 
 	// Normalize the request into a valid A2A JSON-RPC 2.0 message
 	var payload map[string]interface{}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
-		return
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusBadRequest,
+			Response: gin.H{"error": "invalid JSON"},
+		}
 	}
 
 	// Wrap in JSON-RPC envelope if missing
@@ -797,8 +830,10 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 
 	marshaledBody, marshalErr := json.Marshal(payload)
 	if marshalErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to marshal request"})
-		return
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusInternalServerError,
+			Response: gin.H{"error": "failed to marshal request"},
+		}
 	}
 	body = marshaledBody
 
@@ -808,9 +843,6 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 		a2aMethod = m
 	}
 
-	// Extract caller workspace ID from X-Workspace-ID header (if agent-to-agent)
-	callerID := c.GetHeader("X-Workspace-ID")
-
 	// Forward to the agent — no timeout. Agent liveness is monitored via heartbeat;
 	// if the agent dies, the TCP connection drops and the proxy returns an error.
 	// Delegation chains (PM → Lead → Agent) can take arbitrarily long.
@@ -818,8 +850,10 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	startTime := time.Now()
 	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), "POST", agentURL, bytes.NewReader(body))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create proxy request"})
-		return
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusInternalServerError,
+			Response: gin.H{"error": "failed to create proxy request"},
+		}
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -827,14 +861,57 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	durationMs := int(time.Since(startTime).Milliseconds())
 	if err != nil {
 		log.Printf("ProxyA2A forward error: %v", err)
-		// Log failed A2A attempt (detached context — request may be done)
-		errMsg := err.Error()
-		var errWsName string
-		db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&errWsName)
-		if errWsName == "" {
-			errWsName = workspaceID
+		if logActivity {
+			// Log failed A2A attempt (detached context — request may be done)
+			errMsg := err.Error()
+			var errWsName string
+			db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&errWsName)
+			if errWsName == "" {
+				errWsName = workspaceID
+			}
+			summary := "A2A request to " + errWsName + " failed: " + errMsg
+			go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
+				WorkspaceID:  workspaceID,
+				ActivityType: "a2a_receive",
+				SourceID:     nilIfEmpty(callerID),
+				TargetID:     &workspaceID,
+				Method:       &a2aMethod,
+				Summary:      &summary,
+				RequestBody:  json.RawMessage(body),
+				DurationMs:   &durationMs,
+				Status:       "error",
+				ErrorDetail:  &errMsg,
+			})
 		}
-		summary := "A2A request to " + errWsName + " failed: " + errMsg
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusBadGateway,
+			Response: gin.H{"error": "failed to reach workspace agent"},
+		}
+	}
+	defer resp.Body.Close()
+
+	// Read agent response (capped at 10MB)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyResponseBody))
+	if err != nil {
+		return 0, nil, &proxyA2AError{
+			Status:   http.StatusBadGateway,
+			Response: gin.H{"error": "failed to read agent response"},
+		}
+	}
+
+	if logActivity {
+		// Log successful A2A communication
+		logStatus := "ok"
+		if resp.StatusCode >= 400 {
+			logStatus = "error"
+		}
+		// Resolve workspace name for readable summary
+		var wsNameForLog string
+		db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsNameForLog)
+		if wsNameForLog == "" {
+			wsNameForLog = workspaceID
+		}
+		summary := a2aMethod + " → " + wsNameForLog
 		go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
 			WorkspaceID:  workspaceID,
 			ActivityType: "a2a_receive",
@@ -843,48 +920,12 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 			Method:       &a2aMethod,
 			Summary:      &summary,
 			RequestBody:  json.RawMessage(body),
+			ResponseBody: json.RawMessage(respBody),
 			DurationMs:   &durationMs,
-			Status:       "error",
-			ErrorDetail:  &errMsg,
+			Status:       logStatus,
 		})
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to reach workspace agent"})
-		return
 	}
-	defer resp.Body.Close()
-
-	// Read agent response (capped at 10MB)
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyResponseBody))
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read agent response"})
-		return
-	}
-
-	// Log successful A2A communication
-	logStatus := "ok"
-	if resp.StatusCode >= 400 {
-		logStatus = "error"
-	}
-	// Resolve workspace name for readable summary
-	var wsNameForLog string
-	db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsNameForLog)
-	if wsNameForLog == "" {
-		wsNameForLog = workspaceID
-	}
-	summary := a2aMethod + " → " + wsNameForLog
-	go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
-		WorkspaceID:  workspaceID,
-		ActivityType: "a2a_receive",
-		SourceID:     nilIfEmpty(callerID),
-		TargetID:     &workspaceID,
-		Method:       &a2aMethod,
-		Summary:      &summary,
-		RequestBody:  json.RawMessage(body),
-		ResponseBody: json.RawMessage(respBody),
-		DurationMs:   &durationMs,
-		Status:       logStatus,
-	})
-
-	c.Data(resp.StatusCode, "application/json", respBody)
+	return resp.StatusCode, respBody, nil
 }
 
 func nilIfEmpty(s string) *string {

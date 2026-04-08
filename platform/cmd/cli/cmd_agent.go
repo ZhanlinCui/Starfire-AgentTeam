@@ -28,6 +28,8 @@ For registry/discovery use the 'registry' subcommand.`,
 	agent.AddCommand(buildChatCmd())
 	agent.AddCommand(buildAgentConfigCmd())
 	agent.AddCommand(buildAgentMemoryCmd())
+	agent.AddCommand(buildAgentSessionCmd())
+	agent.AddCommand(buildAgentSkillCmd())
 
 	return agent
 }

@@ -187,6 +187,9 @@ export function ChatTab({ workspaceId, data }: Props) {
           } else if (type === "agent_log") {
             const summary = (p.summary as string) || "";
             if (summary) line = summary.slice(0, 80);
+          } else if (type === "skill_promotion") {
+            const summary = (p.summary as string) || "";
+            if (summary) line = `★ ${summary.slice(0, 80)}`;
           }
 
           if (line) {
@@ -421,6 +424,20 @@ export function ChatTab({ workspaceId, data }: Props) {
             </span>
           )}
         </div>
+
+        {data.currentTask && (
+          <div className="mx-4 mt-3 rounded-xl border border-amber-800/30 bg-amber-950/20 px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">
+              Resuming current run
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-zinc-300">
+              This chat is continuing the active task below. New messages will extend the same session history.
+            </p>
+            <p className="mt-2 text-[11px] text-amber-200/90 truncate">
+              {data.currentTask}
+            </p>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">

@@ -11,6 +11,14 @@ import logging
 import asyncio
 
 from adapters.base import BaseAdapter, AdapterConfig
+from adapters.shared_runtime import (
+    append_peer_guidance,
+    build_task_text,
+    brief_task,
+    extract_history,
+    extract_message_text,
+    set_current_task,
+)
 from a2a.server.agent_execution import AgentExecutor
 
 logger = logging.getLogger(__name__)
@@ -77,23 +85,14 @@ class CrewAIA2AExecutor(AgentExecutor):
 
     async def execute(self, context, event_queue):
         from a2a.utils import new_agent_text_message
-        from a2a_executor import _extract_history, set_current_task
 
-        text_parts = []
-        if context.message and context.message.parts:
-            for part in context.message.parts:
-                if hasattr(part, "text") and part.text:
-                    text_parts.append(part.text)
-                elif hasattr(part, "root") and hasattr(part.root, "text"):
-                    text_parts.append(part.root.text)
-        user_message = " ".join(text_parts).strip()
+        user_message = extract_message_text(context)
 
         if not user_message:
             await event_queue.enqueue_event(new_agent_text_message("No message provided"))
             return
 
-        brief = user_message[:60] + ("..." if len(user_message) > 60 else "")
-        await set_current_task(self._heartbeat, brief)
+        await set_current_task(self._heartbeat, brief_task(user_message))
 
         try:
             from crewai import Agent, Task, Crew
@@ -116,16 +115,15 @@ class CrewAIA2AExecutor(AgentExecutor):
             if model_str.startswith("openai:"):
                 model_str = model_str.replace("openai:", "openai/")
 
-            backstory = self.system_prompt or "You are a helpful AI agent."
-            if self.peers_info:
-                backstory += f"\n\n## Peers\n{self.peers_info}\nUse delegate_to_peer to communicate with them."
+            backstory = append_peer_guidance(
+                self.system_prompt,
+                self.peers_info,
+                default_text="You are a helpful AI agent.",
+                tool_name="delegate_to_peer",
+            )
 
             # Include conversation history in the task description
-            history = _extract_history(context)
-            task_desc = user_message
-            if history:
-                conv = "\n".join(f"{'User' if r == 'human' else 'Agent'}: {t}" for r, t in history)
-                task_desc = f"Conversation so far:\n{conv}\n\nCurrent request: {user_message}"
+            task_desc = build_task_text(user_message, extract_history(context))
 
             agent = Agent(
                 role=backstory.split("\n")[0][:100],

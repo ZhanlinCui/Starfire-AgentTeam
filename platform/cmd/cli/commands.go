@@ -39,6 +39,7 @@ Environment:
 	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output as JSON")
 
 	root.AddCommand(buildAgentCmd())
+	root.AddCommand(buildDoctorCmd())
 	root.AddCommand(buildWSCmd())
 	root.AddCommand(buildEventsCmd())
 	root.AddCommand(buildRegistryCmd())

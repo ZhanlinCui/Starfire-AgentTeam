@@ -12,18 +12,18 @@ import (
 
 // WorkspaceInfo represents a workspace from the platform API.
 type WorkspaceInfo struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	Role           *string         `json:"role"`
-	Tier           int             `json:"tier"`
-	Status         string          `json:"status"`
-	URL            string          `json:"url"`
-	ParentID       *string         `json:"parent_id"`
-	AgentCard      json.RawMessage `json:"agent_card"`
-	ActiveTasks    int             `json:"active_tasks"`
-	LastErrorRate  float64         `json:"last_error_rate"`
-	LastSampleError string         `json:"last_sample_error"`
-	UptimeSeconds  int             `json:"uptime_seconds"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Role            *string         `json:"role"`
+	Tier            int             `json:"tier"`
+	Status          string          `json:"status"`
+	URL             string          `json:"url"`
+	ParentID        *string         `json:"parent_id"`
+	AgentCard       json.RawMessage `json:"agent_card"`
+	ActiveTasks     int             `json:"active_tasks"`
+	LastErrorRate   float64         `json:"last_error_rate"`
+	LastSampleError string          `json:"last_sample_error"`
+	UptimeSeconds   int             `json:"uptime_seconds"`
 }
 
 // AgentCardInfo represents parsed fields from the agent_card JSON.
@@ -47,6 +47,49 @@ type EventInfo struct {
 	WorkspaceID *string         `json:"workspace_id"`
 	Payload     json.RawMessage `json:"payload"`
 	CreatedAt   time.Time       `json:"created_at"`
+}
+
+// WorkspaceFile represents a file read through the Files API.
+type WorkspaceFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Size    int    `json:"size"`
+}
+
+// SessionSearchItem represents a session search result from the platform API.
+type SessionSearchItem struct {
+	Kind         string          `json:"kind"`
+	ID           string          `json:"id"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Label        string          `json:"label"`
+	Content      string          `json:"content"`
+	Method       string          `json:"method"`
+	Status       string          `json:"status"`
+	RequestBody  json.RawMessage `json:"request_body,omitempty"`
+	ResponseBody json.RawMessage `json:"response_body,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
+// WorkspaceBundle represents the exported bundle payload from the platform API.
+type WorkspaceBundle struct {
+	Schema        string              `json:"schema"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	Description   string              `json:"description"`
+	Tier          int                 `json:"tier"`
+	Model         string              `json:"model"`
+	SystemPrompt  string              `json:"system_prompt"`
+	Skills        []WorkspaceBundleSkill `json:"skills"`
+	Prompts       map[string]string   `json:"prompts"`
+	SubWorkspaces []WorkspaceBundle   `json:"sub_workspaces"`
+}
+
+// WorkspaceBundleSkill is a serialized skill entry from a bundle export.
+type WorkspaceBundleSkill struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Files       map[string]string `json:"files"`
 }
 
 // WSEvent represents a WebSocket event message.
@@ -125,6 +168,118 @@ func (c *PlatformClient) FetchEvents() ([]EventInfo, error) {
 		return nil, fmt.Errorf("decode events: %w", err)
 	}
 	return events, nil
+}
+
+// GetWorkspaceFile fetches a workspace file via GET /workspaces/:id/files/*path.
+func (c *PlatformClient) GetWorkspaceFile(id, filePath string) (*WorkspaceFile, error) {
+	endpoint, err := url.JoinPath(c.baseURL, "workspaces", id, "files", filePath)
+	if err != nil {
+		return nil, fmt.Errorf("build file URL: %w", err)
+	}
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("get file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get file: status %d: %s", resp.StatusCode, body)
+	}
+	var file WorkspaceFile
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		return nil, fmt.Errorf("decode file: %w", err)
+	}
+	return &file, nil
+}
+
+// PutWorkspaceFile writes a workspace file via PUT /workspaces/:id/files/*path.
+func (c *PlatformClient) PutWorkspaceFile(id, filePath, content string) error {
+	endpoint, err := url.JoinPath(c.baseURL, "workspaces", id, "files", filePath)
+	if err != nil {
+		return fmt.Errorf("build file URL: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{"content": content})
+	if err != nil {
+		return fmt.Errorf("marshal file request: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build file request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("put file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("put file: status %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+// SearchSession searches a workspace's activity logs and memories.
+func (c *PlatformClient) SearchSession(id, query string, limit int) ([]SessionSearchItem, error) {
+	endpoint, err := url.JoinPath(c.baseURL, "workspaces", id, "session-search")
+	if err != nil {
+		return nil, fmt.Errorf("build session search URL: %w", err)
+	}
+	params := url.Values{}
+	if query != "" {
+		params.Set("q", query)
+	}
+	if limit > 0 {
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if encoded := params.Encode(); encoded != "" {
+		endpoint += "?" + encoded
+	}
+
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("search session: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("search session: status %d (body read error: %v)", resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("search session: status %d: %s", resp.StatusCode, body)
+	}
+
+	var items []SessionSearchItem
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		return nil, fmt.Errorf("decode session search: %w", err)
+	}
+	return items, nil
+}
+
+// ExportBundle fetches a workspace bundle via GET /bundles/export/:id.
+func (c *PlatformClient) ExportBundle(id string) (*WorkspaceBundle, error) {
+	endpoint, err := url.JoinPath(c.baseURL, "bundles", "export", id)
+	if err != nil {
+		return nil, fmt.Errorf("build bundle export URL: %w", err)
+	}
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("export bundle: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("export bundle: status %d (body read error: %v)", resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("export bundle: status %d: %s", resp.StatusCode, body)
+	}
+
+	var bundle WorkspaceBundle
+	if err := json.NewDecoder(resp.Body).Decode(&bundle); err != nil {
+		return nil, fmt.Errorf("decode bundle: %w", err)
+	}
+	return &bundle, nil
 }
 
 // DeleteWorkspace deletes a workspace via DELETE /workspaces/:id.

@@ -505,6 +505,33 @@ Agent Molecule sits at an intersection no current framework owns:
 
 The DX pitch should be: _"See your entire agent organization running in real-time. Debug across agents like you debug across microservices."_
 
+## Agent Molecule vs. CrewAI / LangGraph / AutoGen
+
+After comparing the current repository against the three major frameworks, the clearest framing is:
+
+**Agent Molecule is not a competing agent framework.** It is a **multi-workspace orchestration platform** with:
+- a Go control plane for registry, liveness, activity logs, approvals, memories, and WebSocket fanout
+- a Python workspace runtime with pluggable adapters
+- a Canvas UI for hierarchy, state, traces, terminal access, and operator intervention
+
+That means the comparison is asymmetric:
+- **CrewAI** is the closest match for the *team/role metaphor* and delegated work distribution
+- **LangGraph** is the closest match for the *runtime substrate* because of stateful execution, checkpoints, and human-in-the-loop behavior
+- **AutoGen** is the closest match for the *conversational multi-agent* model
+
+The important difference is that Agent Molecule elevates those ideas into a **productized control surface**. In other words, the frameworks answer "how should agents run?", while Agent Molecule answers "how do humans operate, inspect, and govern an organization of agents?"
+
+### Practical takeaway
+- If you are evaluating **execution semantics**, LangGraph is the best baseline
+- If you are evaluating **role-based delegation**, CrewAI is the best baseline
+- If you are evaluating **multi-agent dialogue**, AutoGen is the best baseline
+- If you are evaluating **operability across many workspaces**, Agent Molecule is the distinct category
+
+### Internal positioning sentence
+Use this sentence when describing the project externally:
+
+> Agent Molecule is an agent workspace operating system: LangGraph, CrewAI, and AutoGen are optional execution backends, while the platform provides control plane, observability, and human-in-the-loop governance.
+
 ---
 
 ## Appendix: Documentation Platform Quick Reference

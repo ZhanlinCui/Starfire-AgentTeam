@@ -86,6 +86,14 @@ Pending approvals auto-expire after 10 minutes. Events: `APPROVAL_REQUESTED`, `A
 
 Scopes: `LOCAL` (workspace only), `TEAM` (parent + siblings), `GLOBAL` (all read, root write only). Access enforced via `CanCommunicate()`.
 
+### Session Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/workspaces/:id/session-search` | Search the workspace's recent activity logs and local memories (params: `q`, `limit`) |
+
+This is the Hermes-style recall surface for the workspace: it reuses existing activity logs and memory rows instead of adding a new store. It is meant for looking back at recent decisions, tasks, and notes without reconstructing context from scratch.
+
 ### Agents
 
 | Method | Path | Description |
@@ -106,6 +114,15 @@ Scopes: `LOCAL` (workspace only), `TEAM` (parent + siblings), `GLOBAL` (all read
 
 See [Registry & Heartbeat](./registry-and-heartbeat.md) for the full flow.
 
+### Webhooks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/webhooks/github` | GitHub webhook ingress for workspace-triggering events |
+| `POST` | `/webhooks/github/:id` | Same ingress, scoped to a specific workspace ID in the URL |
+
+GitHub webhook requests must include `X-Hub-Signature-256` and are verified with `GITHUB_WEBHOOK_SECRET`. The v1 handler accepts `issue_comment` and `pull_request_review_comment` events when `action == "created"`, translates them into an A2A `message/send` task, and forwards them through the existing workspace proxy path.
+
 ### Hierarchy & Peers
 
 | Method | Path | Description |
@@ -122,7 +139,7 @@ Communication topology is derived from the `parent_id` hierarchy — there is no
 | `GET` | `/workspaces/:id/activity` | List activity logs (params: `type`, `limit`) |
 | `POST` | `/workspaces/:id/activity` | Agent self-reports activity (body: `{ activity_type, method?, summary?, target_id?, status?, error_detail?, duration_ms?, metadata? }`) |
 
-Activity types: `a2a_send`, `a2a_receive`, `task_update`, `agent_log`, `error`. Invalid types return 400. Limit defaults to 100, max 500. A2A proxy calls are logged automatically.
+Activity types: `a2a_send`, `a2a_receive`, `task_update`, `agent_log`, `skill_promotion`, `error`. Invalid types return 400. Limit defaults to 100, max 500. A2A proxy calls are logged automatically.
 
 ### Traces (Langfuse)
 
