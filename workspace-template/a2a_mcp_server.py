@@ -167,6 +167,43 @@ TOOLS = [
         "description": "Get this workspace's own info — ID, name, role, tier, parent, status.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "commit_memory",
+        "description": "Save important information to persistent memory. Use this to remember decisions, conversation context, task results, and anything that should survive a restart. Scope: LOCAL (this workspace only), TEAM (parent + siblings), GLOBAL (entire org).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The information to remember — be detailed and specific",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["LOCAL", "TEAM", "GLOBAL"],
+                    "description": "Memory scope (default: LOCAL)",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "recall_memory",
+        "description": "Search persistent memory for previously saved information. Returns all matching memories. Use this at the start of conversations to recall prior context.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query (empty returns all memories)",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["LOCAL", "TEAM", "GLOBAL", ""],
+                    "description": "Filter by scope (empty returns all accessible)",
+                },
+            },
+        },
+    },
 ]
 
 
@@ -343,6 +380,52 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
             _peer_names[p["id"]] = p["name"]
             lines.append(f"- {p['name']} (ID: {p['id']}, status: {status}, role: {role})")
         return "\n".join(lines)
+
+    elif name == "commit_memory":
+        content = arguments.get("content", "")
+        scope = arguments.get("scope", "LOCAL").upper()
+        if not content:
+            return "Error: content is required"
+        if scope not in ("LOCAL", "TEAM", "GLOBAL"):
+            scope = "LOCAL"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
+                    json={"content": content, "scope": scope},
+                )
+                data = resp.json()
+                if resp.status_code in (200, 201):
+                    return json.dumps({"success": True, "id": data.get("id"), "scope": scope})
+                return f"Error: {data.get('error', resp.text)}"
+        except Exception as e:
+            return f"Error saving memory: {e}"
+
+    elif name == "recall_memory":
+        query = arguments.get("query", "")
+        scope = arguments.get("scope", "")
+        params = {}
+        if query:
+            params["q"] = query
+        if scope:
+            params["scope"] = scope.upper()
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
+                    params=params,
+                )
+                data = resp.json()
+                if isinstance(data, list):
+                    if not data:
+                        return "No memories found."
+                    lines = []
+                    for m in data:
+                        lines.append(f"[{m.get('scope', '?')}] {m.get('content', '')}")
+                    return "\n".join(lines)
+                return json.dumps(data)
+        except Exception as e:
+            return f"Error recalling memory: {e}"
 
     elif name == "get_workspace_info":
         info = await get_workspace_info()
