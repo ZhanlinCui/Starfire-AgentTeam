@@ -13,3 +13,6 @@ websockets>=12.0
 
 # Config parsing
 pyyaml>=6.0
+
+# Shared tools framework (used by coordinator, delegation, memory, sandbox)
+langchain-core>=0.3.0
