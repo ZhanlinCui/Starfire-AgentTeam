@@ -273,7 +273,7 @@ Canvas shows the current task as an amber banner on the workspace node and side 
 
 ### ACTIVITY_LOGGED
 
-New activity log entry created (A2A communication, agent log, error). WebSocket-only — not persisted to `structure_events` (stored in `activity_logs` table instead).
+New activity log entry created (A2A communication, webhook-triggered task ingress, agent log, error). WebSocket-only — not persisted to `structure_events` (stored in `activity_logs` table instead).
 
 ```json
 {

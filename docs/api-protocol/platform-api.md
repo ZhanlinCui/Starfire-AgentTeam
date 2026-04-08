@@ -106,6 +106,15 @@ Scopes: `LOCAL` (workspace only), `TEAM` (parent + siblings), `GLOBAL` (all read
 
 See [Registry & Heartbeat](./registry-and-heartbeat.md) for the full flow.
 
+### Webhooks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/webhooks/github` | GitHub webhook ingress for workspace-triggering events |
+| `POST` | `/webhooks/github/:id` | Same ingress, scoped to a specific workspace ID in the URL |
+
+GitHub webhook requests must include `X-Hub-Signature-256` and are verified with `GITHUB_WEBHOOK_SECRET`. The v1 handler accepts `issue_comment` and `pull_request_review_comment` events when `action == "created"`, translates them into an A2A `message/send` task, and forwards them through the existing workspace proxy path.
+
 ### Hierarchy & Peers
 
 | Method | Path | Description |
