@@ -114,21 +114,31 @@ Starfire 提供按层分组、可直接落地的生产级文档：
 
 本地完整部署可通过 Docker Compose 一次拉起整套多 Agent 平台。
 
+推荐的本地主路径：
+1. 先执行 `./infra/scripts/setup.sh` 启动共享基础设施
+2. 在仓库根目录运行 `molecli doctor` 检查本地环境
+3. 启动 Platform 控制平面
+4. 启动 Canvas 前端
+5. 打开 Canvas 并部署第一个模板
+
 ```bash
 # 1. 初始化基础设施（Postgres、Redis、Langfuse）
 ./infra/scripts/setup.sh
 
-# 2. 启动 Platform 控制平面（Go）
+# 2. 检查本地环境
+molecli doctor
+
+# 3. 启动 Platform 控制平面（Go）
 cd platform
 go run ./cmd/server
 
-# 3. 启动 Canvas 前端（Next.js 15）
+# 4. 启动 Canvas 前端（Next.js 15）
 cd ../canvas
 npm install
 npm run dev
 ```
 
-访问 `http://localhost:3000` 打开 Starfire Canvas，拖入你的第一个 Agent。
+访问 `http://localhost:3000` 打开 Starfire Canvas，进入模板面板并部署你的第一个 Agent workspace。
 
 ---
 

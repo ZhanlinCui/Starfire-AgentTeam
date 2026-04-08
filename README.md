@@ -110,21 +110,31 @@ Starfire has extensive, production-ready documentation organized by layer:
 
 A full local deployment starts the entire multi-agent platform using Docker Compose.
 
+Recommended local path:
+1. Start the shared infrastructure with `./infra/scripts/setup.sh`
+2. Run `molecli doctor` from the repo root to verify local prerequisites
+3. Start the platform control plane
+4. Start the Canvas frontend
+5. Open the Canvas and deploy your first template
+
 ```bash
 # 1. Setup the Infrastructure (Postgres, Redis, Langfuse)
 ./infra/scripts/setup.sh
 
-# 2. Run the Platform Control Plane (Go)
+# 2. Verify your local environment
+molecli doctor
+
+# 3. Run the Platform Control Plane (Go)
 cd platform
 go run ./cmd/server
 
-# 3. Run the Canvas Frontend (Next.js 15)
+# 4. Run the Canvas Frontend (Next.js 15)
 cd ../canvas
 npm install
 npm run dev
 ```
 
-Navigate to `http://localhost:3000` to open the Starfire Canvas and drag in your first Agent.
+Navigate to `http://localhost:3000`, open the template palette, and deploy your first Agent workspace.
 
 ---
 
