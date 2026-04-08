@@ -103,12 +103,13 @@ func WritePump(client *Client) {
 func (h *Hub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	count := len(h.clients)
 	for client := range h.clients {
 		close(client.Send)
 		client.Conn.Close()
 		delete(h.clients, client)
 	}
-	log.Printf("WebSocket hub closed (%d clients disconnected)", len(h.clients))
+	log.Printf("WebSocket hub closed (%d clients disconnected)", count)
 }
 
 // ReadPump reads from WebSocket (keeps connection alive, discards messages).

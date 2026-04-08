@@ -58,6 +58,9 @@ class HeartbeatLoop:
                             "uptime_seconds": int(time.time() - self.start_time),
                         },
                     )
+                    # Reset counters after each heartbeat so error rate reflects the current window
+                    self.error_count = 0
+                    self.request_count = 0
                 except Exception as e:
                     print(f"Heartbeat failed: {e}")
 

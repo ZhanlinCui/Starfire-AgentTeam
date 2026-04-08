@@ -295,11 +295,13 @@ func (p *Provisioner) WriteFilesToContainer(ctx context.Context, containerID str
 		// Create parent directories in tar (deduplicated)
 		dir := filepath.Dir(name)
 		if dir != "." && !createdDirs[dir] {
-			tw.WriteHeader(&tar.Header{
+			if err := tw.WriteHeader(&tar.Header{
 				Typeflag: tar.TypeDir,
 				Name:     dir + "/",
 				Mode:     0755,
-			})
+			}); err != nil {
+				return fmt.Errorf("failed to write tar dir header for %s: %w", dir, err)
+			}
 			createdDirs[dir] = true
 		}
 

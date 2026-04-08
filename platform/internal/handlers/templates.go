@@ -728,8 +728,14 @@ func (h *TemplatesHandler) writeViaEphemeral(ctx context.Context, volumeName str
 		return fmt.Errorf("failed to start ephemeral container: %w", err)
 	}
 
-	// Copy files via tar
-	return h.copyFilesToContainer(ctx, resp.ID, "/configs", files)
+	// Copy files via tar, then stop container cleanly
+	if err := h.copyFilesToContainer(ctx, resp.ID, "/configs", files); err != nil {
+		return err
+	}
+	// Wait for container to be ready for removal (copy is synchronous, but be safe)
+	timeout := 5
+	h.docker.ContainerStop(ctx, resp.ID, container.StopOptions{Timeout: &timeout})
+	return nil
 }
 
 // deleteViaEphemeral deletes a file from a named volume using an ephemeral container.

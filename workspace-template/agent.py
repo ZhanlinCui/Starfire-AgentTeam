@@ -65,6 +65,8 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
 
     # Auto-inject Langfuse tracing if env vars are present
     callbacks = _setup_langfuse()
+    if callbacks:
+        llm.callbacks = callbacks
 
     agent = create_react_agent(
         model=llm,

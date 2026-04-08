@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -21,9 +22,20 @@ const terminalSessionTimeout = 30 * time.Minute
 var termUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
-		return origin == "" ||
+		if origin == "" ||
 			strings.HasPrefix(origin, "http://localhost:") ||
-			strings.HasPrefix(origin, "https://localhost:")
+			strings.HasPrefix(origin, "https://localhost:") {
+			return true
+		}
+		// Also allow origins from CORS_ORIGINS env var
+		if corsOrigins := os.Getenv("CORS_ORIGINS"); corsOrigins != "" {
+			for _, allowed := range strings.Split(corsOrigins, ",") {
+				if strings.TrimSpace(allowed) == origin {
+					return true
+				}
+			}
+		}
+		return false
 	},
 }
 

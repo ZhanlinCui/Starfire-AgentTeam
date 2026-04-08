@@ -18,6 +18,7 @@ The runtime is selected via config.yaml:
 """
 
 import asyncio
+import atexit
 import json
 import logging
 import os
@@ -59,6 +60,7 @@ def _brief_summary(text: str, max_len: int = 80) -> str:
 RUNTIME_PRESETS: dict[str, dict] = {
     "claude-code": {
         "command": "claude",
+        # Required for unattended agent operation — workspace tier controls access at the platform level
         "base_args": ["--print", "--dangerously-skip-permissions", "--allowed-tools", "Bash"],
         "prompt_flag": "-p",
         "model_flag": "--model",
@@ -149,6 +151,9 @@ class CLIAgentExecutor(AgentExecutor):
             os.close(fd)
             with open(self._mcp_config_path, "w") as f:
                 f.write(mcp_config)
+
+        # Register cleanup for reliable temp file removal (atexit is more reliable than __del__)
+        atexit.register(self._cleanup_temp_files)
 
         # Verify command exists
         cmd = self.config.command or self.preset["command"]
@@ -441,8 +446,21 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                 )
                 return
 
+    def _cleanup_temp_files(self):
+        """Clean up temp files. Called via atexit for reliable cleanup."""
+        for f in self._temp_files:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+        if self._auth_helper_path:
+            try:
+                os.unlink(self._auth_helper_path)
+            except OSError:
+                pass
+
     def __del__(self):
-        """Clean up temp files."""
+        """Clean up temp files (fallback — prefer atexit-registered _cleanup_temp_files)."""
         for f in self._temp_files:
             try:
                 os.unlink(f)

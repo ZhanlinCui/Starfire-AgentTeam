@@ -131,8 +131,8 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/memory", memh.Set)
 	r.DELETE("/workspaces/:id/memory/:key", memh.Delete)
 
-	// Secrets
-	sech := handlers.NewSecretsHandler()
+	// Secrets (auto-restart workspace after secret change)
+	sech := handlers.NewSecretsHandler(wh.RestartByID)
 	r.GET("/workspaces/:id/secrets", sech.List)
 	r.POST("/workspaces/:id/secrets", sech.Set)
 	r.DELETE("/workspaces/:id/secrets/:key", sech.Delete)

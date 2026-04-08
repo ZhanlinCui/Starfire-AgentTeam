@@ -99,12 +99,9 @@ for ID in $BOB $CAROL $DAVE $EVE $FRANK; do
 done
 echo "Set OPENAI_API_KEY on 5 agents"
 
-# Restart non-Claude agents to pick up secrets
-echo "Restarting agents to pick up API keys..."
-for ID in $BOB $CAROL $DAVE $EVE $FRANK; do
-  curl -s -X POST "$PLATFORM/workspaces/$ID/restart" > /dev/null
-done
-sleep 5
+# Auto-restart happens automatically when secrets are set
+echo "Secrets trigger auto-restart — waiting for agents to come back..."
+sleep 15
 
 # --- Wait for all online ---
 echo ""

@@ -23,6 +23,11 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 	targetID := c.Param("id")
 	callerID := c.GetHeader("X-Workspace-ID")
 
+	if callerID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "X-Workspace-ID header is required"})
+		return
+	}
+
 	if callerID != "" {
 		if !registry.CanCommunicate(callerID, targetID) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to discover this workspace"})

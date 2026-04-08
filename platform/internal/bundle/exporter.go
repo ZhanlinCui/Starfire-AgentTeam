@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"gopkg.in/yaml.v3"
 )
 
 // Export serializes a running workspace into a Bundle.
@@ -113,7 +114,9 @@ func execInContainer(ctx context.Context, dockerCli *client.Client, containerNam
 	}
 	defer resp.Close()
 	var stdout bytes.Buffer
-	stdcopy.StdCopy(&stdout, io.Discard, io.LimitReader(resp.Reader, 5*1024*1024)) // 5MB cap
+	if _, err := stdcopy.StdCopy(&stdout, io.Discard, io.LimitReader(resp.Reader, 5*1024*1024)); err != nil {
+		return "", fmt.Errorf("failed to read exec output: %w", err)
+	}
 	return strings.TrimSpace(stdout.String()), nil
 }
 
@@ -251,7 +254,10 @@ func findConfigDir(configsDir, name string) string {
 			continue
 		}
 		// Check if the config name matches the workspace name
-		if strings.Contains(string(data), "name: "+name) {
+		var cfg struct {
+			Name string `yaml:"name"`
+		}
+		if yaml.Unmarshal(data, &cfg) == nil && cfg.Name == name {
 			return filepath.Join(configsDir, e.Name())
 		}
 		if fallback == "" {

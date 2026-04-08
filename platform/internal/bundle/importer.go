@@ -71,8 +71,11 @@ func Import(
 		go func() {
 			provCtx, cancel := context.WithTimeout(context.Background(), provisioner.ProvisionTimeout)
 			defer cancel()
-			if _, err := prov.Start(provCtx, cfg); err != nil {
+			url, err := prov.Start(provCtx, cfg)
+			if err != nil {
 				markFailed(provCtx, wsID, broadcaster, err)
+			} else if url != "" {
+				db.DB.ExecContext(provCtx, `UPDATE workspaces SET url = $1 WHERE id = $2`, url, wsID)
 			}
 		}()
 	}

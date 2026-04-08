@@ -13,10 +13,12 @@ import (
 
 var uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-type SecretsHandler struct{}
+type SecretsHandler struct {
+	restartFunc func(workspaceID string) // Optional: auto-restart after secret change
+}
 
-func NewSecretsHandler() *SecretsHandler {
-	return &SecretsHandler{}
+func NewSecretsHandler(restartFunc func(string)) *SecretsHandler {
+	return &SecretsHandler{restartFunc: restartFunc}
 }
 
 // List handles GET /workspaces/:id/secrets
@@ -93,6 +95,11 @@ func (h *SecretsHandler) Set(c *gin.Context) {
 		return
 	}
 
+	// Auto-restart workspace to pick up new secret
+	if h.restartFunc != nil {
+		go h.restartFunc(workspaceID)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"status": "saved", "key": body.Key})
 }
 
@@ -118,6 +125,11 @@ func (h *SecretsHandler) Delete(c *gin.Context) {
 	if rows == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "secret not found"})
 		return
+	}
+
+	// Auto-restart workspace to pick up removed secret
+	if h.restartFunc != nil {
+		go h.restartFunc(workspaceID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "deleted", "key": key})

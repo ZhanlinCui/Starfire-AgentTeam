@@ -110,7 +110,24 @@ class OpenClawAdapter(BaseAdapter):
             )
             logger.info("OpenClaw onboard complete")
 
-        # 3b. Always write auth-profiles.json with current API key
+        # 3b. Fix context window (OpenClaw defaults to 16K, but modern models have much more)
+        oc_config_path = os.path.expanduser("~/.openclaw/openclaw.json")
+        if os.path.exists(oc_config_path):
+            try:
+                import json as json_mod
+                oc_cfg = json_mod.load(open(oc_config_path))
+                provider_name = "custom-" + provider_url.split("//")[1].split("/")[0].replace(".", "-")
+                providers = oc_cfg.get("models", {}).get("providers", {})
+                if provider_name in providers:
+                    for m in providers[provider_name].get("models", []):
+                        m["contextWindow"] = 1000000  # 1M tokens for modern models
+                        m["maxTokens"] = 16384
+                    json_mod.dump(oc_cfg, open(oc_config_path, "w"), indent=2)
+                    logger.info(f"Fixed context window for {provider_name}")
+            except Exception as e:
+                logger.warning(f"Failed to fix context window: {e}")
+
+        # 3c. Always write auth-profiles.json
         # (key may have been set via secrets API after first boot)
         if api_key:
             auth_dir = os.path.expanduser("~/.openclaw/agents/main/agent")

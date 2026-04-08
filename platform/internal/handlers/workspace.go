@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/crypto"
@@ -30,7 +31,10 @@ const maxProxyRequestBody = 1 << 20
 const maxProxyResponseBody = 10 << 20
 
 // a2aClient is a shared HTTP client for proxying A2A requests to workspace agents.
-var a2aClient = &http.Client{} // No timeout — agent liveness is checked via heartbeat, not proxy deadline
+var a2aClient = &http.Client{Timeout: 30 * time.Minute}
+
+// restartMu prevents concurrent RestartByID calls for the same workspace
+var restartMu sync.Map // map[workspaceID]*sync.Mutex
 
 type WorkspaceHandler struct {
 	broadcaster *events.Broadcaster
@@ -515,6 +519,72 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	go h.provisionWorkspace(id, templatePath, configFiles, payload)
 
 	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "config_dir": configLabel})
+}
+
+// RestartByID restarts a workspace by ID — for programmatic use (e.g., auto-restart after secret change).
+func (h *WorkspaceHandler) RestartByID(workspaceID string) {
+	if h.provisioner == nil {
+		return
+	}
+
+	// Per-workspace mutex — skip if already restarting (last-write-wins)
+	mu, _ := restartMu.LoadOrStore(workspaceID, &sync.Mutex{})
+	wsMu := mu.(*sync.Mutex)
+	if !wsMu.TryLock() {
+		log.Printf("Auto-restart: skipping %s — restart already in progress", workspaceID)
+		return
+	}
+	defer wsMu.Unlock()
+
+	ctx := context.Background()
+
+	var wsName, status string
+	var tier int
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT name, status, tier FROM workspaces WHERE id = $1 AND status != 'removed'`, workspaceID,
+	).Scan(&wsName, &status, &tier)
+	if err != nil {
+		return
+	}
+
+	// If still provisioning, brief wait so container exists for Stop()
+	if status == "provisioning" {
+		log.Printf("Auto-restart: interrupting provisioning for %s (%s)", wsName, workspaceID)
+		time.Sleep(10 * time.Second)
+	}
+
+	log.Printf("Auto-restart: restarting %s (%s) after secret change (was: %s)", wsName, workspaceID, status)
+
+	h.provisioner.Stop(ctx, workspaceID)
+
+	db.DB.ExecContext(ctx,
+		`UPDATE workspaces SET status = 'provisioning', url = '', updated_at = now() WHERE id = $1`, workspaceID)
+	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", workspaceID, map[string]interface{}{
+		"name": wsName, "tier": tier,
+	})
+
+	var templatePath string
+	var configFiles map[string][]byte
+	template := findTemplateByName(h.configsDir, wsName)
+	if template != "" {
+		candidatePath := filepath.Join(h.configsDir, template)
+		if _, err := os.Stat(candidatePath); err == nil {
+			templatePath = candidatePath
+		}
+	}
+
+	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier}
+	if templatePath != "" {
+		cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
+		for _, line := range strings.Split(string(cfgData), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "runtime:") {
+				payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+				break
+			}
+		}
+	}
+	go h.provisionWorkspace(workspaceID, templatePath, configFiles, payload)
 }
 
 // findTemplateByName looks for a workspace-configs-templates directory matching a name.
