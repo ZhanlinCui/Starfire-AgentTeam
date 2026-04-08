@@ -497,7 +497,7 @@ function TreeView({
     <div>
       {nodes.map((node) => (
         <TreeItem
-          key={`${node.path}:${node.type}`}
+          key={`${node.path}:${node.isDir ? "dir" : "file"}`}
           node={node}
           selectedPath={selectedPath}
           onSelect={onSelect}
