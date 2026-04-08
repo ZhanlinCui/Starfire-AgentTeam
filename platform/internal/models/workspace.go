@@ -7,23 +7,24 @@ import (
 )
 
 type Workspace struct {
-	ID              string          `json:"id" db:"id"`
-	Name            string          `json:"name" db:"name"`
-	Role            sql.NullString  `json:"role" db:"role"`
-	Tier            int             `json:"tier" db:"tier"`
-	Status          string          `json:"status" db:"status"`
-	SourceBundleID  sql.NullString  `json:"source_bundle_id" db:"source_bundle_id"`
-	AgentCard       json.RawMessage `json:"agent_card" db:"agent_card"`
-	URL             sql.NullString  `json:"url" db:"url"`
-	ParentID        *string         `json:"parent_id" db:"parent_id"`
-	ForwardedTo     *string         `json:"forwarded_to" db:"forwarded_to"`
-	LastHeartbeatAt *time.Time      `json:"last_heartbeat_at" db:"last_heartbeat_at"`
-	LastErrorRate   float64         `json:"last_error_rate" db:"last_error_rate"`
-	LastSampleError sql.NullString  `json:"last_sample_error" db:"last_sample_error"`
-	ActiveTasks     int             `json:"active_tasks" db:"active_tasks"`
-	UptimeSeconds   int             `json:"uptime_seconds" db:"uptime_seconds"`
-	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at" db:"updated_at"`
+	ID                 string          `json:"id" db:"id"`
+	Name               string          `json:"name" db:"name"`
+	Role               sql.NullString  `json:"role" db:"role"`
+	Tier               int             `json:"tier" db:"tier"`
+	AwarenessNamespace sql.NullString  `json:"awareness_namespace" db:"awareness_namespace"`
+	Status             string          `json:"status" db:"status"`
+	SourceBundleID     sql.NullString  `json:"source_bundle_id" db:"source_bundle_id"`
+	AgentCard          json.RawMessage `json:"agent_card" db:"agent_card"`
+	URL                sql.NullString  `json:"url" db:"url"`
+	ParentID           *string         `json:"parent_id" db:"parent_id"`
+	ForwardedTo        *string         `json:"forwarded_to" db:"forwarded_to"`
+	LastHeartbeatAt    *time.Time      `json:"last_heartbeat_at" db:"last_heartbeat_at"`
+	LastErrorRate      float64         `json:"last_error_rate" db:"last_error_rate"`
+	LastSampleError    sql.NullString  `json:"last_sample_error" db:"last_sample_error"`
+	ActiveTasks        int             `json:"active_tasks" db:"active_tasks"`
+	UptimeSeconds      int             `json:"uptime_seconds" db:"uptime_seconds"`
+	CreatedAt          time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at" db:"updated_at"`
 	// Canvas layout fields (from JOIN)
 	X         float64 `json:"x"`
 	Y         float64 `json:"y"`

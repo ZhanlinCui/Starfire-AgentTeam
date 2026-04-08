@@ -57,6 +57,7 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 	}
 
 	id := uuid.New().String()
+	awarenessNamespace := workspaceAwarenessNamespace(id)
 	if payload.Tier == 0 {
 		payload.Tier = 1
 	}
@@ -71,9 +72,9 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 
 	// Insert workspace
 	_, err := db.DB.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, role, tier, status, parent_id)
-		VALUES ($1, $2, $3, $4, 'provisioning', $5)
-	`, id, payload.Name, role, payload.Tier, payload.ParentID)
+		INSERT INTO workspaces (id, name, role, tier, awareness_namespace, status, parent_id)
+		VALUES ($1, $2, $3, $4, $5, 'provisioning', $6)
+	`, id, payload.Name, role, payload.Tier, awarenessNamespace, payload.ParentID)
 	if err != nil {
 		log.Printf("Create workspace error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workspace"})
@@ -118,11 +119,17 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		go h.provisionWorkspace(id, templatePath, configFiles, payload)
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"id": id, "status": "provisioning"})
+	c.JSON(http.StatusCreated, gin.H{
+		"id":                  id,
+		"status":              "provisioning",
+		"awareness_namespace": awarenessNamespace,
+	})
 }
 
 // scanWorkspaceRow is a helper to scan workspace+layout rows into a clean JSON map.
-func scanWorkspaceRow(rows interface{ Scan(dest ...interface{}) error }) (map[string]interface{}, error) {
+func scanWorkspaceRow(rows interface {
+	Scan(dest ...interface{}) error
+}) (map[string]interface{}, error) {
 	var id, name, role, status, url, sampleError, currentTask string
 	var tier, activeTasks, uptimeSeconds int
 	var errorRate, x, y float64
@@ -313,10 +320,10 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	// If has children and not confirmed, return children list for confirmation
 	if len(children) > 0 && !confirm {
 		c.JSON(http.StatusOK, gin.H{
-			"status":           "confirmation_required",
-			"message":          "This workspace has sub-workspaces. Delete with ?confirm=true to cascade delete.",
-			"children":         children,
-			"children_count":   len(children),
+			"status":         "confirmation_required",
+			"message":        "This workspace has sub-workspaces. Delete with ?confirm=true to cascade delete.",
+			"children":       children,
+			"children_count": len(children),
 		})
 		return
 	}
@@ -387,17 +394,8 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, templatePath string, 
 	}
 
 	pluginsPath, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
-	cfg := provisioner.WorkspaceConfig{
-		WorkspaceID:   workspaceID,
-		TemplatePath:  templatePath,
-		ConfigFiles:   configFiles,
-		PluginsPath:   pluginsPath,
-		WorkspacePath: os.Getenv("WORKSPACE_DIR"), // If set, bind-mount host dir as /workspace
-		Tier:          payload.Tier,
-		Runtime:       payload.Runtime,
-		EnvVars:       envVars,
-		PlatformURL:   h.platformURL,
-	}
+	awarenessNamespace := h.loadAwarenessNamespace(ctx, workspaceID)
+	cfg := h.buildProvisionerConfig(workspaceID, templatePath, configFiles, payload, envVars, pluginsPath, awarenessNamespace)
 
 	url, err := h.provisioner.Start(ctx, cfg)
 	if err != nil {
@@ -425,6 +423,41 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, templatePath string, 
 	}
 	// On success, the workspace will register via POST /registry/register
 	// which transitions status to 'online' and broadcasts WORKSPACE_ONLINE
+}
+
+func workspaceAwarenessNamespace(workspaceID string) string {
+	return fmt.Sprintf("workspace:%s", workspaceID)
+}
+
+func (h *WorkspaceHandler) loadAwarenessNamespace(ctx context.Context, workspaceID string) string {
+	var awarenessNamespace string
+	err := db.DB.QueryRowContext(ctx, `SELECT COALESCE(awareness_namespace, '') FROM workspaces WHERE id = $1`, workspaceID).Scan(&awarenessNamespace)
+	if err != nil || awarenessNamespace == "" {
+		return workspaceAwarenessNamespace(workspaceID)
+	}
+	return awarenessNamespace
+}
+
+func (h *WorkspaceHandler) buildProvisionerConfig(
+	workspaceID, templatePath string,
+	configFiles map[string][]byte,
+	payload models.CreateWorkspacePayload,
+	envVars map[string]string,
+	pluginsPath, awarenessNamespace string,
+) provisioner.WorkspaceConfig {
+	return provisioner.WorkspaceConfig{
+		WorkspaceID:        workspaceID,
+		TemplatePath:       templatePath,
+		ConfigFiles:        configFiles,
+		PluginsPath:        pluginsPath,
+		WorkspacePath:      os.Getenv("WORKSPACE_DIR"), // If set, bind-mount host dir as /workspace
+		Tier:               payload.Tier,
+		Runtime:            payload.Runtime,
+		EnvVars:            envVars,
+		PlatformURL:        h.platformURL,
+		AwarenessURL:       os.Getenv("AWARENESS_URL"),
+		AwarenessNamespace: awarenessNamespace,
+	}
 }
 
 // Restart handles POST /workspaces/:id/restart

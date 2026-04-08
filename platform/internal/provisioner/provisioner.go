@@ -22,12 +22,12 @@ import (
 // RuntimeImages maps runtime names to their Docker image tags.
 // Each adapter has its own pre-built image extending the base.
 var RuntimeImages = map[string]string{
-	"langgraph":  "workspace-template:langgraph",
+	"langgraph":   "workspace-template:langgraph",
 	"claude-code": "workspace-template:claude-code",
-	"openclaw":   "workspace-template:openclaw",
-	"deepagents": "workspace-template:deepagents",
-	"crewai":     "workspace-template:crewai",
-	"autogen":    "workspace-template:autogen",
+	"openclaw":    "workspace-template:openclaw",
+	"deepagents":  "workspace-template:deepagents",
+	"crewai":      "workspace-template:crewai",
+	"autogen":     "workspace-template:autogen",
 }
 
 const (
@@ -46,15 +46,17 @@ const (
 
 // WorkspaceConfig holds the parameters needed to provision a workspace container.
 type WorkspaceConfig struct {
-	WorkspaceID   string
-	TemplatePath  string            // Host path to template dir to copy from (e.g. claude-code-default/)
-	ConfigFiles   map[string][]byte // Generated config files to write into /configs volume
-	PluginsPath   string            // Host path to plugins directory (mounted at /plugins)
-	WorkspacePath string            // Host path to bind-mount as /workspace (if empty, uses Docker named volume)
-	Tier          int
-	Runtime       string            // "langgraph" (default) or "claude-code", "codex", "ollama", "custom"
-	EnvVars       map[string]string // Additional env vars (API keys, etc.)
-	PlatformURL   string
+	WorkspaceID        string
+	TemplatePath       string            // Host path to template dir to copy from (e.g. claude-code-default/)
+	ConfigFiles        map[string][]byte // Generated config files to write into /configs volume
+	PluginsPath        string            // Host path to plugins directory (mounted at /plugins)
+	WorkspacePath      string            // Host path to bind-mount as /workspace (if empty, uses Docker named volume)
+	Tier               int
+	Runtime            string            // "langgraph" (default) or "claude-code", "codex", "ollama", "custom"
+	EnvVars            map[string]string // Additional env vars (API keys, etc.)
+	PlatformURL        string
+	AwarenessURL       string
+	AwarenessNamespace string
 }
 
 // ConfigVolumeName returns the Docker named volume for a workspace's configs.
@@ -116,6 +118,10 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		fmt.Sprintf("TIER=%d", cfg.Tier),
 		"PLUGINS_DIR=/plugins",
 	}
+	if cfg.AwarenessNamespace != "" && cfg.AwarenessURL != "" {
+		env = append(env, fmt.Sprintf("AWARENESS_NAMESPACE=%s", cfg.AwarenessNamespace))
+		env = append(env, fmt.Sprintf("AWARENESS_URL=%s", cfg.AwarenessURL))
+	}
 	for k, v := range cfg.EnvVars {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
@@ -160,7 +166,7 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	}
 
 	hostCfg := &container.HostConfig{
-		Binds: binds,
+		Binds:         binds,
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 		PortBindings: nat.PortMap{
 			nat.Port(DefaultPort + "/tcp"): []nat.PortBinding{

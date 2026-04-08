@@ -14,6 +14,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
+	"github.com/agent-molecule/platform/internal/models"
 	"github.com/agent-molecule/platform/internal/ws"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
@@ -249,7 +250,7 @@ func TestWorkspaceCreate(t *testing.T) {
 
 	// Expect workspace INSERT (uuid is dynamic, use AnyArg)
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Test Agent", nil, 1, (*string)(nil)).
+		WithArgs(sqlmock.AnyArg(), "Test Agent", nil, 1, sqlmock.AnyArg(), (*string)(nil)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect canvas_layouts INSERT
@@ -284,9 +285,40 @@ func TestWorkspaceCreate(t *testing.T) {
 	if resp["id"] == nil || resp["id"] == "" {
 		t.Error("expected non-empty id in response")
 	}
+	if resp["awareness_namespace"] != "workspace:"+resp["id"].(string) {
+		t.Errorf("expected awareness namespace derived from workspace id, got %v", resp["awareness_namespace"])
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestBuildProvisionerConfig_IncludesAwarenessSettings(t *testing.T) {
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp/configs")
+
+	t.Setenv("AWARENESS_URL", "http://awareness:37800")
+	t.Setenv("WORKSPACE_DIR", "/tmp/workspace")
+
+	cfg := handler.buildProvisionerConfig(
+		"ws-123",
+		"/tmp/configs/template",
+		map[string][]byte{"config.yaml": []byte("name: test")},
+		models.CreateWorkspacePayload{Tier: 2, Runtime: "claude-code"},
+		map[string]string{"OPENAI_API_KEY": "sk-test"},
+		"/tmp/plugins",
+		"workspace:ws-123",
+	)
+
+	if cfg.AwarenessURL != "http://awareness:37800" {
+		t.Fatalf("expected awareness URL to be injected, got %q", cfg.AwarenessURL)
+	}
+	if cfg.AwarenessNamespace != "workspace:ws-123" {
+		t.Fatalf("expected awareness namespace to be injected, got %q", cfg.AwarenessNamespace)
+	}
+	if cfg.WorkspacePath != "/tmp/workspace" {
+		t.Fatalf("expected workspace path from env, got %q", cfg.WorkspacePath)
 	}
 }
 
