@@ -19,6 +19,28 @@ services:
       timeout: 5s
       retries: 10
 
+  langfuse-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        export PGPASSWORD="$${POSTGRES_PASSWORD}"
+        until pg_isready -h postgres -U "$${POSTGRES_USER}" -d postgres >/dev/null 2>&1; do
+          sleep 1
+        done
+        if ! psql -h postgres -U "$${POSTGRES_USER}" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'langfuse'" | grep -q 1; then
+          psql -h postgres -U "$${POSTGRES_USER}" -d postgres -c "CREATE DATABASE langfuse"
+        fi
+    networks:
+      - agent-molecule-net
+
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--notify-keyspace-events", "KEA"]
@@ -36,27 +58,34 @@ services:
 
   # --- Observability ---
   langfuse-clickhouse:
-    image: clickhouse/clickhouse-server:24.3
+    image: clickhouse/clickhouse-server:24-alpine
+    environment:
+      CLICKHOUSE_DB: langfuse
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
     volumes:
       - clickhousedata:/var/lib/clickhouse
     networks:
       - agent-molecule-net
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   langfuse:
-    image: langfuse/langfuse:3
+    image: langfuse/langfuse:2
     depends_on:
-      postgres:
-        condition: service_healthy
       langfuse-clickhouse:
         condition: service_healthy
+      langfuse-db-init:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@postgres:5432/${POSTGRES_DB:-agentmolecule}?sslmode=disable
-      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      DATABASE_URL: postgres://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@postgres:5432/langfuse
+      CLICKHOUSE_URL: clickhouse://langfuse:langfuse@langfuse-clickhouse:9000/langfuse
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+      LANGFUSE_AUTO_CLICKHOUSE_MIGRATION_DISABLED: "true"
       NEXTAUTH_SECRET: ${LANGFUSE_SECRET:-changeme-langfuse-secret}
       NEXTAUTH_URL: http://localhost:3001
       SALT: ${LANGFUSE_SALT:-changeme-langfuse-salt}
@@ -119,7 +148,7 @@ services:
     networks:
       - agent-molecule-net
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
