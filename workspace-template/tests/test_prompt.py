@@ -39,6 +39,44 @@ def test_build_system_prompt_default_fallback(tmp_path):
     assert "Default system prompt content." in result
 
 
+def test_build_system_prompt_auto_includes_memory_snapshot(tmp_path):
+    """Memory snapshot files are auto-included when present."""
+    (tmp_path / "system-prompt.md").write_text("Base prompt.")
+    (tmp_path / "MEMORY.md").write_text("Known workspace facts.")
+    (tmp_path / "USER.md").write_text("User prefers concise answers.")
+
+    result = build_system_prompt(
+        config_path=str(tmp_path),
+        workspace_id="ws-1",
+        loaded_skills=[],
+        peers=[],
+    )
+
+    assert "Base prompt." in result
+    assert "Known workspace facts." in result
+    assert "User prefers concise answers." in result
+    assert result.index("Base prompt.") < result.index("Known workspace facts.")
+    assert result.index("Known workspace facts.") < result.index("User prefers concise answers.")
+
+
+def test_build_system_prompt_deduplicates_explicit_memory_files(tmp_path):
+    """Explicit snapshot files are not loaded twice."""
+    (tmp_path / "system-prompt.md").write_text("Base prompt.")
+    (tmp_path / "MEMORY.md").write_text("Known workspace facts.")
+    (tmp_path / "USER.md").write_text("User prefers concise answers.")
+
+    result = build_system_prompt(
+        config_path=str(tmp_path),
+        workspace_id="ws-1",
+        loaded_skills=[],
+        peers=[],
+        prompt_files=["system-prompt.md", "MEMORY.md"],
+    )
+
+    assert result.count("Known workspace facts.") == 1
+    assert result.count("User prefers concise answers.") == 1
+
+
 def test_build_system_prompt_missing_file(tmp_path):
     """Missing prompt files are skipped with a warning (no crash)."""
     result = build_system_prompt(

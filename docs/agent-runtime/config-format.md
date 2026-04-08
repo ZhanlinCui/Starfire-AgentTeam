@@ -113,7 +113,7 @@ env:
 | `tier` | Yes | 1-4, determines deployment method |
 | `runtime` | No | Adapter to use: `langgraph` (default), `claude-code`, `crewai`, `autogen`, `deepagents`, `openclaw`. See [Agent Runtime Adapters](./cli-runtime.md). |
 | `model` | Yes | LangChain-compatible provider string (e.g. `anthropic:claude-sonnet-4-6`). Overridden by `MODEL_PROVIDER` env var if set. |
-| `prompt_files` | No | Ordered list of markdown files to load as system prompt. Defaults to `["system-prompt.md"]` if omitted. Supports any agent framework's file structure (OpenClaw, Claude Code, etc.) |
+| `prompt_files` | No | Ordered list of markdown files to load as system prompt. Defaults to `["system-prompt.md"]` if omitted. `MEMORY.md` and `USER.md` are auto-appended when present so frozen memory snapshots do not need to be duplicated here. Supports any agent framework's file structure (OpenClaw, Claude Code, etc.) |
 | `shared_context` | No | Files from this workspace's config dir to share with direct children. Children fetch these at startup and inject into their system prompt as `## Parent Context`. 1-level inheritance only (grandchildren don't see grandparent's context). |
 | `skills` | Yes | List of skill folder names to load from `skills/` |
 | `tools` | No | Built-in tools from workspace-template |

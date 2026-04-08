@@ -7,10 +7,15 @@ Hierarchical Memory Architecture:
 """
 
 import os
+from types import SimpleNamespace
 
-import httpx
 from langchain_core.tools import tool
 from tools.awareness_client import build_awareness_client
+
+try:  # pragma: no cover - optional runtime dependency in lightweight test envs
+    import httpx  # type: ignore
+except ImportError:  # pragma: no cover
+    httpx = SimpleNamespace(AsyncClient=None)
 
 PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
 WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "")

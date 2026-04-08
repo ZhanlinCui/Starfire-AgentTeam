@@ -7,9 +7,14 @@ to this helper when workspace awareness is configured.
 from __future__ import annotations
 
 import os
+import sys
+from types import SimpleNamespace
 from typing import Any
 
-import httpx
+try:  # pragma: no cover - optional runtime dependency in lightweight test envs
+    import httpx  # type: ignore
+except ImportError:  # pragma: no cover
+    httpx = SimpleNamespace(AsyncClient=None)
 
 
 DEFAULT_AWARENESS_TIMEOUT = 10.0
@@ -41,7 +46,8 @@ class AwarenessClient:
         return f"{self.base_url}/api/v1/namespaces/{self.namespace}/memories"
 
     async def commit(self, content: str, scope: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        client_cls = _resolve_async_client()
+        async with client_cls(timeout=self.timeout) as client:
             resp = await client.post(
                 self._memories_url(),
                 json={"content": content, "scope": scope},
@@ -55,7 +61,8 @@ class AwarenessClient:
         if scope:
             params["scope"] = scope
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        client_cls = _resolve_async_client()
+        async with client_cls(timeout=self.timeout) as client:
             resp = await client.get(self._memories_url(), params=params)
         return _parse_search_response(resp)
 
@@ -92,3 +99,18 @@ def _safe_json(resp: httpx.Response) -> dict[str, Any] | list[Any]:
         return resp.json()
     except ValueError:
         return {"error": resp.text}
+
+
+def _resolve_async_client():
+    client_cls = getattr(httpx, "AsyncClient", None)
+    if client_cls is not None:
+        return client_cls
+
+    memory_module = sys.modules.get("tools.memory")
+    if memory_module is not None:
+        memory_httpx = getattr(memory_module, "httpx", None)
+        client_cls = getattr(memory_httpx, "AsyncClient", None)
+        if client_cls is not None:
+            return client_cls
+
+    raise RuntimeError("httpx.AsyncClient is unavailable")
