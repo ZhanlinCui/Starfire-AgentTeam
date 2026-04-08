@@ -201,7 +201,7 @@ export function TemplatePalette() {
                     </p>
                   )}
 
-                  {t.skills?.length > 0 && (
+                  {t.skills.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {t.skills.slice(0, 3).map((s) => (
                         <span key={s} className="text-[8px] text-zinc-400 bg-zinc-700/40 px-1.5 py-0.5 rounded">

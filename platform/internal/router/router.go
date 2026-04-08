@@ -163,7 +163,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.DELETE("/workspaces/:id/files/*path", tmplh.DeleteFile)
 
 	// Bundles
-	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir, dockerCli)
+	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir)
 	r.GET("/bundles/export/:id", bh.Export)
 	r.POST("/bundles/import", bh.Import)
 

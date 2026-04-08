@@ -1,6 +1,6 @@
 """Workspace runtime entry point.
 
-Loads config -> discovers adapter -> setup -> create executor -> wrap in A2A -> register -> heartbeat.
+Loads config -> loads skills -> creates agent -> wraps in A2A -> registers -> starts heartbeat.
 """
 
 import asyncio
@@ -15,9 +15,19 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard, AgentCapabilities, AgentSkill
 
-from adapters import get_adapter, AdapterConfig
+from a2a_executor import LangGraphA2AExecutor
+from agent import create_agent
+from cli_executor import CLIAgentExecutor
 from config import load_config
+from coordinator import get_children, get_parent_context, build_children_description, route_task_to_team
 from heartbeat import HeartbeatLoop
+from plugins import load_plugins
+from prompt import build_system_prompt, get_peer_capabilities
+from skills.loader import load_skills
+from tools.approval import request_approval
+from tools.delegation import delegate_to_workspace
+from tools.memory import commit_memory, search_memory
+from tools.sandbox import run_code
 
 
 def get_machine_ip() -> str:
@@ -41,37 +51,96 @@ async def main():
     config = load_config(config_path)
     port = config.a2a.port
 
-    # 2. Create heartbeat (passed to adapter for task tracking)
+    valid_runtimes = {"langgraph", "claude-code", "codex", "ollama", "custom"}
+    if config.runtime not in valid_runtimes:
+        print(f"WARNING: Unknown runtime '{config.runtime}', treating as custom CLI. Valid: {', '.join(sorted(valid_runtimes))}")
+    is_cli_runtime = config.runtime != "langgraph"
+    loaded_skills = []
+    system_prompt = None
+
+    # Create heartbeat early so CLI executor can push task updates
     heartbeat = HeartbeatLoop(platform_url, workspace_id)
 
-    # 3. Get adapter for this runtime
-    runtime = config.runtime or "langgraph"
-    adapter_cls = get_adapter(runtime)  # Raises KeyError if unknown — no silent fallback
+    if is_cli_runtime:
+        # CLI runtimes (claude-code, codex, ollama, custom)
+        # Skip LangGraph-specific setup (plugins, skills, tools, coordinator)
+        # Just load the system prompt if it exists
+        print(f"Runtime: {config.runtime} (CLI-based)")
 
-    adapter = adapter_cls()
-    print(f"Runtime: {runtime} ({adapter.display_name()})")
+        prompt_file = os.path.join(config_path, "system-prompt.md")
+        if os.path.exists(prompt_file):
+            with open(prompt_file) as f:
+                system_prompt = f.read()
+            print(f"System prompt: loaded ({len(system_prompt)} chars)")
 
-    # 4. Build adapter config
-    adapter_config = AdapterConfig(
-        model=config.model,
-        system_prompt=None,  # Adapter builds its own prompt
-        tools=config.skills,  # Skill names from config.yaml
-        runtime_config=vars(config.runtime_config) if config.runtime_config else {},
-        config_path=config_path,
-        workspace_id=workspace_id,
-        prompt_files=config.prompt_files,
-        a2a_port=port,
-        heartbeat=heartbeat,
-    )
+        executor = CLIAgentExecutor(
+            runtime=config.runtime,
+            runtime_config=config.runtime_config,
+            system_prompt=system_prompt,
+            config_path=config_path,
+            heartbeat=heartbeat,
+        )
+    else:
+        # LangGraph runtime — full setup
+        print("Runtime: langgraph")
 
-    # 5. Setup adapter and create executor
-    await adapter.setup(adapter_config)
-    executor = await adapter.create_executor(adapter_config)
+        # Load plugins
+        plugins = load_plugins()
+        if plugins.plugin_names:
+            print(f"Plugins: {', '.join(plugins.plugin_names)}")
 
-    # Get loaded skills for agent card (adapter may have populated them)
-    loaded_skills = getattr(adapter, "loaded_skills", [])
+        # Load skills
+        loaded_skills = load_skills(config_path, config.skills)
+        seen_skill_ids = {s.metadata.id for s in loaded_skills}
 
-    # 6. Build Agent Card
+        for plugin_skills_dir in plugins.skill_dirs:
+            plugin_skill_names = [
+                d for d in os.listdir(plugin_skills_dir)
+                if os.path.isdir(os.path.join(plugin_skills_dir, d))
+            ]
+            for skill in load_skills(plugin_skills_dir, plugin_skill_names):
+                if skill.metadata.id not in seen_skill_ids:
+                    loaded_skills.append(skill)
+                    seen_skill_ids.add(skill.metadata.id)
+
+        print(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
+
+        # Gather tools
+        all_tools = [delegate_to_workspace, request_approval, commit_memory, search_memory, run_code]
+        for skill in loaded_skills:
+            all_tools.extend(skill.tools)
+
+        # Coordinator check
+        children = await get_children()
+        is_coordinator = len(children) > 0
+        if is_coordinator:
+            print(f"Coordinator mode: {len(children)} children ({[c.get('name') for c in children]})")
+            all_tools.append(route_task_to_team)
+
+        # Parent context
+        parent_context = await get_parent_context()
+        if parent_context:
+            print(f"Inherited {len(parent_context)} context files from parent")
+
+        # Build system prompt
+        peers = await get_peer_capabilities(platform_url, workspace_id)
+        coordinator_prompt = build_children_description(children) if is_coordinator else ""
+        extra_prompts = list(plugins.prompt_fragments)
+        if coordinator_prompt:
+            extra_prompts.append(coordinator_prompt)
+
+        system_prompt = build_system_prompt(
+            config_path, workspace_id, loaded_skills, peers,
+            prompt_files=config.prompt_files,
+            plugin_rules=plugins.rules,
+            plugin_prompts=extra_prompts,
+            parent_context=parent_context,
+        )
+
+        agent = create_agent(config.model, all_tools, system_prompt)
+        executor = LangGraphA2AExecutor(agent)
+
+    # 2. Build Agent Card
     machine_ip = os.environ.get("HOSTNAME", get_machine_ip())
     workspace_url = f"http://{machine_ip}:{port}"
 
@@ -98,7 +167,7 @@ async def main():
         defaultOutputModes=["text/plain", "application/json"],
     )
 
-    # 7. Wrap in A2A
+    # 3. Wrap in A2A
     handler = DefaultRequestHandler(
         agent_executor=executor,
         task_store=InMemoryTaskStore(),
@@ -109,7 +178,7 @@ async def main():
         http_handler=handler,
     )
 
-    # 8. Register with platform
+    # 4. Register with platform
     agent_card_dict = {
         "name": config.name,
         "description": config.description,
@@ -144,10 +213,10 @@ async def main():
         except Exception as e:
             print(f"Warning: failed to register with platform: {e}")
 
-    # 9. Start heartbeat
+    # 5. Start heartbeat (created earlier for CLI executor task tracking)
     heartbeat.start()
 
-    # 10. Run A2A server
+    # 6. Run the A2A server
     print(f"Workspace {workspace_id} starting on port {port}")
     server_config = uvicorn.Config(
         app.build(),

@@ -1,9 +1,29 @@
-# Base image — bare minimum for A2A server and adapter loading
-# Agent-specific deps are in adapters/<runtime>/requirements.txt
-# and installed at container startup via entrypoint.sh
+# ──────────────────────────────────────────────────────────────────────────────
+# PINNED VERSIONS — do not loosen without reading the notes below
+#
+# a2a-sdk: pinned at 0.3.25. The 1.0.0a0 pre-release (shipped 2026-03-17)
+#   contains breaking changes to AgentExecutor, RequestContext, and the
+#   EventQueue interface. Upgrading requires updates to a2a_executor.py.
+#
+# langgraph / langchain-*: pinned together as a matched set. LangChain
+#   packages must be upgraded as a group — mixing minor versions causes
+#   subtle graph-compilation errors. Pin all four together when upgrading.
+#
+# langfuse: 4.x changed the tracer API; requires LANGFUSE_HOST and key env
+#   vars to be present at import time (unlike 3.x which deferred lazily).
+# ──────────────────────────────────────────────────────────────────────────────
 
-# A2A protocol
+# A2A / Agent runtime
 a2a-sdk[http-server]==0.3.25
+
+# LangChain ecosystem — upgrade as a matched set
+langchain-core==1.2.26
+langchain-anthropic==1.4.0
+langchain-openai==1.1.12
+langgraph==1.1.6
+
+# Observability
+langfuse==4.0.6
 
 # HTTP / server
 httpx>=0.27.0
@@ -11,5 +31,10 @@ uvicorn>=0.30.0
 starlette>=0.38.0
 websockets>=12.0
 
-# Config parsing
+# Utilities
 pyyaml>=6.0
+
+# Optional: E2B cloud sandbox backend (required when config.sandbox.backend == "e2b")
+# Set E2B_API_KEY env var (workspace secret) to use this backend.
+# Obtain a key at https://e2b.dev
+e2b-code-interpreter==1.0.3

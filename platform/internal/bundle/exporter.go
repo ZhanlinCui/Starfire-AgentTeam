@@ -1,26 +1,19 @@
 package bundle
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/agent-molecule/platform/internal/db"
-	"github.com/agent-molecule/platform/internal/provisioner"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // Export serializes a running workspace into a Bundle.
-// dockerCli is optional — when provided, config is read from the running container's /configs volume.
-func Export(ctx context.Context, workspaceID, configsDir string, dockerCli *client.Client) (*Bundle, error) {
+func Export(ctx context.Context, workspaceID, configsDir string) (*Bundle, error) {
 	// Fetch workspace record
 	var name, role, status string
 	var tier int
@@ -61,20 +54,11 @@ func Export(ctx context.Context, workspaceID, configsDir string, dockerCli *clie
 	b.Tools = []BundleTool{}
 	b.Prompts = map[string]string{}
 
-	// Try to read config from running container first, then fall back to host templates
-	loaded := false
-	if dockerCli != nil {
-		containerName := provisioner.ContainerName(workspaceID)
-		if err := b.loadFromContainer(ctx, dockerCli, containerName); err == nil {
-			loaded = true
-		}
-	}
-	if !loaded {
-		// Fallback: read from host-side template directory
-		configPath := findConfigDir(configsDir, name)
-		if configPath != "" {
-			b.loadFromConfigDir(configPath)
-		}
+	// Try to find and read the config directory
+	// Look for a config that matches the workspace name
+	configPath := findConfigDir(configsDir, name)
+	if configPath != "" {
+		b.loadFromConfigDir(configPath)
 	}
 
 	// Recursively export sub-workspaces
@@ -85,7 +69,7 @@ func Export(ctx context.Context, workspaceID, configsDir string, dockerCli *clie
 		for rows.Next() {
 			var childID string
 			if rows.Scan(&childID) == nil {
-				childBundle, err := Export(ctx, childID, configsDir, dockerCli)
+				childBundle, err := Export(ctx, childID, configsDir)
 				if err == nil {
 					b.SubWorkspaces = append(b.SubWorkspaces, *childBundle)
 				}
@@ -94,89 +78,6 @@ func Export(ctx context.Context, workspaceID, configsDir string, dockerCli *clie
 	}
 
 	return b, nil
-}
-
-// execInContainer runs a command in a container and returns stdout.
-func execInContainer(ctx context.Context, dockerCli *client.Client, containerName string, cmd []string) (string, error) {
-	execCfg := container.ExecOptions{
-		Cmd:          cmd,
-		AttachStdout: true,
-		AttachStderr: true,
-	}
-	execID, err := dockerCli.ContainerExecCreate(ctx, containerName, execCfg)
-	if err != nil {
-		return "", err
-	}
-	resp, err := dockerCli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
-	if err != nil {
-		return "", err
-	}
-	defer resp.Close()
-	var stdout bytes.Buffer
-	stdcopy.StdCopy(&stdout, io.Discard, io.LimitReader(resp.Reader, 5*1024*1024)) // 5MB cap
-	return strings.TrimSpace(stdout.String()), nil
-}
-
-// loadFromContainer reads config files from a running container's /configs directory.
-func (b *Bundle) loadFromContainer(ctx context.Context, dockerCli *client.Client, containerName string) error {
-	// Check container is running
-	info, err := dockerCli.ContainerInspect(ctx, containerName)
-	if err != nil || !info.State.Running {
-		return fmt.Errorf("container not running")
-	}
-
-	// Read system-prompt.md
-	if content, err := execInContainer(ctx, dockerCli, containerName, []string{"cat", "/configs/system-prompt.md"}); err == nil {
-		b.SystemPrompt = content
-	}
-
-	// Read config.yaml
-	if content, err := execInContainer(ctx, dockerCli, containerName, []string{"cat", "/configs/config.yaml"}); err == nil {
-		b.Prompts["config.yaml"] = content
-	}
-
-	// Read skills
-	output, err := execInContainer(ctx, dockerCli, containerName, []string{"sh", "-c", "ls -1 /configs/skills/ 2>/dev/null || true"})
-	if err != nil || output == "" {
-		return nil
-	}
-
-	for _, skillName := range strings.Split(output, "\n") {
-		skillName = strings.TrimSpace(skillName)
-		if skillName == "" {
-			continue
-		}
-		skill := BundleSkill{
-			ID:    skillName,
-			Name:  skillName,
-			Files: map[string]string{},
-		}
-
-		// List files in skill directory
-		skillFiles, err := execInContainer(ctx, dockerCli, containerName, []string{
-			"find", "/configs/skills/" + skillName, "-type", "f",
-		})
-		if err != nil {
-			continue
-		}
-		for _, filePath := range strings.Split(skillFiles, "\n") {
-			filePath = strings.TrimSpace(filePath)
-			if filePath == "" {
-				continue
-			}
-			relPath := strings.TrimPrefix(filePath, "/configs/skills/"+skillName+"/")
-			if content, err := execInContainer(ctx, dockerCli, containerName, []string{"cat", filePath}); err == nil {
-				skill.Files[relPath] = content
-			}
-		}
-
-		if content, ok := skill.Files["SKILL.md"]; ok {
-			skill.Description = extractDescription(content)
-		}
-		b.Skills = append(b.Skills, skill)
-	}
-
-	return nil
 }
 
 // loadFromConfigDir reads config files and skills from a workspace config directory.

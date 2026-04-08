@@ -2,37 +2,20 @@
 package provisioner
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 )
 
-// RuntimeImages maps runtime names to their Docker image tags.
-// Each adapter has its own pre-built image extending the base.
-var RuntimeImages = map[string]string{
-	"langgraph":  "workspace-template:langgraph",
-	"claude-code": "workspace-template:claude-code",
-	"openclaw":   "workspace-template:openclaw",
-	"deepagents": "workspace-template:deepagents",
-	"crewai":     "workspace-template:crewai",
-	"autogen":    "workspace-template:autogen",
-}
-
 const (
-	// DefaultImage is the fallback workspace Docker image.
-	DefaultImage = "workspace-template:langgraph"
+	// DefaultImage is the workspace runtime Docker image (unified — handles all runtimes).
+	DefaultImage = "workspace-template:latest"
 
 	// DefaultNetwork is the Docker network workspaces join.
 	DefaultNetwork = "agent-molecule-net"
@@ -47,23 +30,13 @@ const (
 // WorkspaceConfig holds the parameters needed to provision a workspace container.
 type WorkspaceConfig struct {
 	WorkspaceID   string
-	TemplatePath  string            // Host path to template dir to copy from (e.g. claude-code-default/)
-	ConfigFiles   map[string][]byte // Generated config files to write into /configs volume
-	PluginsPath   string            // Host path to plugins directory (mounted at /plugins)
-	WorkspacePath string            // Host path to bind-mount as /workspace (if empty, uses Docker named volume)
+	ConfigPath    string // Host path to workspace config directory
+	PluginsPath   string // Host path to plugins directory (mounted at /plugins)
+	WorkspacePath string // Host path to bind-mount as /workspace (if empty, uses Docker named volume)
 	Tier          int
 	Runtime       string            // "langgraph" (default) or "claude-code", "codex", "ollama", "custom"
 	EnvVars       map[string]string // Additional env vars (API keys, etc.)
 	PlatformURL   string
-}
-
-// ConfigVolumeName returns the Docker named volume for a workspace's configs.
-func ConfigVolumeName(workspaceID string) string {
-	id := workspaceID
-	if len(id) > 12 {
-		id = id[:12]
-	}
-	return fmt.Sprintf("ws-%s-configs", id)
 }
 
 // Provisioner manages Docker containers for workspace agents.
@@ -97,16 +70,6 @@ func InternalURL(workspaceID string) string {
 // Start provisions and starts a workspace container.
 func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, error) {
 	name := ContainerName(cfg.WorkspaceID)
-	configVolume := ConfigVolumeName(cfg.WorkspaceID)
-
-	// Create named volume for configs (idempotent — no-op if already exists)
-	_, err := p.cli.VolumeCreate(ctx, volume.CreateOptions{
-		Name: configVolume,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create config volume %s: %w", configVolume, err)
-	}
-	log.Printf("Provisioner: config volume %s ready", configVolume)
 
 	// Build environment variables
 	env := []string{
@@ -120,16 +83,9 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Select image based on runtime (each adapter has its own pre-built image)
-	image := DefaultImage
-	if cfg.Runtime != "" {
-		if img, ok := RuntimeImages[cfg.Runtime]; ok {
-			image = img
-		}
-	}
-
+	// Container config — single unified image handles all runtimes via config.yaml
 	containerCfg := &container.Config{
-		Image: image,
+		Image: DefaultImage,
 		Env:   env,
 		ExposedPorts: nat.PortSet{
 			nat.Port(DefaultPort + "/tcp"): {},
@@ -148,11 +104,8 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		workspaceMount = fmt.Sprintf("%s:/workspace", volumeName)
 		log.Printf("Provisioner: workspace volume %s (created by Docker if new)", volumeName)
 	}
-
-	// Mount configs as read-write named volume (agent and Files API need to write)
-	configMount := fmt.Sprintf("%s:/configs", configVolume)
 	binds := []string{
-		configMount,
+		fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath),
 		workspaceMount,
 	}
 	if cfg.PluginsPath != "" {
@@ -174,7 +127,7 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	// need writable filesystem for their runtime data (.claude/, .npm/, tmp files).
 	// Tier 1 still restricts the workspace volume (no writable /workspace).
 	if cfg.Tier == 1 {
-		tier1Binds := []string{configMount}
+		tier1Binds := []string{fmt.Sprintf("%s:/configs:ro", cfg.ConfigPath)}
 		if cfg.PluginsPath != "" {
 			tier1Binds = append(tier1Binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
 		}
@@ -202,20 +155,6 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		return "", fmt.Errorf("failed to start container: %w", err)
 	}
 
-	// Copy template files into /configs if TemplatePath is set
-	if cfg.TemplatePath != "" {
-		if err := p.CopyTemplateToContainer(ctx, resp.ID, cfg.TemplatePath); err != nil {
-			log.Printf("Provisioner: warning — failed to copy template to container %s: %v", name, err)
-		}
-	}
-
-	// Write generated config files into /configs if ConfigFiles is set
-	if len(cfg.ConfigFiles) > 0 {
-		if err := p.WriteFilesToContainer(ctx, resp.ID, cfg.ConfigFiles); err != nil {
-			log.Printf("Provisioner: warning — failed to write config files to container %s: %v", name, err)
-		}
-	}
-
 	// Resolve the host-mapped port so the platform can reach the container from the host.
 	// The provisioner uses ephemeral port binding (127.0.0.1:0 → 8000/tcp), so we need
 	// to inspect the container to find the actual assigned port.
@@ -235,106 +174,6 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 
 	log.Printf("Provisioner: started container %s for workspace %s at %s (internal: %s)", name, cfg.WorkspaceID, hostURL, InternalURL(cfg.WorkspaceID))
 	return hostURL, nil
-}
-
-// CopyTemplateToContainer copies files from a host directory into /configs in the container.
-func (p *Provisioner) CopyTemplateToContainer(ctx context.Context, containerID, templatePath string) error {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-
-	err := filepath.Walk(templatePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(templatePath, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		header.Name = rel
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-
-		if !info.IsDir() {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if _, err := tw.Write(data); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create tar from %s: %w", templatePath, err)
-	}
-	if err := tw.Close(); err != nil {
-		return fmt.Errorf("failed to close tar writer: %w", err)
-	}
-
-	return p.cli.CopyToContainer(ctx, containerID, "/configs", &buf, container.CopyToContainerOptions{})
-}
-
-// WriteFilesToContainer writes in-memory files into /configs in the container.
-func (p *Provisioner) WriteFilesToContainer(ctx context.Context, containerID string, files map[string][]byte) error {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-
-	createdDirs := map[string]bool{}
-	for name, data := range files {
-		// Create parent directories in tar (deduplicated)
-		dir := filepath.Dir(name)
-		if dir != "." && !createdDirs[dir] {
-			tw.WriteHeader(&tar.Header{
-				Typeflag: tar.TypeDir,
-				Name:     dir + "/",
-				Mode:     0755,
-			})
-			createdDirs[dir] = true
-		}
-
-		header := &tar.Header{
-			Name: name,
-			Mode: 0644,
-			Size: int64(len(data)),
-		}
-		if err := tw.WriteHeader(header); err != nil {
-			return fmt.Errorf("failed to write tar header for %s: %w", name, err)
-		}
-		if _, err := tw.Write(data); err != nil {
-			return fmt.Errorf("failed to write tar data for %s: %w", name, err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return fmt.Errorf("failed to close tar writer: %w", err)
-	}
-
-	return p.cli.CopyToContainer(ctx, containerID, "/configs", &buf, container.CopyToContainerOptions{})
-}
-
-// CopyToContainer exposes CopyToContainer from the Docker client for use by other packages.
-func (p *Provisioner) CopyToContainer(ctx context.Context, containerID, dstPath string, content io.Reader) error {
-	return p.cli.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{})
-}
-
-// RemoveVolume removes the config volume for a workspace.
-func (p *Provisioner) RemoveVolume(ctx context.Context, workspaceID string) error {
-	volName := ConfigVolumeName(workspaceID)
-	if err := p.cli.VolumeRemove(ctx, volName, true); err != nil {
-		return fmt.Errorf("failed to remove volume %s: %w", volName, err)
-	}
-	log.Printf("Provisioner: removed config volume %s", volName)
-	return nil
 }
 
 // Stop stops and removes a workspace container.

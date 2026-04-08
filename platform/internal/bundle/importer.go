@@ -3,6 +3,9 @@ package bundle
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
@@ -55,14 +58,21 @@ func Import(
 		"source_bundle_id": b.ID,
 	})
 
-	// Build config files in memory for the provisioner
-	configFiles := buildBundleConfigFiles(b)
+	// Write config files to a temp directory for the provisioner
+	configDir, err := writeBundleConfig(b)
+	if err != nil {
+		log.Printf("Import: failed to write config for %s: %v", wsID, err)
+		result.Status = "failed"
+		result.Error = err.Error()
+		markFailed(ctx, wsID, broadcaster, err)
+		return result
+	}
 
 	// Provision the container if provisioner is available
 	if prov != nil {
 		cfg := provisioner.WorkspaceConfig{
 			WorkspaceID: wsID,
-			ConfigFiles: configFiles,
+			ConfigPath:  configDir,
 			Tier:        b.Tier,
 			EnvVars:     map[string]string{},
 			PlatformURL: platformURL,
@@ -86,28 +96,44 @@ func Import(
 	return result
 }
 
-// buildBundleConfigFiles builds a map of config files from a bundle for writing into a container volume.
-func buildBundleConfigFiles(b *Bundle) map[string][]byte {
-	files := make(map[string][]byte)
+// writeBundleConfig writes a bundle's config, prompt, and skill files to a temp directory.
+func writeBundleConfig(b *Bundle) (string, error) {
+	idPrefix := b.ID
+	if len(idPrefix) > 8 {
+		idPrefix = idPrefix[:8]
+	}
+	dir, err := os.MkdirTemp("", fmt.Sprintf("ws-bundle-%s-*", idPrefix))
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
 
 	// Write system-prompt.md
 	if b.SystemPrompt != "" {
-		files["system-prompt.md"] = []byte(b.SystemPrompt)
+		if err := os.WriteFile(filepath.Join(dir, "system-prompt.md"), []byte(b.SystemPrompt), 0644); err != nil {
+			return "", fmt.Errorf("failed to write system-prompt.md: %w", err)
+		}
 	}
 
 	// Write config.yaml from prompts if present
 	if configYaml, ok := b.Prompts["config.yaml"]; ok {
-		files["config.yaml"] = []byte(configYaml)
-	}
-
-	// Write skills
-	for _, skill := range b.Skills {
-		for relPath, content := range skill.Files {
-			files[fmt.Sprintf("skills/%s/%s", skill.ID, relPath)] = []byte(content)
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(configYaml), 0644); err != nil {
+			return "", fmt.Errorf("failed to write config.yaml: %w", err)
 		}
 	}
 
-	return files
+	// Write skills
+	skillsDir := filepath.Join(dir, "skills")
+	os.MkdirAll(skillsDir, 0755)
+	for _, skill := range b.Skills {
+		skillDir := filepath.Join(skillsDir, skill.ID)
+		for relPath, content := range skill.Files {
+			fullPath := filepath.Join(skillDir, relPath)
+			os.MkdirAll(filepath.Dir(fullPath), 0755)
+			os.WriteFile(fullPath, []byte(content), 0644)
+		}
+	}
+
+	return dir, nil
 }
 
 func markFailed(ctx context.Context, wsID string, broadcaster *events.Broadcaster, err error) {
