@@ -69,7 +69,7 @@ See [Config Format — shared_context](../agent-runtime/config-format.md) and [S
 Since Local Memory degrades as the context window fills, agents feature an independent Consolidation Loop. Similar to human sleep, when an agent reaches a configurable TTL of heartbeat-idleness, it can wake up a background goroutine/LangGraph thread to summarize noisy local scratchpad entries into dense, high-value knowledge facts, committing them back to L1 or L2 memory.
 
 ### 5. Memory-to-Skill Promotion
-When consolidation keeps surfacing the same stable workflow, the agent should stop treating it as a one-off memory entry and promote it into a reusable skill. The promotion signal is intentionally simple:
+When consolidation keeps surfacing the same stable workflow, the agent should stop treating it as a one-off memory entry and mark it as a reusable skill candidate. The promotion signal is intentionally simple:
 
 - `memory-curation` compresses the durable result into a packet
 - repeated success evidence is recorded as `repetition_signal`
@@ -78,4 +78,4 @@ When consolidation keeps surfacing the same stable workflow, the agent should st
 
 This keeps the boundary clear: `awareness` stores durable memory, while skills store repeatable procedure. The hot-reload path then makes the new skill available without a restart.
 
-When a promotion packet is committed, the workspace emits a best-effort `skill_promotion` activity to the platform and follows it with a lightweight heartbeat update (`current_task = "Skill promotion: ..."`) so the self-improving loop is visible in runtime telemetry and in the canvas task strip without introducing a second storage layer.
+When a promotion packet is committed, the workspace emits a best-effort `skill_promotion` activity to the platform and follows it with a lightweight heartbeat update (`current_task = "Skill promotion: ..."`) so the promotion is visible in runtime telemetry and in the canvas task strip. The runtime does not auto-generate a separate skill registry or hidden lifecycle manager; it only surfaces the signal so the existing skill tools and hot-reload path can act on it.

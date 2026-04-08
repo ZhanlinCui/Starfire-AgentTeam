@@ -154,7 +154,7 @@ def test_commit_memory_uses_platform_fallback_without_awareness(monkeypatch, mem
     assert captured["json"] == {"content": "remember fallback", "scope": "GLOBAL"}
 
 
-def test_commit_memory_promoted_packet_logs_activity(monkeypatch, memory_modules):
+def test_commit_memory_promoted_packet_logs_skill_promotion(monkeypatch, tmp_path, memory_modules):
     memory, _awareness_client = memory_modules
     captured = {"calls": []}
 
@@ -209,6 +209,8 @@ def test_commit_memory_promoted_packet_logs_activity(monkeypatch, memory_modules
     assert heartbeat_url == "http://platform.test/registry/heartbeat"
     assert heartbeat_payload["current_task"] == "Skill promotion: Repeated GitHub webhook handling is now a skill candidate"
     assert heartbeat_payload["active_tasks"] == 1
+
+    assert not (tmp_path / "skills").exists()
 
 
 def test_search_memory_rejects_invalid_scope(memory_modules):

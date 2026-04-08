@@ -236,7 +236,7 @@ Both commands stay intentionally small and reuse the existing workspace Files AP
 
 ## Skill Promotion Loop
 
-When the agent sees the same workflow succeed repeatedly, it should compress that workflow into memory first and then promote it into a skill without waiting for a later review pass.
+When the agent sees the same workflow succeed repeatedly, it should compress that workflow into memory first and then promote it into a skill without waiting for a later review pass. Hermes-style promotion stays intentionally thin: the runtime records the promotion as a signal, and the actual skill package lifecycle remains a separate skill-management concern rather than a second hidden control plane.
 
 The handoff is:
 
@@ -244,11 +244,11 @@ The handoff is:
 2. The memory packet sets `promote_to_skill = true`
 3. The packet also carries a `repetition_signal` proving the workflow has repeated cleanly
 4. `skill-authoring` turns that packet into a narrow `SKILL.md`
-5. The existing file watcher hot-reloads the new skill and rebuilds the Agent Card
+5. The existing skill loader / hot-reload path picks up the skill package when it has been created through the normal skill lifecycle
 
-This is intentionally a local runtime loop, not a remote registry or human approval queue. The goal is to let repeated work become reusable behavior as soon as it is stable enough to write down.
+This is intentionally a local runtime signal, not a remote registry or human approval queue. The goal is to keep the promotion observable and narrowly scoped, while avoiding a custom auto-generation layer that would duplicate the skill system itself.
 
-For observability, the workspace also writes a `skill_promotion` activity when a promotion packet is committed, and then sends a lightweight heartbeat with `current_task = "Skill promotion: ..."` so the canvas can treat the promotion as an explicit in-flight task.
+For observability, the workspace writes a `skill_promotion` activity when a promotion packet is committed, and then sends a lightweight heartbeat with `current_task = "Skill promotion: ..."` so the canvas can treat the promotion as an explicit in-flight task.
 
 ## ClawHub Compatibility
 
