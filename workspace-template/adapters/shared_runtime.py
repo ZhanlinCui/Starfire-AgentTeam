@@ -154,13 +154,20 @@ async def set_current_task(heartbeat: Any, task: str) -> None:
     """Update current task on heartbeat and push immediately to platform.
 
     The heartbeat loop only fires every 30s, so quick tasks would finish
-    before the canvas ever sees them. This pushes immediately via HTTP.
+    before the canvas ever sees them. Setting a task pushes immediately.
+    Clearing a task only updates the heartbeat object — the next heartbeat
+    cycle will broadcast the clear, keeping the task visible longer.
     """
     if heartbeat:
         heartbeat.current_task = task
         heartbeat.active_tasks = 1 if task else 0
 
-    # Push immediately so the canvas shows the task in real-time
+    # Only push immediately when SETTING a task (not clearing)
+    # Clearing is handled by the next heartbeat cycle, which keeps
+    # the task visible on the canvas for quick A2A responses
+    if not task:
+        return
+
     import os
     workspace_id = os.environ.get("WORKSPACE_ID", "")
     platform_url = os.environ.get("PLATFORM_URL", "")
@@ -173,7 +180,7 @@ async def set_current_task(heartbeat: Any, task: str) -> None:
                     json={
                         "workspace_id": workspace_id,
                         "current_task": task,
-                        "active_tasks": 1 if task else 0,
+                        "active_tasks": 1,
                         "error_rate": 0,
                         "sample_error": "",
                         "uptime_seconds": 0,
