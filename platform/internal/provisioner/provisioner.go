@@ -367,6 +367,53 @@ func (p *Provisioner) ExecRead(ctx context.Context, containerName, filePath stri
 	return clean, nil
 }
 
+// ReadFromVolume reads a file from a Docker named volume using a throwaway container.
+// Used as a fallback when ExecRead fails (container already stopped).
+func (p *Provisioner) ReadFromVolume(ctx context.Context, volumeName, filePath string) ([]byte, error) {
+	resp, err := p.cli.ContainerCreate(ctx, &container.Config{
+		Image: "alpine",
+		Cmd:   []string{"cat", "/vol/" + filePath},
+	}, &container.HostConfig{
+		Binds: []string{volumeName + ":/vol:ro"},
+	}, nil, nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer p.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+
+	if err := p.cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return nil, err
+	}
+	waitCh, errCh := p.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
+	select {
+	case <-waitCh:
+	case err := <-errCh:
+		if err != nil {
+			return nil, err
+		}
+	}
+	reader, err := p.cli.ContainerLogs(ctx, resp.ID, container.LogsOptions{ShowStdout: true})
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	// Strip Docker multiplexed stream headers
+	var clean []byte
+	for len(data) >= 8 {
+		size := int(data[4])<<24 | int(data[5])<<16 | int(data[6])<<8 | int(data[7])
+		if 8+size > len(data) {
+			break
+		}
+		clean = append(clean, data[8:8+size]...)
+		data = data[8+size:]
+	}
+	return clean, nil
+}
+
 // RemoveVolume removes the config volume for a workspace.
 func (p *Provisioner) RemoveVolume(ctx context.Context, workspaceID string) error {
 	volName := ConfigVolumeName(workspaceID)

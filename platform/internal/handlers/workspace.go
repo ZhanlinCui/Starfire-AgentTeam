@@ -575,9 +575,22 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 			}
 		}
 	}
-	// Fallback: use runtime read from the container before we stopped it
+	// Fallback 1: use runtime read from the container before we stopped it
 	if payload.Runtime == "" {
 		payload.Runtime = containerRuntime
+	}
+	// Fallback 2: read from config volume if ExecRead also failed (container was already dead)
+	if payload.Runtime == "" && h.provisioner != nil {
+		if cfgData, err := h.provisioner.ReadFromVolume(ctx, provisioner.ConfigVolumeName(id), "config.yaml"); err == nil {
+			for _, line := range strings.Split(string(cfgData), "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "runtime:") {
+					payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+					log.Printf("Restart: detected runtime %q from config volume for %s", payload.Runtime, wsName)
+					break
+				}
+			}
+		}
 	}
 
 	// If runtime has a default template and no template was found yet, use it
