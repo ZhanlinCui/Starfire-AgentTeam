@@ -27,6 +27,16 @@ AWARENESS_NAMESPACE=workspace:ws-reno-stars-seo-001
 
 When awareness is configured, the workspace keeps using the same `commit_memory` / `search_memory` tools, but the backend routes those calls into the workspace's own awareness namespace. If the two awareness env vars are absent, the runtime falls back to the platform memory API for compatibility.
 
+`awareness` is the workspace's durable memory backend. It stores facts that should survive across turns, while `session-search` provides the thin recall surface over recent activity and memory rows. The division of labor stays narrow:
+
+- `memory-curation` decides what is durable and compresses it into a packet
+- `awareness` persists that packet inside the workspace's isolated namespace
+- `session-search` recovers recent decisions, notes, and activity traces
+- `skill-authoring` only runs when a repeated workflow is stable enough to become a reusable skill
+- `skills runtime` loads the resulting skill package and hot-reloads it into the agent
+
+This keeps the runtime source-faithful to Hermes-style behavior: memory is for persistence and recall, skills are for repeatable procedure, and promotion is only a signal until the normal skill lifecycle creates the actual package.
+
 ## workspace-configs-templates/
 
 One folder per workspace type. Contains the "personality" of the workspace — the specific skills, prompts, and config for that role.
