@@ -120,10 +120,10 @@ func TestExtended_WorkspaceRestart_NoProvisioner(t *testing.T) {
 	// provisioner is nil — should return 503
 	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp/configs")
 
-	// Expect SELECT for workspace existence check
-	mock.ExpectQuery("SELECT status, name, tier FROM workspaces WHERE id =").
+	// Expect SELECT for workspace existence check (includes runtime column)
+	mock.ExpectQuery("SELECT status, name, tier").
 		WithArgs("ws-restart").
-		WillReturnRows(sqlmock.NewRows([]string{"status", "name", "tier"}).AddRow("offline", "Restarting Agent", 1))
+		WillReturnRows(sqlmock.NewRows([]string{"status", "name", "tier", "runtime"}).AddRow("offline", "Restarting Agent", 1, "langgraph"))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)

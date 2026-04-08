@@ -248,9 +248,9 @@ func TestWorkspaceCreate(t *testing.T) {
 	broadcaster := newTestBroadcaster()
 	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp/configs")
 
-	// Expect workspace INSERT (uuid is dynamic, use AnyArg)
+	// Expect workspace INSERT (uuid is dynamic, use AnyArg for id, runtime, awareness_namespace)
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Test Agent", nil, 1, sqlmock.AnyArg(), (*string)(nil)).
+		WithArgs(sqlmock.AnyArg(), "Test Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect canvas_layouts INSERT
