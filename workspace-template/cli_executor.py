@@ -366,6 +366,7 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
 
         # Auto-recall: inject prior memories into the prompt on first message (no session yet)
+        original_input = user_input  # Keep clean copy for memory
         if not self._session_id:
             memories = await self._recall_memories()
             if memories:
@@ -375,8 +376,8 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             await self._run_cli(user_input, event_queue)
         finally:
             await self._set_current_task("")
-            # Auto-commit: save a brief memory of this interaction
-            await self._commit_memory(f"User asked: {user_input[:200]}")
+            # Auto-commit: save the original user request (not the memory-injected version)
+            await self._commit_memory(f"Conversation: {original_input[:200]}")
 
     async def _run_cli(self, user_input: str, event_queue: EventQueue):
         """Run the CLI subprocess and enqueue the result."""
