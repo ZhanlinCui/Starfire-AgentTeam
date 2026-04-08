@@ -187,6 +187,9 @@ export function ChatTab({ workspaceId, data }: Props) {
           } else if (type === "agent_log") {
             const summary = (p.summary as string) || "";
             if (summary) line = summary.slice(0, 80);
+          } else if (type === "skill_promotion") {
+            const summary = (p.summary as string) || "";
+            if (summary) line = `★ ${summary.slice(0, 80)}`;
           }
 
           if (line) {

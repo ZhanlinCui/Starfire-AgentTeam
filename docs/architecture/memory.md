@@ -77,3 +77,5 @@ When consolidation keeps surfacing the same stable workflow, the agent should st
 - `skill-authoring` turns the packet into a narrow `SKILL.md`
 
 This keeps the boundary clear: `awareness` stores durable memory, while skills store repeatable procedure. The hot-reload path then makes the new skill available without a restart.
+
+When a promotion packet is committed, the workspace emits a best-effort `skill_promotion` activity to the platform so the self-improving loop is visible in runtime telemetry without introducing a second storage layer.

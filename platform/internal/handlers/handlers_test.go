@@ -935,7 +935,7 @@ func TestActivityHandler_ListMaxLimit(t *testing.T) {
 // ---------- TestActivityHandler_ReportAllValidTypes ----------
 
 func TestActivityHandler_ReportAllValidTypes(t *testing.T) {
-	validTypes := []string{"a2a_send", "a2a_receive", "task_update", "agent_log", "error"}
+	validTypes := []string{"a2a_send", "a2a_receive", "task_update", "agent_log", "skill_promotion", "error"}
 
 	for _, actType := range validTypes {
 		t.Run(actType, func(t *testing.T) {

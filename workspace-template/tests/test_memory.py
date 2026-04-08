@@ -1,6 +1,7 @@
 """Tests for workspace memory tools and awareness routing."""
 
 import asyncio
+import json
 import importlib.util
 import sys
 from pathlib import Path
@@ -151,6 +152,59 @@ def test_commit_memory_uses_platform_fallback_without_awareness(monkeypatch, mem
     assert result == {"success": True, "id": "platform-mem", "scope": "GLOBAL"}
     assert captured["url"] == "http://platform.test/workspaces/ws-test/memories"
     assert captured["json"] == {"content": "remember fallback", "scope": "GLOBAL"}
+
+
+def test_commit_memory_promoted_packet_logs_activity(monkeypatch, memory_modules):
+    memory, _awareness_client = memory_modules
+    captured = {"calls": []}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured.setdefault("timeouts", []).append(timeout)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json):
+            captured["calls"].append((url, json))
+            if url.endswith("/memories"):
+                return _FakeResponse(201, {"id": "mem-skill"})
+            if url.endswith("/activity"):
+                return _FakeResponse(200, {"status": "logged"})
+            raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(memory.httpx, "AsyncClient", FakeAsyncClient)
+
+    packet = {
+        "title": "Normalize webhook ingress",
+        "summary": "Repeated GitHub webhook handling is now a skill candidate",
+        "promote_to_skill": True,
+        "repetition_signal": {
+            "count": 2,
+            "workflow": "github webhook ingress",
+        },
+        "what changed": "The same webhook normalization was done twice cleanly.",
+        "why it matters": "It is now stable enough to promote into SKILL.md.",
+    }
+
+    result = asyncio.run(memory.commit_memory(json.dumps(packet), "team"))
+
+    assert result == {"success": True, "id": "mem-skill", "scope": "TEAM"}
+    assert len(captured["calls"]) == 2
+    memory_url, memory_payload = captured["calls"][0]
+    activity_url, activity_payload = captured["calls"][1]
+    assert memory_url == "http://platform.test/workspaces/ws-test/memories"
+    assert memory_payload == {"content": json.dumps(packet), "scope": "TEAM"}
+    assert activity_url == "http://platform.test/workspaces/ws-test/activity"
+    assert activity_payload["activity_type"] == "agent_log"
+    assert activity_payload["method"] == "memory/skill-promotion"
+    assert activity_payload["summary"] == "Repeated GitHub webhook handling is now a skill candidate"
+    assert activity_payload["metadata"]["promote_to_skill"] is True
+    assert activity_payload["metadata"]["memory_id"] == "mem-skill"
+    assert activity_payload["metadata"]["repetition_signal"] == packet["repetition_signal"]
 
 
 def test_search_memory_rejects_invalid_scope(memory_modules):

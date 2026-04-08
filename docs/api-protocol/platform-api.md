@@ -139,7 +139,7 @@ Communication topology is derived from the `parent_id` hierarchy — there is no
 | `GET` | `/workspaces/:id/activity` | List activity logs (params: `type`, `limit`) |
 | `POST` | `/workspaces/:id/activity` | Agent self-reports activity (body: `{ activity_type, method?, summary?, target_id?, status?, error_detail?, duration_ms?, metadata? }`) |
 
-Activity types: `a2a_send`, `a2a_receive`, `task_update`, `agent_log`, `error`. Invalid types return 400. Limit defaults to 100, max 500. A2A proxy calls are logged automatically.
+Activity types: `a2a_send`, `a2a_receive`, `task_update`, `agent_log`, `skill_promotion`, `error`. Invalid types return 400. Limit defaults to 100, max 500. A2A proxy calls are logged automatically.
 
 ### Traces (Langfuse)
 

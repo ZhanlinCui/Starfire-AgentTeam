@@ -234,10 +234,10 @@ func (h *ActivityHandler) Report(c *gin.Context) {
 
 	// Validate activity type
 	switch body.ActivityType {
-	case "a2a_send", "a2a_receive", "task_update", "agent_log", "error":
+	case "a2a_send", "a2a_receive", "task_update", "agent_log", "skill_promotion", "error":
 		// valid
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid activity_type, must be one of: a2a_send, a2a_receive, task_update, agent_log, error"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid activity_type, must be one of: a2a_send, a2a_receive, task_update, agent_log, skill_promotion, error"})
 		return
 	}
 
@@ -315,7 +315,7 @@ func LogActivity(ctx context.Context, broadcaster *events.Broadcaster, params Ac
 
 type ActivityParams struct {
 	WorkspaceID  string
-	ActivityType string // a2a_send, a2a_receive, task_update, agent_log, error
+	ActivityType string // a2a_send, a2a_receive, task_update, agent_log, skill_promotion, error
 	SourceID     *string
 	TargetID     *string
 	Method       *string

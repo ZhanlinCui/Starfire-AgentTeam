@@ -248,6 +248,8 @@ The handoff is:
 
 This is intentionally a local runtime loop, not a remote registry or human approval queue. The goal is to let repeated work become reusable behavior as soon as it is stable enough to write down.
 
+For observability, the workspace also writes a `skill_promotion` activity when a promotion packet is committed, so the canvas and platform logs can show that a repeatable workflow is being upgraded.
+
 ## ClawHub Compatibility
 
 ### Installing from ClawHub

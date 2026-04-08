@@ -22,6 +22,7 @@ func TestSessionSearchReturnsActivityAndMemory(t *testing.T) {
 		"kind", "id", "workspace_id", "label", "content", "method", "status", "request_body", "response_body", "created_at",
 	}).
 		AddRow("activity", "act-1", "ws-123", "task_update", "Working on docs", "POST", "ok", `{"task":"docs"}`, `{"ok":true}`, time.Now()).
+		AddRow("activity", "act-2", "ws-123", "skill_promotion", "Promoted repeatable workflow", "memory/skill-promotion", "ok", `{"promote_to_skill":true}`, `{"id":"mem-2"}`, time.Now()).
 		AddRow("memory", "mem-1", "ws-123", "TEAM", "remember the docs path", "", "", nil, nil, time.Now())
 
 	mock.ExpectQuery("WITH session_items AS").
@@ -44,10 +45,10 @@ func TestSessionSearchReturnsActivityAndMemory(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if len(resp) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(resp))
+	if len(resp) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(resp))
 	}
-	if resp[0]["kind"] != "activity" || resp[1]["kind"] != "memory" {
+	if resp[0]["kind"] != "activity" || resp[1]["kind"] != "activity" || resp[2]["kind"] != "memory" {
 		t.Fatalf("unexpected result kinds: %#v", resp)
 	}
 

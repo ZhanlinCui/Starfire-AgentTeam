@@ -547,6 +547,7 @@ describe("context menu", () => {
       url: "",
       parentId: null,
       currentTask: "",
+      needsRestart: false,
     },
   };
 

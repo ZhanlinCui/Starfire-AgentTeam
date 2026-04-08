@@ -10,13 +10,14 @@ interface Props {
   workspaceId: string;
 }
 
-type FilterType = "all" | "a2a_receive" | "a2a_send" | "task_update" | "agent_log" | "error";
+type FilterType = "all" | "a2a_receive" | "a2a_send" | "task_update" | "agent_log" | "skill_promotion" | "error";
 
 const FILTERS: { id: FilterType; label: string; icon: string }[] = [
   { id: "all", label: "All", icon: "●" },
   { id: "a2a_receive", label: "A2A In", icon: "↙" },
   { id: "a2a_send", label: "A2A Out", icon: "↗" },
   { id: "task_update", label: "Tasks", icon: "◆" },
+  { id: "skill_promotion", label: "Skill Promo", icon: "★" },
   { id: "agent_log", label: "Logs", icon: "▸" },
   { id: "error", label: "Errors", icon: "!" },
 ];
@@ -25,6 +26,7 @@ const TYPE_COLORS: Record<string, { text: string; bg: string; border: string }> 
   a2a_receive: { text: "text-blue-400", bg: "bg-blue-950/30", border: "border-blue-800/30" },
   a2a_send: { text: "text-cyan-400", bg: "bg-cyan-950/30", border: "border-cyan-800/30" },
   task_update: { text: "text-amber-400", bg: "bg-amber-950/30", border: "border-amber-800/30" },
+  skill_promotion: { text: "text-violet-300", bg: "bg-violet-950/30", border: "border-violet-800/30" },
   agent_log: { text: "text-zinc-400", bg: "bg-zinc-800/30", border: "border-zinc-700/30" },
   error: { text: "text-red-400", bg: "bg-red-950/30", border: "border-red-800/30" },
 };
@@ -371,6 +373,7 @@ function formatType(type: string): string {
     case "a2a_receive": return "A2A IN";
     case "a2a_send": return "A2A OUT";
     case "task_update": return "TASK";
+    case "skill_promotion": return "PROMO";
     case "agent_log": return "LOG";
     case "error": return "ERROR";
     default: return type.toUpperCase();
