@@ -84,7 +84,7 @@ def _make_e2b_mock(stdout_text: str = "hello e2b\n", stderr_text: str = ""):
 
 
 def _run_sync(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------

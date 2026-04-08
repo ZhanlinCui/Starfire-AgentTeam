@@ -18,6 +18,7 @@ from a2a.types import AgentCard, AgentCapabilities, AgentSkill
 from adapters import get_adapter, AdapterConfig
 from config import load_config
 from heartbeat import HeartbeatLoop
+from tools.awareness_client import get_awareness_config
 
 
 def get_machine_ip() -> str:
@@ -36,10 +37,13 @@ async def main():
     workspace_id = os.environ.get("WORKSPACE_ID", "workspace-default")
     config_path = os.environ.get("WORKSPACE_CONFIG_PATH", "/configs")
     platform_url = os.environ.get("PLATFORM_URL", "http://platform:8080")
+    awareness_config = get_awareness_config()
 
     # 1. Load config
     config = load_config(config_path)
     port = config.a2a.port
+    if awareness_config:
+        print(f"Awareness enabled for namespace: {awareness_config['namespace']}")
 
     # 2. Create heartbeat (passed to adapter for task tracking)
     heartbeat = HeartbeatLoop(platform_url, workspace_id)

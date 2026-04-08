@@ -41,7 +41,11 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
 
     # Instantiate the LLM
     if provider == "anthropic":
-        llm = LLMClass(model=model_name)
+        llm_kwargs = {"model": model_name}
+        anthropic_base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
+        if anthropic_base_url:
+            llm_kwargs["anthropic_api_url"] = anthropic_base_url
+        llm = LLMClass(**llm_kwargs)
     elif provider == "openrouter":
         api_key = os.environ.get("OPENROUTER_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
         max_tokens = int(os.environ.get("MAX_TOKENS", "2048"))
@@ -59,7 +63,11 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
             openai_api_base="https://api.groq.com/openai/v1",
         )
     elif provider == "openai":
-        llm = LLMClass(model=model_name)
+        llm_kwargs = {"model": model_name}
+        openai_base_url = os.environ.get("OPENAI_BASE_URL", "")
+        if openai_base_url:
+            llm_kwargs["openai_api_base"] = openai_base_url
+        llm = LLMClass(**llm_kwargs)
     else:
         llm = LLMClass(model=model_name)
 

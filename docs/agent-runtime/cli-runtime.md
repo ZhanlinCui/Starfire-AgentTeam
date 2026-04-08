@@ -209,6 +209,10 @@ a2a info                           # Show workspace info
 
 Both approaches use the same backend: platform registry for discovery, A2A protocol for messaging, and access control enforcement (parent↔child, siblings only).
 
+## Workspace Awareness
+
+CLI runtimes keep the same memory tool surface as the Python runtime. When `AWARENESS_URL` and `AWARENESS_NAMESPACE` are injected into the workspace, `commit_memory` and `search_memory` route to the workspace's own awareness namespace instead of the fallback platform memory API. This keeps the agent contract stable while giving each workspace an isolated memory scope.
+
 ## Task Status Reporting
 
 Any process inside a workspace container (cron jobs, scripts, background tasks) can update the canvas card display:

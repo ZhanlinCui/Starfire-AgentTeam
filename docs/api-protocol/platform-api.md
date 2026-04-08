@@ -33,6 +33,8 @@ All scoped endpoints use the `X-Workspace-ID` header to identify the calling wor
 | `POST` | `/workspaces/:id/restart` | Restart offline/failed workspace (stops old container, re-provisions) |
 | `POST` | `/workspaces/:id/a2a` | Proxy A2A JSON-RPC to workspace agent (injects `messageId`, wraps envelope) |
 
+Newly created workspaces also receive an `awareness_namespace` persisted on the workspace row and injected into the provisioned container as `AWARENESS_NAMESPACE` alongside `AWARENESS_URL`.
+
 ### Config & Memory
 
 | Method | Path | Description |
@@ -53,7 +55,7 @@ All scoped endpoints use the `X-Workspace-ID` header to identify the calling wor
 | `DELETE` | `/workspaces/:id/secrets/:key` | Delete a secret |
 | `GET` | `/workspaces/:id/model` | Get current model override from secrets |
 
-Secrets are stored in `workspace_secrets` table as plaintext bytes for MVP (AES-256 encryption planned for Phase 14). The provisioner reads secrets at container deploy time and injects them as environment variables. Common keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MODEL_PROVIDER`.
+Secrets are stored in `workspace_secrets` table as plaintext bytes for MVP (AES-256 encryption planned for Phase 14). The provisioner reads secrets at container deploy time and injects them as environment variables. Common keys: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `MODEL_PROVIDER`, `AWARENESS_URL`, `AWARENESS_NAMESPACE`.
 
 ### Terminal
 
