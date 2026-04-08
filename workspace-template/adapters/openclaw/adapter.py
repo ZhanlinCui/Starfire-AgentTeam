@@ -17,6 +17,7 @@ import shutil
 import subprocess
 
 from adapters.base import BaseAdapter, AdapterConfig
+from adapters.shared_runtime import brief_task, extract_message_text, set_current_task
 from a2a.server.agent_execution import AgentExecutor
 
 logger = logging.getLogger(__name__)
@@ -189,24 +190,14 @@ class OpenClawA2AExecutor(AgentExecutor):
 
     async def execute(self, context, event_queue):
         from a2a.utils import new_agent_text_message
-        from a2a_executor import set_current_task
 
-        # Extract user message
-        text_parts = []
-        if context.message and context.message.parts:
-            for part in context.message.parts:
-                if hasattr(part, "text") and part.text:
-                    text_parts.append(part.text)
-                elif hasattr(part, "root") and hasattr(part.root, "text"):
-                    text_parts.append(part.root.text)
-        user_message = " ".join(text_parts).strip()
+        user_message = extract_message_text(context)
 
         if not user_message:
             await event_queue.enqueue_event(new_agent_text_message("No message provided"))
             return
 
-        brief = user_message[:60] + ("..." if len(user_message) > 60 else "")
-        await set_current_task(self._heartbeat, brief)
+        await set_current_task(self._heartbeat, brief_task(user_message))
 
         # Call OpenClaw agent via CLI
         try:

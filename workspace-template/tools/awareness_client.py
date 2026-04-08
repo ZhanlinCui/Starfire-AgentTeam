@@ -11,6 +11,8 @@ import sys
 from types import SimpleNamespace
 from typing import Any
 
+from policies.namespaces import resolve_awareness_namespace
+
 try:  # pragma: no cover - optional runtime dependency in lightweight test envs
     import httpx  # type: ignore
 except ImportError:  # pragma: no cover
@@ -23,9 +25,13 @@ DEFAULT_AWARENESS_TIMEOUT = 10.0
 def get_awareness_config() -> dict[str, str] | None:
     """Return awareness connection settings if the workspace is configured."""
     base_url = os.environ.get("AWARENESS_URL", "").rstrip("/")
-    namespace = os.environ.get("AWARENESS_NAMESPACE", "").strip()
-    if not base_url or not namespace:
+    workspace_id = os.environ.get("WORKSPACE_ID", "")
+    configured_namespace = os.environ.get("AWARENESS_NAMESPACE", "")
+    if not base_url:
         return None
+    if not workspace_id and not configured_namespace:
+        return None
+    namespace = resolve_awareness_namespace(workspace_id, configured_namespace)
     return {
         "base_url": base_url,
         "namespace": namespace,

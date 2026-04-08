@@ -20,6 +20,7 @@ from config import load_config
 from heartbeat import HeartbeatLoop
 from preflight import run_preflight, render_preflight_report
 from tools.awareness_client import get_awareness_config
+from policies.namespaces import resolve_awareness_namespace
 
 
 def get_machine_ip() -> str:
@@ -48,7 +49,11 @@ async def main():
     if not preflight.ok:
         raise SystemExit(1)
     if awareness_config:
-        print(f"Awareness enabled for namespace: {awareness_config['namespace']}")
+        awareness_namespace = resolve_awareness_namespace(
+            workspace_id,
+            awareness_config.get("namespace", ""),
+        )
+        print(f"Awareness enabled for namespace: {awareness_namespace}")
 
     # 2. Create heartbeat (passed to adapter for task tracking)
     heartbeat = HeartbeatLoop(platform_url, workspace_id)

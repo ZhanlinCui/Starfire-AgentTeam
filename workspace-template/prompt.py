@@ -1,9 +1,9 @@
 """Build the system prompt for the workspace agent."""
 
-import json
 from pathlib import Path
 
 from skills.loader import LoadedSkill
+from adapters.shared_runtime import build_peer_section
 
 DEFAULT_MEMORY_SNAPSHOT_FILES = ("MEMORY.md", "USER.md")
 
@@ -114,36 +114,10 @@ def build_system_prompt(
             parts.append(skill.instructions)
             parts.append("")
 
-    # Add peer capabilities
-    if peers:
-        parts.append("\n## Your Peers (workspaces you can delegate to)\n")
-        for peer in peers:
-            agent_card = peer.get("agent_card")
-            if not agent_card:
-                continue
-
-            if isinstance(agent_card, str):
-                try:
-                    agent_card = json.loads(agent_card)
-                except json.JSONDecodeError:
-                    continue
-
-            name = agent_card.get("name", peer.get("name", "Unknown"))
-            peer_id = peer.get("id", "unknown")
-            skills = agent_card.get("skills", [])
-            status = peer.get("status", "unknown")
-
-            parts.append(f"- **{name}** (id: `{peer_id}`, status: {status})")
-            if skills:
-                skill_names = [s.get("name", s.get("id", "")) for s in skills if isinstance(s, dict)]
-                if skill_names:
-                    parts.append(f"  Skills: {', '.join(skill_names)}")
-            parts.append("")
-
-        parts.append(
-            "Use the `delegate_to_workspace` tool to send tasks to peers. "
-            "Only delegate to peers listed above."
-        )
+    # Add peer capabilities with a single shared renderer.
+    peer_section = build_peer_section(peers)
+    if peer_section:
+        parts.append(peer_section)
 
     # Add delegation failure handling
     parts.append("""
