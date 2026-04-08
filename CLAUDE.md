@@ -73,7 +73,7 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 ```bash
 cd platform && go test ./...                    # 25 Go handler tests (sqlmock + miniredis)
 cd canvas && npm test                            # 58 Vitest store tests
-cd workspace-template && python -m pytest -v     # 45 pytest tests (config, heartbeat, prompt, skills, a2a)
+cd workspace-template && python -m pytest -v     # 80 pytest tests (config, heartbeat, prompt, skills, a2a, executor)
 ```
 
 ### Integration Tests
@@ -143,6 +143,8 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 - Real-time updates: WebSocket events → `applyEvent()` in Zustand store
 - Position persistence: `onNodeDragStop` → `PATCH /workspaces/:id` with `{x, y}`
 - Embedded sub-workspaces: `nestNode` sets `hidden: !!targetId` on child nodes; children render as recursive `TeamMemberChip` components inside parent (up to 3 levels), not as separate canvas nodes. Use `n.data.parentId` (not React Flow's `n.parentId`) for hierarchy lookups.
+- Chat sessions: stored in localStorage per workspace. Conversation history (last 20 messages) sent via `params.metadata.history` in A2A `message/send` requests. Agents reconstruct the full conversation from this metadata.
+- Config save: "Save & Restart" writes config.yaml and auto-restarts the workspace. "Save" writes only (shows restart banner). Secrets POST/DELETE auto-restart on the platform side.
 
 ### Workspace Lifecycle
 `provisioning` → `online` (on register) → `degraded` (error_rate > 0.5) → `online` (recovered) → `offline` (Redis TTL expired) → `removed` (deleted)

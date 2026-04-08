@@ -5,14 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 # conftest.py pre-mocks the a2a SDK modules so this import works
-from a2a_executor import LangGraphA2AExecutor
+from a2a_executor import LangGraphA2AExecutor, _extract_history, set_current_task
 
 
-def _make_context(parts, context_id="ctx-test"):
+def _make_context(parts, context_id="ctx-test", metadata=None):
     """Helper to build a mock RequestContext."""
     context = MagicMock()
     context.message.parts = parts
     context.context_id = context_id
+    context.metadata = metadata or {}
     return context
 
 
@@ -42,7 +43,7 @@ async def test_text_extraction_from_parts():
     agent.ainvoke.assert_called_once()
     call_args = agent.ainvoke.call_args
     messages = call_args[0][0]["messages"]
-    assert messages[0] == ("user", "Hello World")
+    assert messages[0] == ("human", "Hello World")
 
 
 @pytest.mark.asyncio
@@ -63,7 +64,7 @@ async def test_text_extraction_from_root():
 
     agent.ainvoke.assert_called_once()
     messages = agent.ainvoke.call_args[0][0]["messages"]
-    assert messages[0] == ("user", "Root text")
+    assert messages[0] == ("human", "Root text")
 
 
 @pytest.mark.asyncio
@@ -179,3 +180,107 @@ async def test_ai_message_content_blocks():
     result = str(eq.enqueue_event.call_args[0][0])
     assert "First part." in result
     assert "Second part." in result
+
+
+# ---------- _extract_history tests ----------
+
+
+def test_extract_history_basic():
+    """History with user and agent messages is extracted correctly."""
+    ctx = _make_context([], metadata={
+        "history": [
+            {"role": "user", "parts": [{"kind": "text", "text": "Hello"}]},
+            {"role": "agent", "parts": [{"kind": "text", "text": "Hi there"}]},
+        ]
+    })
+    result = _extract_history(ctx)
+    assert result == [("human", "Hello"), ("ai", "Hi there")]
+
+
+def test_extract_history_empty_metadata():
+    """Empty metadata returns empty list."""
+    ctx = _make_context([], metadata={})
+    assert _extract_history(ctx) == []
+
+
+def test_extract_history_no_metadata():
+    """None metadata returns empty list."""
+    ctx = _make_context([])
+    ctx.metadata = None
+    assert _extract_history(ctx) == []
+
+
+def test_extract_history_malformed_entries():
+    """Malformed history entries (missing parts, empty text) are skipped."""
+    ctx = _make_context([], metadata={
+        "history": [
+            {"role": "user", "parts": []},  # no text
+            {"role": "user", "parts": [{"kind": "text", "text": ""}]},  # empty text
+            {"role": "agent", "parts": [{"kind": "text", "text": "Valid"}]},  # valid
+            "not a dict",  # malformed
+        ]
+    })
+    result = _extract_history(ctx)
+    assert result == [("ai", "Valid")]
+
+
+def test_extract_history_non_list():
+    """Non-list history value returns empty list."""
+    ctx = _make_context([], metadata={"history": "not a list"})
+    assert _extract_history(ctx) == []
+
+
+# ---------- History prepend in executor ----------
+
+
+@pytest.mark.asyncio
+async def test_history_prepended_to_messages():
+    """Conversation history is prepended before the current user message."""
+    ai_msg = MagicMock()
+    ai_msg.type = "ai"
+    ai_msg.content = "Response"
+
+    agent = AsyncMock()
+    agent.ainvoke = AsyncMock(return_value={"messages": [ai_msg]})
+    executor = LangGraphA2AExecutor(agent)
+
+    part = MagicMock()
+    part.text = "Follow up"
+
+    ctx = _make_context([part], "ctx-hist", metadata={
+        "history": [
+            {"role": "user", "parts": [{"kind": "text", "text": "First question"}]},
+            {"role": "agent", "parts": [{"kind": "text", "text": "First answer"}]},
+        ]
+    })
+    eq = _make_event_queue()
+
+    await executor.execute(ctx, eq)
+
+    messages = agent.ainvoke.call_args[0][0]["messages"]
+    assert len(messages) == 3
+    assert messages[0] == ("human", "First question")
+    assert messages[1] == ("ai", "First answer")
+    assert messages[2] == ("human", "Follow up")
+
+
+# ---------- set_current_task tests ----------
+
+
+@pytest.mark.asyncio
+async def test_set_current_task_updates_heartbeat():
+    """set_current_task updates heartbeat fields."""
+    heartbeat = MagicMock()
+    await set_current_task(heartbeat, "Doing work")
+    assert heartbeat.current_task == "Doing work"
+    assert heartbeat.active_tasks == 1
+
+    await set_current_task(heartbeat, "")
+    assert heartbeat.current_task == ""
+    assert heartbeat.active_tasks == 0
+
+
+@pytest.mark.asyncio
+async def test_set_current_task_none_heartbeat():
+    """set_current_task is a no-op with None heartbeat."""
+    await set_current_task(None, "Doing work")  # Should not raise

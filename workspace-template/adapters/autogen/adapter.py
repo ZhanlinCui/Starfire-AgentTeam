@@ -59,19 +59,22 @@ class AutoGenAdapter(BaseAdapter):
             model=config.model,
             system_prompt=self.system_prompt,
             peers_info=self.peers_info,
+            heartbeat=config.heartbeat,
         )
 
 
 class AutoGenA2AExecutor(AgentExecutor):
     """Wraps AutoGen's AssistantAgent with A2A delegation tools."""
 
-    def __init__(self, model: str, system_prompt: str | None, peers_info: str):
+    def __init__(self, model: str, system_prompt: str | None, peers_info: str, heartbeat=None):
         self.model = model
         self.system_prompt = system_prompt
         self.peers_info = peers_info
+        self._heartbeat = heartbeat
 
     async def execute(self, context, event_queue):
         from a2a.utils import new_agent_text_message
+        from a2a_executor import _extract_history, set_current_task
 
         text_parts = []
         if context.message and context.message.parts:
@@ -85,6 +88,9 @@ class AutoGenA2AExecutor(AgentExecutor):
         if not user_message:
             await event_queue.enqueue_event(new_agent_text_message("No message provided"))
             return
+
+        brief = user_message[:60] + ("..." if len(user_message) > 60 else "")
+        await set_current_task(self._heartbeat, brief)
 
         try:
             from autogen_agentchat.agents import AssistantAgent
@@ -111,6 +117,13 @@ class AutoGenA2AExecutor(AgentExecutor):
             if self.peers_info:
                 sys_msg += f"\n\n## Peers\n{self.peers_info}\nUse delegate_to_peer tool to communicate with them."
 
+            # Include conversation history in the task
+            history = _extract_history(context)
+            task_text = user_message
+            if history:
+                conv = "\n".join(f"{'User' if r == 'human' else 'Agent'}: {t}" for r, t in history)
+                task_text = f"Conversation so far:\n{conv}\n\nCurrent request: {user_message}"
+
             client = OpenAIChatCompletionClient(model=model_name)
             agent = AssistantAgent(
                 name="agent",
@@ -119,7 +132,7 @@ class AutoGenA2AExecutor(AgentExecutor):
                 tools=[delegate_to_peer, list_available_peers],
             )
 
-            result = await agent.run(task=user_message)
+            result = await agent.run(task=task_text)
 
             reply = ""
             if hasattr(result, "messages") and result.messages:
@@ -132,6 +145,8 @@ class AutoGenA2AExecutor(AgentExecutor):
 
         except Exception as e:
             reply = f"AutoGen error: {e}"
+        finally:
+            await set_current_task(self._heartbeat, "")
 
         await event_queue.enqueue_event(new_agent_text_message(reply))
 

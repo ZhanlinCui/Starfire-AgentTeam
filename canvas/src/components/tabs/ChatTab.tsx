@@ -91,20 +91,14 @@ export function ChatTab({ workspaceId, data }: Props) {
     setActiveSessionId(loaded.length > 0 ? loaded[loaded.length - 1].id : "");
   }, [workspaceId]);
 
-  const checkAgent = useCallback(async () => {
-    try {
-      const res = await api.get<{ url: string; status: string }>(
-        `/registry/discover/${workspaceId}`
-      );
-      setAgentReachable(!!res.url);
-      setError(null);
-    } catch {
-      setAgentReachable(false);
-      setError(
-        data.status === "offline" ? "Agent is offline" : "Agent not available"
-      );
-    }
-  }, [workspaceId, data.status]);
+  const checkAgent = useCallback(() => {
+    // Agent reachability is derived from workspace status.
+    // Messages are proxied through POST /workspaces/:id/a2a, so we don't
+    // need to discover the agent's internal URL from the browser.
+    const reachable = data.status === "online" || data.status === "degraded";
+    setAgentReachable(reachable);
+    setError(reachable ? null : `Agent is ${data.status}`);
+  }, [data.status]);
 
   useEffect(() => {
     checkAgent();
@@ -325,6 +319,15 @@ export function ChatTab({ workspaceId, data }: Props) {
     // Clean up any previous poll
     cleanupRef.current?.();
 
+    // Build conversation history from prior messages in this session (last 20 to limit payload)
+    const history = messages
+      .filter((m) => m.role === "user" || m.role === "agent")
+      .slice(-20)
+      .map((m) => ({
+        role: m.role === "user" ? "user" : "agent",
+        parts: [{ kind: "text", text: m.content }],
+      }));
+
     // Fire the A2A request — don't wait for the response.
     // The poll loop picks up the result from the activity log.
     api.post(`/workspaces/${workspaceId}/a2a`, {
@@ -335,6 +338,7 @@ export function ChatTab({ workspaceId, data }: Props) {
           messageId: crypto.randomUUID(),
           parts: [{ kind: "text", text }],
         },
+        metadata: { history },
       },
     }).catch(() => {}); // Ignore — we poll for the result instead
 
@@ -503,8 +507,15 @@ export function ChatTab({ workspaceId, data }: Props) {
         {error && (
           <div className="mx-4 mb-2 px-3 py-1.5 bg-red-900/30 border border-red-800 rounded text-xs text-red-400">
             {error}
-            <button onClick={checkAgent} className="ml-2 underline hover:text-red-300">
-              Retry
+            <button
+              onClick={() => {
+                if (confirm(`Restart ${data.name}?`)) {
+                  useCanvasStore.getState().restartWorkspace(workspaceId);
+                }
+              }}
+              className="ml-2 underline hover:text-red-300"
+            >
+              Restart
             </button>
           </div>
         )}

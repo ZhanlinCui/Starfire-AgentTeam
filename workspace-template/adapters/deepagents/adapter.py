@@ -104,4 +104,4 @@ class DeepAgentsAdapter(BaseAdapter):
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
         from a2a_executor import LangGraphA2AExecutor
-        return LangGraphA2AExecutor(self.agent)
+        return LangGraphA2AExecutor(self.agent, heartbeat=config.heartbeat)

@@ -107,6 +107,7 @@ env:
 | `description` | Yes | What this workspace does |
 | `version` | Yes | Semantic version |
 | `tier` | Yes | 1-4, determines deployment method |
+| `runtime` | No | Adapter to use: `langgraph` (default), `claude-code`, `crewai`, `autogen`, `deepagents`, `openclaw`. See [Agent Runtime Adapters](./cli-runtime.md). |
 | `model` | Yes | LangChain-compatible provider string (e.g. `anthropic:claude-sonnet-4-6`). Overridden by `MODEL_PROVIDER` env var if set. |
 | `prompt_files` | No | Ordered list of markdown files to load as system prompt. Defaults to `["system-prompt.md"]` if omitted. Supports any agent framework's file structure (OpenClaw, Claude Code, etc.) |
 | `shared_context` | No | Files from this workspace's config dir to share with direct children. Children fetch these at startup and inject into their system prompt as `## Parent Context`. 1-level inheritance only (grandchildren don't see grandparent's context). |
@@ -119,6 +120,15 @@ env:
 | `sandbox` | No | Code sandbox config for tier 3+ (see [Code Sandbox](../development/code-sandbox.md)) |
 | `env.required` | No | Environment variable keys that must be present at startup |
 | `env.optional` | No | Environment variable keys that are used if present |
+
+## Config Save Behavior (Canvas UI)
+
+The Config tab in the Canvas UI provides two save options:
+
+- **Save & Restart** — writes `config.yaml` to the workspace volume and immediately restarts the container. All changes take effect.
+- **Save** — writes `config.yaml` only, sets a "Restart to apply changes" banner on the workspace card. Useful for batching multiple changes before restarting.
+
+**Secrets** (API keys, env vars) saved via the Config tab auto-restart the workspace on the platform side — no manual restart needed.
 
 ## Hot-Reload Behavior
 

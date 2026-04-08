@@ -225,16 +225,22 @@ describe("applyEvent", () => {
     expect(newNode.position).toEqual({ x: 0, y: 0 });
   });
 
-  it("WORKSPACE_PROVISIONING does not duplicate existing node", () => {
+  it("WORKSPACE_PROVISIONING updates existing node status on restart", () => {
+    // ws-1 exists as "online" — a restart should set it to "provisioning"
     useCanvasStore.getState().applyEvent(
       makeMsg({
         event: "WORKSPACE_PROVISIONING",
         workspace_id: "ws-1",
-        payload: { name: "Duplicate" },
+        payload: { name: "PM" },
       })
     );
 
-    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    const { nodes } = useCanvasStore.getState();
+    expect(nodes).toHaveLength(2); // no duplication
+    const node = nodes.find((n) => n.id === "ws-1")!;
+    expect(node.data.status).toBe("provisioning");
+    expect(node.data.needsRestart).toBe(false);
+    expect(node.data.currentTask).toBe("");
   });
 
   it("WORKSPACE_PROVISIONING uses defaults when payload is sparse", () => {

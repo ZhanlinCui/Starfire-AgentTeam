@@ -178,14 +178,18 @@ class OpenClawAdapter(BaseAdapter):
             raise RuntimeError("OpenClaw gateway did not become healthy within 30s")
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
-        return OpenClawA2AExecutor()
+        return OpenClawA2AExecutor(heartbeat=config.heartbeat)
 
 
 class OpenClawA2AExecutor(AgentExecutor):
     """Proxies A2A messages to OpenClaw via `openclaw agent` CLI subprocess."""
 
+    def __init__(self, heartbeat=None):
+        self._heartbeat = heartbeat
+
     async def execute(self, context, event_queue):
         from a2a.utils import new_agent_text_message
+        from a2a_executor import set_current_task
 
         # Extract user message
         text_parts = []
@@ -200,6 +204,9 @@ class OpenClawA2AExecutor(AgentExecutor):
         if not user_message:
             await event_queue.enqueue_event(new_agent_text_message("No message provided"))
             return
+
+        brief = user_message[:60] + ("..." if len(user_message) > 60 else "")
+        await set_current_task(self._heartbeat, brief)
 
         # Call OpenClaw agent via CLI
         try:
@@ -232,6 +239,8 @@ class OpenClawA2AExecutor(AgentExecutor):
             reply = "OpenClaw timed out after 120s"
         except Exception as e:
             reply = f"OpenClaw error: {e}"
+        finally:
+            await set_current_task(self._heartbeat, "")
 
         await event_queue.enqueue_event(new_agent_text_message(reply))
 

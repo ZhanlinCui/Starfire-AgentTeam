@@ -18,28 +18,39 @@ runtime_config:
 
 ## How It Works
 
-The unified `workspace-template` Docker image includes both Python (LangGraph) and Node.js (CLI runtimes). At startup, `main.py` checks the `runtime` field in `config.yaml`:
-
-- **`langgraph`** (default): Creates a LangGraph ReAct agent with skills, tools, plugins, and peer discovery. Full Python agent runtime.
-- **Any CLI runtime**: Creates a `CLIAgentExecutor` that invokes the CLI tool via subprocess on each A2A request. Skips LangGraph-specific setup (plugins, skills, tools, coordinator) for faster startup.
+The unified `workspace-template` Docker image includes both Python (LangGraph) and Node.js (CLI runtimes). At startup, `main.py` checks the `runtime` field in `config.yaml`, discovers the matching adapter in `adapters/<runtime>/`, calls `adapter.setup(config)` then `adapter.create_executor(config)` to get an `AgentExecutor` that handles A2A requests.
 
 ```
 A2A request arrives
       |
       v
-CLIAgentExecutor._build_command(message)
-      |  - selects preset (claude-code, codex, ollama)
-      |  - adds model flag, system prompt flag
-      |  - adds auth (env var: CLAUDE_CODE_OAUTH_TOKEN or OPENAI_API_KEY)
-      |  - adds prompt
+AgentExecutor.execute(context, event_queue)
+      |  - extracts user message from A2A parts
+      |  - extracts conversation history from params.metadata.history
+      |  - sets current_task on heartbeat (shows on canvas card)
+      |  - invokes the runtime (LangGraph graph, CLI subprocess, etc.)
       v
-asyncio.create_subprocess_exec(cmd, args)
-      |
-      v
-stdout → A2A response
+Response → A2A event queue → JSON-RPC response
 ```
 
-## Built-in Runtime Presets
+### Conversation History
+
+Chat sessions in the Canvas UI send prior messages (up to 20) via `params.metadata.history` in each A2A `message/send` request. Executors extract this history:
+
+- **LangGraph/DeepAgents**: Prepends history as `("human", text)` / `("ai", text)` tuples to the LangGraph message list
+- **CrewAI/AutoGen**: Prepends history as a text prefix in the task description (`"Conversation so far:\n..."`)
+- **Claude Code**: Uses `--resume <session_id>` for native session continuity (history not needed)
+- **OpenClaw**: Uses `--session-id` for native session continuity
+
+### Current Task Reporting
+
+All executors update the workspace's `current_task` via the heartbeat during execution. This shows an amber banner on the canvas card. The shared `set_current_task(heartbeat, task)` function in `a2a_executor.py` handles this for all runtimes.
+
+## Built-in Adapters
+
+### LangGraph (`runtime: langgraph`) — Default
+
+Full Python agent with LangGraph ReAct pattern. Supports skills, tools, plugins, peer coordination, and team routing.
 
 ### Claude Code (`runtime: claude-code`)
 
@@ -57,42 +68,46 @@ Invokes: `claude --print --dangerously-skip-permissions --allowed-tools Bash --m
 
 **Important:** Claude Code refuses to run as root with `--dangerously-skip-permissions`. The Dockerfile creates a non-root `agent` user.
 
-### OpenAI Codex (`runtime: codex`)
+### CrewAI (`runtime: crewai`)
+
+Role-based multi-agent framework. Creates a CrewAI Agent + Task + Crew per request with A2A delegation tools (`delegate_to_peer`, `list_available_peers`).
 
 ```yaml
-runtime: codex
-runtime_config:
-  model: gpt-5.4
-  auth_token_env: OPENAI_API_KEY
+runtime: crewai
+model: openrouter:google/gemini-2.5-flash
 ```
 
-Invokes: `codex --print --dangerously-skip-permissions --model gpt-5.4 -p "<message>"`
+**Auth:** Uses `OPENROUTER_API_KEY` or `OPENAI_API_KEY` env var.
 
-**Auth:** Uses `OPENAI_API_KEY` env var (set via workspace secrets).
+### AutoGen (`runtime: autogen`)
 
-### Ollama (`runtime: ollama`)
+Microsoft AutoGen AssistantAgent with tool use. Creates an `AssistantAgent` per request with A2A delegation tools.
 
 ```yaml
-runtime: ollama
-runtime_config:
-  model: llama3
+runtime: autogen
+model: openai:gpt-4.1-mini
 ```
 
-Invokes: `ollama run llama3 "<message>"`
+**Auth:** Uses `OPENAI_API_KEY` env var.
 
-**Auth:** None needed (local model).
+### DeepAgents (`runtime: deepagents`)
 
-### Custom (`runtime: custom`)
+LangGraph-based agent with deep planning capabilities. Uses the same `LangGraphA2AExecutor` as the default runtime but with a specialized agent setup including delegation, memory, and search tools.
 
 ```yaml
-runtime: custom
-runtime_config:
-  command: my-agent
-  args: ["--flag1", "--flag2"]
-  timeout: 600
+runtime: deepagents
+model: openrouter:google/gemini-2.5-flash
 ```
 
-Invokes: `my-agent --flag1 --flag2 -p "<message>"`
+### OpenClaw (`runtime: openclaw`)
+
+Proxies A2A messages to OpenClaw via `openclaw agent` CLI subprocess. Handles its own session continuity via `--session-id`.
+
+```yaml
+runtime: openclaw
+```
+
+**Auth:** Uses OpenClaw's own authentication (configured during `openclaw setup`).
 
 ## Session Continuity (Claude Code)
 
@@ -215,12 +230,15 @@ This pushes an immediate heartbeat with `current_task` to the platform, which br
 
 | File | Role |
 |------|------|
-| `cli_executor.py` | Generic CLI agent executor with runtime presets |
+| `main.py` | Runtime selector — discovers adapter, calls setup/create_executor |
+| `a2a_executor.py` | `LangGraphA2AExecutor`, shared `set_current_task()`, `_extract_history()` |
+| `cli_executor.py` | `CLIAgentExecutor` for Claude Code (subprocess-based) |
+| `adapters/base.py` | `BaseAdapter` interface + `AdapterConfig` dataclass |
+| `adapters/__init__.py` | Auto-discovers adapters from subdirectories |
 | `agent_molecule_status.py` | CLI tool + module for updating canvas task display from any process |
-| `a2a_mcp_server.py` | MCP server exposing A2A delegation tools (list_peers, delegate_task, delegate_task_async, check_task_status) |
+| `a2a_mcp_server.py` | MCP server exposing A2A delegation tools (list_peers, delegate_task) |
 | `a2a_cli.py` | CLI tool for A2A delegation (all runtimes) |
 | `config.py` | `RuntimeConfig` dataclass, `runtime` field in `WorkspaceConfig` |
-| `main.py` | Runtime selector — creates `CLIAgentExecutor` or `LangGraphA2AExecutor` |
 
 ## Rate Limit Handling
 
@@ -244,21 +262,15 @@ For production with many concurrent agents, consider:
 
 ## Extending with New Runtimes
 
-To add a new CLI runtime:
+To add a new adapter:
 
-1. Add a preset to `RUNTIME_PRESETS` in `cli_executor.py`:
-```python
-"my-runtime": {
-    "command": "my-agent-cli",
-    "base_args": ["--output-text"],
-    "prompt_flag": "-p",
-    "model_flag": "--model",
-    "system_prompt_flag": "--system",
-    "auth_pattern": "env",      # or "apiKeyHelper" or None
-    "default_auth_env": "MY_API_KEY",
-    "default_auth_file": "",
-},
-```
+1. Create `workspace-template/adapters/<name>/` with:
+   - `adapter.py` — class extending `BaseAdapter` with `setup()` and `create_executor()` methods
+   - `requirements.txt` — runtime-specific Python dependencies (installed at container startup)
+   - `__init__.py` — exports adapter class as `Adapter`
 
-2. Install the CLI tool in the Dockerfile
-3. Use it in config.yaml: `runtime: my-runtime`
+2. The `create_executor()` method returns an `AgentExecutor` (from `a2a.server.agent_execution`) whose `execute(context, event_queue)` method handles A2A requests.
+
+3. Use `set_current_task()` from `a2a_executor.py` for heartbeat/canvas integration.
+
+4. Use it in config.yaml: `runtime: <name>`

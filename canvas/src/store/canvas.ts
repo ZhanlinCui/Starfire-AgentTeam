@@ -277,7 +277,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       case "WORKSPACE_PROVISIONING": {
         const exists = nodes.find((n) => n.id === msg.workspace_id);
-        if (!exists) {
+        if (exists) {
+          // Restart — update existing node to provisioning
+          set({
+            nodes: nodes.map((n) =>
+              n.id === msg.workspace_id
+                ? { ...n, data: { ...n.data, status: "provisioning", needsRestart: false, currentTask: "" } }
+                : n
+            ),
+          });
+        } else {
           set({
             nodes: [
               ...nodes,

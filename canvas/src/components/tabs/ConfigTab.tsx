@@ -335,7 +335,7 @@ function SecretsSection({ workspaceId }: { workspaceId: string }) {
     setError(null);
     try {
       await api.post(`/workspaces/${workspaceId}/secrets`, { key, value });
-      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
+      // Platform auto-restarts workspace after secret change — no needsRestart flag needed
       setNewKey(""); setNewValue(""); setShowAdd(false);
       loadSecrets();
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to save"); }
@@ -345,7 +345,7 @@ function SecretsSection({ workspaceId }: { workspaceId: string }) {
     setError(null);
     try {
       await api.del(`/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`);
-      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
+      // Platform auto-restarts workspace after secret deletion
       setSecrets((prev) => prev.filter((s) => s.key !== key));
     } catch (e) { setError(e instanceof Error ? e.message : "Failed to delete"); }
   };
@@ -519,20 +519,24 @@ export function ConfigTab({ workspaceId }: Props) {
     }));
   };
 
-  const handleSave = async () => {
+  const handleSave = async (restart: boolean) => {
     setSaving(true);
     setError(null);
     setSuccess(false);
     try {
       const content = rawMode ? rawDraft : toYaml(config);
       await api.put(`/workspaces/${workspaceId}/files/config.yaml`, { content });
-      useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       setOriginalYaml(content);
       if (rawMode) {
         const parsed = parseYaml(content);
         setConfig({ ...DEFAULT_CONFIG, ...parsed } as ConfigData);
       } else {
         setRawDraft(content);
+      }
+      if (restart) {
+        await useCanvasStore.getState().restartWorkspace(workspaceId);
+      } else {
+        useCanvasStore.getState().updateNodeData(workspaceId, { needsRestart: true });
       }
       setSuccess(true);
       clearTimeout(successTimerRef.current);
@@ -624,8 +628,10 @@ export function ConfigTab({ workspaceId }: Props) {
                 >
                   <option value="">LangGraph (default)</option>
                   <option value="claude-code">Claude Code</option>
-                  <option value="codex">Codex</option>
-                  <option value="ollama">Ollama</option>
+                  <option value="crewai">CrewAI</option>
+                  <option value="autogen">AutoGen</option>
+                  <option value="deepagents">DeepAgents</option>
+                  <option value="openclaw">OpenClaw</option>
                 </select>
               </div>
               <TextInput label="Model" value={config.runtime_config?.model || config.model || ""} onChange={(v) => {
@@ -697,11 +703,18 @@ export function ConfigTab({ workspaceId }: Props) {
 
       <div className="p-3 border-t border-zinc-800 flex gap-2">
         <button
-          onClick={handleSave}
+          onClick={() => handleSave(true)}
           disabled={!isDirty || saving}
           className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-xs rounded text-white disabled:opacity-30 transition-colors"
         >
-          {saving ? "Saving..." : "Save"}
+          {saving ? "Restarting..." : "Save & Restart"}
+        </button>
+        <button
+          onClick={() => handleSave(false)}
+          disabled={!isDirty || saving}
+          className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-xs rounded text-zinc-300 disabled:opacity-30 transition-colors"
+        >
+          Save
         </button>
         <button
           onClick={loadConfig}
