@@ -20,6 +20,8 @@ This starts:
 
 Each workspace container is provisioned **on demand** by the platform when a user creates or imports one.
 
+Langfuse uses a dedicated `langfuse` Postgres database. The compose stack creates it automatically before starting the Langfuse service, so it does not conflict with the platform's `agentmolecule` schema.
+
 ### Infrastructure Only
 
 To start just Postgres, Redis, and Langfuse (no application code):
@@ -79,7 +81,7 @@ Node.js         22+
 Next.js         15
 React Flow      12   (@xyflow/react)
 a2a-sdk         0.3+ (A2A server SDK, install with a2a-sdk[http-server])
-langfuse        3.x  (self-hosted Docker)
+langfuse        2.x  (self-hosted Docker in current compose files)
 Postgres        16
 Redis           7
 Docker Compose  2.x
