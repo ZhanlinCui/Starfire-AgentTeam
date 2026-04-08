@@ -32,7 +32,7 @@ export interface WorkspaceCapabilitySummary {
   hasActiveTask: boolean;
 }
 
-export type PanelTab = "details" | "chat" | "terminal" | "config" | "files" | "memory" | "traces" | "events" | "activity";
+export type PanelTab = "details" | "skills" | "chat" | "terminal" | "config" | "files" | "memory" | "traces" | "events" | "activity";
 
 export interface ContextMenuState {
   x: number;

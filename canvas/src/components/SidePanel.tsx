@@ -6,6 +6,7 @@ import { showToast } from "@/components/Toaster";
 import { StatusDot } from "./StatusDot";
 import { Tooltip } from "./Tooltip";
 import { DetailsTab } from "./tabs/DetailsTab";
+import { SkillsTab } from "./tabs/SkillsTab";
 import { ChatTab } from "./tabs/ChatTab";
 import { ConfigTab } from "./tabs/ConfigTab";
 import { TerminalTab } from "./tabs/TerminalTab";
@@ -18,6 +19,7 @@ import { summarizeWorkspaceCapabilities } from "@/store/canvas";
 
 const TABS: { id: PanelTab; label: string; icon: string }[] = [
   { id: "details", label: "Details", icon: "◉" },
+  { id: "skills", label: "Skills", icon: "✦" },
   { id: "activity", label: "Activity", icon: "⊙" },
   { id: "chat", label: "Chat", icon: "◈" },
   { id: "terminal", label: "Terminal", icon: "▸" },
@@ -185,6 +187,7 @@ export function SidePanel() {
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto">
         {panelTab === "details" && <DetailsTab workspaceId={selectedNodeId} data={node.data} />}
+        {panelTab === "skills" && <SkillsTab data={node.data} />}
         {panelTab === "activity" && <ActivityTab workspaceId={selectedNodeId} />}
         {panelTab === "chat" && <ChatTab workspaceId={selectedNodeId} data={node.data} />}
         {panelTab === "terminal" && <TerminalTab workspaceId={selectedNodeId} />}
