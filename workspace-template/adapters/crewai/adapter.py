@@ -16,16 +16,21 @@ logger = logging.getLogger(__name__)
 
 
 def _langchain_to_crewai(lc_tool):
-    """Wrap a LangChain BaseTool as a sync CrewAI @tool."""
+    """Wrap a LangChain BaseTool as a sync CrewAI @tool.
+
+    CrewAI's @tool decorator requires the function to have a docstring
+    at decoration time, so we set __doc__ before applying the decorator.
+    """
     from crewai.tools import tool as crewai_tool
 
-    @crewai_tool(lc_tool.name)
     def wrapper(**kwargs) -> str:
+        """Placeholder."""
         result = asyncio.get_event_loop().run_until_complete(lc_tool.ainvoke(kwargs))
         return str(result)
 
-    wrapper.__doc__ = lc_tool.description
-    return wrapper
+    wrapper.__name__ = lc_tool.name
+    wrapper.__doc__ = lc_tool.description or f"Tool: {lc_tool.name}"
+    return crewai_tool(lc_tool.name)(wrapper)
 
 
 class CrewAIAdapter(BaseAdapter):
