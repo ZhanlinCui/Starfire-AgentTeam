@@ -10,6 +10,8 @@ If a company's HR department shouldn't expose employee salaries to the Engineeri
 
 HMA enforces that **memory isolation perfectly mirrors the org chart topology**. We define three distinct tiers of memory scopes, strictly controlled by Postgres Row-Level Security (RLS) and the platform's `CanCommunicate` rules.
 
+In the current implementation, each workspace also receives its own awareness namespace. That namespace is the concrete runtime boundary behind these logical scopes: the agent still uses the same memory tools, but the backend routes requests into the workspace's isolated awareness space.
+
 ---
 
 ### 1. L1: Local Memory (Personal Scratchpad)

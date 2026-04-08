@@ -21,7 +21,11 @@ ANTHROPIC_API_KEY=sk-...
 LANGFUSE_HOST=http://langfuse-web:3000
 LANGFUSE_PUBLIC_KEY=pk-...
 LANGFUSE_SECRET_KEY=sk-...
+AWARENESS_URL=http://awareness:37800
+AWARENESS_NAMESPACE=workspace:ws-reno-stars-seo-001
 ```
+
+When awareness is configured, the workspace keeps using the same `commit_memory` / `search_memory` tools, but the backend routes those calls into the workspace's own awareness namespace. If the two awareness env vars are absent, the runtime falls back to the platform memory API for compatibility.
 
 ## workspace-configs-templates/
 
