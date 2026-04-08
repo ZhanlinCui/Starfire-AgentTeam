@@ -61,6 +61,7 @@ func (h *ActivityHandler) List(c *gin.Context) {
 	}
 
 	if err != nil {
+		log.Printf("Activity list error for %s: %v", workspaceID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
 		return
 	}

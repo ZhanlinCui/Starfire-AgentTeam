@@ -20,7 +20,9 @@ import (
 )
 
 // RuntimeImages maps runtime names to their Docker image tags.
-// Each adapter has its own pre-built image extending the base.
+// Each adapter has its own pre-built image extending workspace-template:base,
+// with runtime-specific deps pre-installed for fast startup.
+// Build all: workspace-template/Dockerfile (base), then each adapters/*/Dockerfile.
 var RuntimeImages = map[string]string{
 	"langgraph":   "workspace-template:langgraph",
 	"claude-code": "workspace-template:claude-code",
@@ -31,8 +33,11 @@ var RuntimeImages = map[string]string{
 }
 
 const (
-	// DefaultImage is the fallback workspace Docker image.
+	// DefaultImage is the fallback workspace Docker image (langgraph is the most common runtime).
 	DefaultImage = "workspace-template:langgraph"
+	// NOTE: Every runtime MUST have an entry in RuntimeImages above. If a runtime is missing,
+	// it falls back to DefaultImage which may have wrong deps. Add new runtimes to both
+	// RuntimeImages AND create adapters/<runtime>/Dockerfile.
 
 	// DefaultNetwork is the Docker network workspaces join.
 	DefaultNetwork = "agent-molecule-net"

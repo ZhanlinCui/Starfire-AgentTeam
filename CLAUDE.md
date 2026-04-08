@@ -52,11 +52,21 @@ npm run build && npm start   # Production
 ```
 Env vars: `NEXT_PUBLIC_PLATFORM_URL` (default http://localhost:8080), `NEXT_PUBLIC_WS_URL` (default ws://localhost:8080/ws).
 
-### Workspace Image
+### Workspace Images
 ```bash
-docker build -t workspace-template:latest workspace-template/   # Build unified workspace image
+bash workspace-template/build-all.sh                   # Build base + ALL runtime images
+bash workspace-template/build-all.sh claude-code       # Build base + specific runtime only
 ```
-The unified image is bare-minimum (Python + Node.js + A2A SDK). Runtime-specific deps are installed at container startup by `entrypoint.sh` from `adapters/<runtime>/requirements.txt`. Runtime is selected via `config.yaml` → `runtime:` field.
+Each runtime has its own Docker image extending `workspace-template:base`, with deps pre-installed for fast startup. The base Dockerfile (`workspace-template/Dockerfile`) builds `:base`, then each `adapters/*/Dockerfile` extends it (e.g. `claude_code/Dockerfile` installs the `claude` CLI). **Always use `build-all.sh`** — it builds base first, then all runtimes in order. No `:latest` tag — each runtime uses its own tag to avoid confusion.
+
+| Runtime | Image Tag | Key Deps |
+|---------|-----------|----------|
+| langgraph | `workspace-template:langgraph` | langchain-anthropic, langgraph |
+| claude-code | `workspace-template:claude-code` | @anthropic-ai/claude-code (npm) |
+| openclaw | `workspace-template:openclaw` | openclaw deps |
+| crewai | `workspace-template:crewai` | crewai |
+| autogen | `workspace-template:autogen` | autogen |
+| deepagents | `workspace-template:deepagents` | deepagents |
 
 Templates are framework presets in `workspace-configs-templates/`: `claude-code-default`, `langgraph`, `openclaw`, `deepagents`. Agent roles are configured after deployment via Config tab or API.
 
