@@ -747,7 +747,7 @@ func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload model
 		quoteName, quoteRole, payload.Tier, runtime)
 
 	if runtime != "langgraph" {
-		configYAML += fmt.Sprintf("runtime_config:\n  model: %s\n  auth_token_file: .auth-token\n  timeout: 300\n", model)
+		configYAML += fmt.Sprintf("runtime_config:\n  model: %s\n  auth_token_file: .auth-token\n  timeout: 0\n", model)
 	} else {
 		configYAML += fmt.Sprintf("model: %s\n", model)
 	}

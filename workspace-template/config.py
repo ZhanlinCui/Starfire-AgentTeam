@@ -36,7 +36,7 @@ class RuntimeConfig:
     args: list[str] = field(default_factory=list)  # additional CLI args
     auth_token_env: str = ""   # env var name for auth token
     auth_token_file: str = ""  # file path for auth token (relative to config dir)
-    timeout: int = 300         # seconds
+    timeout: int = 0           # seconds (0 = no timeout — agents wait until done)
     model: str = ""            # model override for the CLI
 
 
@@ -93,7 +93,7 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
             args=runtime_raw.get("args", []),
             auth_token_env=runtime_raw.get("auth_token_env", ""),
             auth_token_file=runtime_raw.get("auth_token_file", ""),
-            timeout=runtime_raw.get("timeout", 300),
+            timeout=runtime_raw.get("timeout", 0),
             model=runtime_raw.get("model", ""),
         ),
         skills=raw.get("skills", []),
