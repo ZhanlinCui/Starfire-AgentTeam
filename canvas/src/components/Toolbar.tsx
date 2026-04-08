@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
 
@@ -8,6 +8,8 @@ export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
 
   const [stopping, setStopping] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpRef = useRef<HTMLDivElement>(null);
 
   const counts = useMemo(() => {
     const c = { total: nodes.length, roots: 0, children: 0, online: 0, offline: 0, failed: 0, provisioning: 0, activeTasks: 0 };
@@ -33,6 +35,25 @@ export function Toolbar() {
     );
     setStopping(false);
   }, [nodes]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (helpRef.current && !helpRef.current.contains(event.target as Node)) {
+        setHelpOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHelpOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   return (
     <div className="fixed top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-zinc-900/80 backdrop-blur-md border border-zinc-800/60 rounded-xl px-4 py-2 shadow-xl shadow-black/20">
@@ -95,6 +116,43 @@ export function Toolbar() {
         <span className="text-[10px] text-zinc-500">Search</span>
         <kbd className="text-[8px] text-zinc-600 bg-zinc-900/60 px-1 py-0.5 rounded border border-zinc-700/30">⌘K</kbd>
       </button>
+
+      {/* Quick help */}
+      <div ref={helpRef} className="relative">
+        <button
+          onClick={() => setHelpOpen((open) => !open)}
+          className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-800/50 hover:bg-zinc-700/50 border border-zinc-700/40 rounded-lg transition-colors"
+          aria-expanded={helpOpen}
+          aria-label="Open quick help"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-zinc-500">
+            <path d="M8 12v.5M6.5 6.3A1.9 1.9 0 1 1 9 8.1c-.7.4-1 .8-1 1.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2" />
+          </svg>
+          <span className="text-[10px] text-zinc-500">Help</span>
+        </button>
+
+        {helpOpen && (
+          <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-zinc-700/60 bg-zinc-950/95 p-3 shadow-2xl shadow-black/50 backdrop-blur-md">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-400">Quick start</span>
+              <button
+                onClick={() => setHelpOpen(false)}
+                className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-2">
+              <HelpRow shortcut="⌘K" text="Search workspaces and jump straight into Details or Chat." />
+              <HelpRow shortcut="Palette" text="Open the template palette to deploy a new workspace." />
+              <HelpRow shortcut="Right-click" text="Use node actions for expand, duplicate, export, restart, or delete." />
+              <HelpRow shortcut="Chat" text="If a task is still running, the chat tab resumes that session automatically." />
+              <HelpRow shortcut="Config" text="Use the Config tab for skills, model, secrets, and runtime settings." />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -104,6 +162,17 @@ function StatusPill({ color, count, label }: { color: string; count: number; lab
     <div className="flex items-center gap-1.5" title={`${count} ${label}`}>
       <div className={`w-1.5 h-1.5 rounded-full ${color}`} />
       <span className="text-[10px] text-zinc-400 tabular-nums">{count}</span>
+    </div>
+  );
+}
+
+function HelpRow({ shortcut, text }: { shortcut: string; text: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-zinc-800/70 bg-zinc-900/45 px-3 py-2">
+      <span className="shrink-0 rounded-md border border-zinc-700/60 bg-zinc-950/70 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.18em] text-zinc-400">
+        {shortcut}
+      </span>
+      <p className="text-[11px] leading-relaxed text-zinc-500">{text}</p>
     </div>
   );
 }
