@@ -33,8 +33,9 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 		AllowCredentials: true,
 	}))
 
-	// Rate limiting — configurable via RATE_LIMIT env var (default 100 req/min)
-	rateLimit := 100
+	// Rate limiting — configurable via RATE_LIMIT env var (default 600 req/min)
+	// 15 workspaces × 2 heartbeats/min + canvas polling + user actions needs headroom
+	rateLimit := 600
 	if v := os.Getenv("RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			rateLimit = n
