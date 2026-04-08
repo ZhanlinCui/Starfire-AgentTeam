@@ -247,6 +247,38 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             self._http_client = httpx.AsyncClient(timeout=5.0)
         return self._http_client
 
+    async def _recall_memories(self) -> str:
+        """Recall recent memories from platform API. Returns formatted string or empty."""
+        workspace_id = os.environ.get("WORKSPACE_ID", "")
+        platform_url = os.environ.get("PLATFORM_URL", "")
+        if not workspace_id or not platform_url:
+            return ""
+        try:
+            resp = await self._get_http_client().get(
+                f"{platform_url}/workspaces/{workspace_id}/memories",
+            )
+            data = resp.json()
+            if isinstance(data, list) and data:
+                lines = [f"- [{m.get('scope', '?')}] {m.get('content', '')}" for m in data[-10:]]
+                return "\n".join(lines)
+        except Exception:
+            pass
+        return ""
+
+    async def _commit_memory(self, content: str):
+        """Save a memory to platform API. Best-effort, no error propagation."""
+        workspace_id = os.environ.get("WORKSPACE_ID", "")
+        platform_url = os.environ.get("PLATFORM_URL", "")
+        if not workspace_id or not platform_url or not content:
+            return
+        try:
+            await self._get_http_client().post(
+                f"{platform_url}/workspaces/{workspace_id}/memories",
+                json={"content": content, "scope": "LOCAL"},
+            )
+        except Exception:
+            pass
+
     def _get_system_prompt(self) -> str | None:
         """Get system prompt — re-read from file each time (supports hot-reload)."""
         prompt_file = Path(self.config_path) / "system-prompt.md"
@@ -333,10 +365,18 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
 
+        # Auto-recall: inject prior memories into the prompt on first message (no session yet)
+        if not self._session_id:
+            memories = await self._recall_memories()
+            if memories:
+                user_input = f"[Prior context from memory]\n{memories}\n\n[Current request]\n{user_input}"
+
         try:
             await self._run_cli(user_input, event_queue)
         finally:
             await self._set_current_task("")
+            # Auto-commit: save a brief memory of this interaction
+            await self._commit_memory(f"User asked: {user_input[:200]}")
 
     async def _run_cli(self, user_input: str, event_queue: EventQueue):
         """Run the CLI subprocess and enqueue the result."""
