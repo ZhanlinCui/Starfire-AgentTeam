@@ -130,13 +130,7 @@ export function SidePanel() {
           <MetaPill label="Runtime" value={capability.runtime || "unknown"} />
           <MetaPill label="Skills" value={capability.skillCount > 0 ? `${capability.skillCount}` : "none"} />
           <MetaPill label="Status" value={node.data.status} tone={isOnline ? "emerald" : "zinc"} />
-          {capability.hasActiveTask && <MetaPill label="Resume" value="active run" tone="amber" />}
         </div>
-        {capability.hasActiveTask && (
-          <p className="mt-2 text-[10px] text-amber-300/80 truncate">
-            Resuming: {capability.currentTask}
-          </p>
-        )}
       </div>
 
       {/* Tabs */}
