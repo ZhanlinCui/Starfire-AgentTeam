@@ -41,17 +41,30 @@ func (h *DelegationHandler) Delegate(c *gin.Context) {
 		return
 	}
 
+	// Validate target_id is a valid UUID
+	if _, err := uuid.Parse(body.TargetID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_id must be a valid UUID"})
+		return
+	}
+
 	delegationID := uuid.New().String()
 
-	// Store delegation in DB (request_body must be JSONB)
-	taskJSON, _ := json.Marshal(map[string]string{"task": body.Task})
+	// Store delegation in DB (request_body must be JSONB, include delegation_id for correlation)
+	taskJSON, _ := json.Marshal(map[string]interface{}{
+		"task":          body.Task,
+		"delegation_id": delegationID,
+	})
+	var trackingOK bool
 	_, err := db.DB.ExecContext(ctx, `
 		INSERT INTO activity_logs (workspace_id, activity_type, method, source_id, target_id, summary, request_body, status)
 		VALUES ($1, 'delegation', 'delegate', $2, $3, $4, $5::jsonb, 'pending')
 	`, sourceID, sourceID, body.TargetID, "Delegating to "+body.TargetID, string(taskJSON))
 	if err != nil {
 		log.Printf("Delegation: failed to store: %v", err)
+	} else {
+		trackingOK = true
 	}
+	_ = trackingOK
 
 	// Build A2A payload
 	a2aBody, _ := json.Marshal(map[string]interface{}{
@@ -74,11 +87,15 @@ func (h *DelegationHandler) Delegate(c *gin.Context) {
 		"task_preview":  truncate(body.Task, 100),
 	})
 
-	c.JSON(http.StatusAccepted, gin.H{
+	resp := gin.H{
 		"delegation_id": delegationID,
 		"status":        "delegated",
 		"target_id":     body.TargetID,
-	})
+	}
+	if !trackingOK {
+		resp["warning"] = "delegation dispatched but status tracking unavailable"
+	}
+	c.JSON(http.StatusAccepted, resp)
 }
 
 // executeDelegation runs in a goroutine — sends A2A and stores the result.
@@ -110,8 +127,11 @@ func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID s
 	responseText := extractResponseText(respBody)
 	log.Printf("Delegation %s: completed (status=%d, %d chars)", delegationID, status, len(responseText))
 
-	// Store success (response_body must be JSONB)
-	respJSON, _ := json.Marshal(map[string]string{"text": responseText})
+	// Store success (response_body must be JSONB, include delegation_id)
+	respJSON, _ := json.Marshal(map[string]interface{}{
+		"text":          responseText,
+		"delegation_id": delegationID,
+	})
 	db.DB.Exec(`
 		INSERT INTO activity_logs (workspace_id, activity_type, method, source_id, target_id, summary, response_body, status)
 		VALUES ($1, 'delegation', 'delegate_result', $2, $3, $4, $5::jsonb, 'completed')
@@ -133,7 +153,9 @@ func (h *DelegationHandler) ListDelegations(c *gin.Context) {
 	rows, err := db.DB.QueryContext(ctx, `
 		SELECT id, activity_type, COALESCE(source_id::text, ''), COALESCE(target_id::text, ''),
 		       COALESCE(summary, ''), COALESCE(status, ''), COALESCE(error_detail, ''),
-		       COALESCE(response_body->>'text', ''), created_at
+		       COALESCE(response_body->>'text', response_body::text, ''),
+		       COALESCE(request_body->>'delegation_id', response_body->>'delegation_id', ''),
+		       created_at
 		FROM activity_logs
 		WHERE workspace_id = $1 AND method IN ('delegate', 'delegate_result')
 		ORDER BY created_at DESC
@@ -147,9 +169,9 @@ func (h *DelegationHandler) ListDelegations(c *gin.Context) {
 
 	var delegations []map[string]interface{}
 	for rows.Next() {
-		var id, actType, sourceID, targetID, summary, status, errorDetail, responseBody string
+		var id, actType, sourceID, targetID, summary, status, errorDetail, responseBody, delegationID string
 		var createdAt time.Time
-		if err := rows.Scan(&id, &actType, &sourceID, &targetID, &summary, &status, &errorDetail, &responseBody, &createdAt); err != nil {
+		if err := rows.Scan(&id, &actType, &sourceID, &targetID, &summary, &status, &errorDetail, &responseBody, &delegationID, &createdAt); err != nil {
 			continue
 		}
 		entry := map[string]interface{}{
@@ -161,10 +183,13 @@ func (h *DelegationHandler) ListDelegations(c *gin.Context) {
 			"status":     status,
 			"created_at": createdAt,
 		}
+		if delegationID != "" {
+			entry["delegation_id"] = delegationID
+		}
 		if errorDetail != "" {
 			entry["error"] = errorDetail
 		}
-		if responseBody != "" && len(responseBody) > 0 {
+		if responseBody != "" {
 			entry["response_preview"] = truncate(responseBody, 300)
 		}
 		delegations = append(delegations, entry)
