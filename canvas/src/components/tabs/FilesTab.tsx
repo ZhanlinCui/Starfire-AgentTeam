@@ -488,7 +488,11 @@ function buildTree(files: FileEntry[]): TreeNode[] {
   for (const file of sorted) {
     const parts = file.path.split("/");
     if (parts.length === 1) {
-      root.push({ name: parts[0], path: file.path, isDir: file.dir, children: [], size: file.size });
+      // Check if already exists in dirMap (e.g. created by a nested child earlier)
+      if (file.dir && dirMap.has(file.path)) continue;
+      const node: TreeNode = { name: parts[0], path: file.path, isDir: file.dir, children: [], size: file.size };
+      root.push(node);
+      if (file.dir) dirMap.set(file.path, node);
     } else {
       // Find or create parent dirs
       let parentChildren = root;
@@ -502,7 +506,14 @@ function buildTree(files: FileEntry[]): TreeNode[] {
         }
         parentChildren = dirNode.children;
       }
-      if (!file.dir) {
+      if (file.dir) {
+        const dirPath = file.path;
+        if (!dirMap.has(dirPath)) {
+          const dirNode: TreeNode = { name: parts[parts.length - 1], path: dirPath, isDir: true, children: [], size: 0 };
+          parentChildren.push(dirNode);
+          dirMap.set(dirPath, dirNode);
+        }
+      } else {
         parentChildren.push({
           name: parts[parts.length - 1],
           path: file.path,
