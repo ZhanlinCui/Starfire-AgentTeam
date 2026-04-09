@@ -116,6 +116,27 @@ class TestCreateAgent:
         mod.create_agent("openai:gpt-4o", [], "sys")
         fake_llm_cls.assert_called_once_with(model="gpt-4o", openai_api_base="http://openai-proxy.test")
 
+    def test_nvidia_provider(self, monkeypatch):
+        """nvidia: prefix uses ChatNVIDIA."""
+        fake_llm_cls = MagicMock(return_value=MagicMock(name="llm"))
+        fake_lc_nvidia = ModuleType("langchain_nvidia_ai_endpoints")
+        fake_lc_nvidia.ChatNVIDIA = fake_llm_cls
+
+        mod = _load_agent(monkeypatch, {"langchain_nvidia_ai_endpoints": fake_lc_nvidia})
+
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        monkeypatch.setenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+        monkeypatch.delenv("LANGFUSE_HOST", raising=False)
+        monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+        monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+
+        mod.create_agent("nvidia:meta/llama3-8b-instruct", [], "sys prompt")
+        fake_llm_cls.assert_called_once_with(
+            model="meta/llama3-8b-instruct",
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key="nvapi-test",
+        )
+
     def test_openrouter_provider(self, monkeypatch):
         """openrouter: prefix uses ChatOpenAI with openrouter base URL."""
         fake_llm_cls = MagicMock(return_value=MagicMock(name="llm"))

@@ -344,6 +344,9 @@ def gen_ai_system_from_model(model_str: str) -> str:
         "openrouter": "openrouter",
         "groq": "groq",
         "google_genai": "google",
+        "nvidia": "nvidia",
+        "nvidia_ai_endpoints": "nvidia",
+        "nim": "nvidia",
         "ollama": "ollama",
     }.get(provider, provider)
 

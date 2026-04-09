@@ -77,6 +77,16 @@ class DeepAgentsAdapter(BaseAdapter):
             if base_url:
                 llm_kwargs["anthropic_api_url"] = base_url
             return ChatAnthropic(**llm_kwargs)
+        elif provider in ("nvidia", "nvidia_ai_endpoints", "nim"):
+            from langchain_nvidia_ai_endpoints import ChatNVIDIA
+            llm_kwargs = {"model": model_name}
+            base_url = os.environ.get("NVIDIA_BASE_URL", "")
+            if base_url:
+                llm_kwargs["base_url"] = base_url
+            api_key = os.environ.get("NVIDIA_API_KEY", "")
+            if api_key:
+                llm_kwargs["api_key"] = api_key
+            return ChatNVIDIA(**llm_kwargs)
         else:
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(model=model_name)

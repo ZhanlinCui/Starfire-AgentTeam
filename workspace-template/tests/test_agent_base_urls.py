@@ -50,6 +50,23 @@ def test_create_agent_uses_anthropic_base_url(monkeypatch):
     assert captured["llm_kwargs"]["anthropic_api_url"] == "https://anthropic.example/v1"
 
 
+def test_create_agent_uses_nvidia_base_url(monkeypatch):
+    """NVIDIA models should pass NVIDIA_BASE_URL through explicitly."""
+    captured = {}
+    _install_agent_mocks(monkeypatch, "langchain_nvidia_ai_endpoints", "ChatNVIDIA", captured)
+    monkeypatch.setenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+
+    sys.modules.pop("agent", None)
+    agent_mod = importlib.import_module("agent")
+
+    agent_mod.create_agent("nvidia:meta/llama3-8b-instruct", [], "system prompt")
+
+    assert captured["llm_kwargs"]["model"] == "meta/llama3-8b-instruct"
+    assert captured["llm_kwargs"]["base_url"] == "https://integrate.api.nvidia.com/v1"
+    assert captured["llm_kwargs"]["api_key"] == "nvapi-test"
+
+
 def test_codex_runtime_preserves_openai_base_url(monkeypatch):
     """Codex CLI runtime should pass OPENAI_BASE_URL into the subprocess env."""
     captured = {}

@@ -26,16 +26,60 @@ import shlex
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any
 
-import httpx
+from types import SimpleNamespace
 
-from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.events import EventQueue
-from a2a.utils import new_agent_text_message
+try:  # pragma: no cover - optional in unit-test/minimal environments
+    import httpx
+except ImportError:  # pragma: no cover
+    httpx = SimpleNamespace(AsyncClient=None)
+
+try:  # pragma: no cover - optional in unit-test/minimal environments
+    from a2a.server.agent_execution import AgentExecutor, RequestContext
+    from a2a.server.events import EventQueue
+    from a2a.utils import new_agent_text_message
+except ImportError:  # pragma: no cover
+    class AgentExecutor:  # minimal fallback for import-time unit tests
+        pass
+
+    class RequestContext:  # minimal fallback for import-time unit tests
+        pass
+
+    class EventQueue:  # minimal fallback for import-time unit tests
+        pass
+
+    def new_agent_text_message(text: str):
+        return {"role": "assistant", "content": text}
 
 from config import RuntimeConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _load_json_object_env(var_name: str) -> dict[str, Any]:
+    """Load a JSON object from an environment variable."""
+    raw = os.environ.get(var_name, "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Ignoring invalid JSON in %s", var_name)
+        return {}
+    if not isinstance(parsed, dict):
+        logger.warning("Ignoring %s because it is not a JSON object", var_name)
+        return {}
+    return parsed
+
+
+def _build_mcp_config() -> dict[str, Any]:
+    """Build MCP server config for CLI runtimes."""
+    mcp_servers: dict[str, Any] = {
+        "a2a": {"command": "python3", "args": ["/app/a2a_mcp_server.py"]},
+    }
+    mcp_servers.update(_load_json_object_env("NVIDIA_MCP_SERVERS_JSON"))
+    return {"mcpServers": mcp_servers}
 
 
 def _brief_summary(text: str, max_len: int = 80) -> str:
@@ -141,11 +185,7 @@ class CLIAgentExecutor(AgentExecutor):
         # Create MCP config once (reuse across invocations)
         self._mcp_config_path: str | None = None
         if self.preset.get("auth_pattern") in ("apiKeyHelper", "env"):
-            mcp_config = json.dumps({
-                "mcpServers": {
-                    "a2a": {"command": "python3", "args": ["/app/a2a_mcp_server.py"]}
-                }
-            })
+            mcp_config = json.dumps(_build_mcp_config())
             fd, self._mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="a2a-mcp-")
             self._temp_files.append(self._mcp_config_path)  # Track immediately
             os.close(fd)

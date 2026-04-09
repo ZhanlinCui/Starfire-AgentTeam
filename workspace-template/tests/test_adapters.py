@@ -1105,6 +1105,26 @@ class TestDeepAgentsCreateLlmBranches:
         assert call_kwargs.get("anthropic_api_url") == "http://proxy:8080"
         assert result is fake_llm
 
+    def test_create_llm_nvidia_with_base_url(self, monkeypatch):
+        """nvidia provider uses ChatNVIDIA with NVIDIA_BASE_URL and NVIDIA_API_KEY."""
+        from types import ModuleType
+        fake_nvidia = ModuleType("langchain_nvidia_ai_endpoints")
+        fake_llm = MagicMock()
+        fake_nvidia.ChatNVIDIA = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_nvidia_ai_endpoints", fake_nvidia)
+        monkeypatch.setenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        result = adapter._create_llm("nvidia:meta/llama3-8b-instruct")
+
+        call_kwargs = fake_nvidia.ChatNVIDIA.call_args[1]
+        assert call_kwargs.get("base_url") == "https://integrate.api.nvidia.com/v1"
+        assert call_kwargs.get("api_key") == "nvapi-test"
+        assert call_kwargs["model"] == "meta/llama3-8b-instruct"
+        assert result is fake_llm
+
     def test_create_llm_unknown_provider_fallback(self, monkeypatch):
         """Unknown provider falls back to ChatOpenAI with model_name only."""
         from types import ModuleType

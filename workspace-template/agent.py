@@ -33,10 +33,15 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
             from langchain_google_genai import ChatGoogleGenerativeAI as LLMClass
         elif provider == "ollama":
             from langchain_ollama import ChatOllama as LLMClass
+        elif provider in ("nvidia", "nvidia_ai_endpoints", "nim"):
+            from langchain_nvidia_ai_endpoints import ChatNVIDIA as LLMClass
         else:
             raise ValueError(f"Unsupported model provider: {provider}")
     except ImportError as e:
-        pkg = "langchain-openai" if provider == "openrouter" else f"langchain-{provider}"
+        if provider in ("nvidia", "nvidia_ai_endpoints", "nim"):
+            pkg = "langchain-nvidia-ai-endpoints"
+        else:
+            pkg = "langchain-openai" if provider == "openrouter" else f"langchain-{provider}"
         raise ImportError(f"Provider '{provider}' requires package '{pkg}'. Install: pip install {pkg}") from e
 
     # Instantiate the LLM
@@ -67,6 +72,15 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
         openai_base_url = os.environ.get("OPENAI_BASE_URL", "")
         if openai_base_url:
             llm_kwargs["openai_api_base"] = openai_base_url
+        llm = LLMClass(**llm_kwargs)
+    elif provider in ("nvidia", "nvidia_ai_endpoints", "nim"):
+        llm_kwargs = {"model": model_name}
+        nvidia_base_url = os.environ.get("NVIDIA_BASE_URL", "")
+        if nvidia_base_url:
+            llm_kwargs["base_url"] = nvidia_base_url
+        nvidia_api_key = os.environ.get("NVIDIA_API_KEY", "")
+        if nvidia_api_key:
+            llm_kwargs["api_key"] = nvidia_api_key
         llm = LLMClass(**llm_kwargs)
     else:
         llm = LLMClass(model=model_name)

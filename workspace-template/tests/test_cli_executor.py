@@ -120,6 +120,27 @@ def test_system_prompt_only_first_message():
     assert "--system-prompt" not in cmd_second
 
 
+def test_mcp_config_merges_nvidia_servers(monkeypatch):
+    """NVIDIA_MCP_SERVERS_JSON should be merged into CLI MCP config."""
+    monkeypatch.setenv(
+        "NVIDIA_MCP_SERVERS_JSON",
+        json.dumps({
+            "nvidia-nat": {
+                "command": "nat",
+                "args": ["mcp", "serve", "--config", "/configs/nat.yml"],
+            }
+        }),
+    )
+
+    executor = _make_executor(runtime="codex", runtime_config=RuntimeConfig(model="gpt-5.4"))
+
+    assert executor._mcp_config_path is not None
+    config_data = json.loads(Path(executor._mcp_config_path).read_text())
+    assert "a2a" in config_data["mcpServers"]
+    assert "nvidia-nat" in config_data["mcpServers"]
+    assert config_data["mcpServers"]["nvidia-nat"]["command"] == "nat"
+
+
 # ---------- execute tests ----------
 
 

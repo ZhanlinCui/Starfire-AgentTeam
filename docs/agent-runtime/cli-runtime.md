@@ -99,6 +99,29 @@ runtime: deepagents
 model: openrouter:google/gemini-2.5-flash
 ```
 
+### NVIDIA-hosted models
+
+LangGraph and DeepAgents workspaces can point at NVIDIA-hosted or self-hosted NIM models with:
+
+```yaml
+model: nvidia:meta/llama3-8b-instruct
+```
+
+Environment variables:
+
+- `NVIDIA_API_KEY` for NVIDIA AI Endpoints / NIM access
+- `NVIDIA_BASE_URL` for an alternate NVIDIA-compatible endpoint, such as a self-hosted gateway
+
+### NeMo Agent Toolkit MCP
+
+If you have a NeMo Agent Toolkit server exposing MCP tools, you can merge it into the built-in A2A MCP bridge by setting:
+
+```bash
+NVIDIA_MCP_SERVERS_JSON='{"nvidia-nat":{"command":"nat","args":["mcp","serve","--config","/configs/nat.yml"]}}'
+```
+
+The CLI runtime keeps the local A2A MCP server and merges in any extra server definitions from that JSON blob.
+
 ### OpenClaw (`runtime: openclaw`)
 
 Proxies A2A messages to OpenClaw via `openclaw agent` CLI subprocess. Handles its own session continuity via `--session-id`.
