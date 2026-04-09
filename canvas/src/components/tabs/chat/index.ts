@@ -1,3 +1,2 @@
-export { type ChatMessage, type ChatSession, createMessage } from "./types";
-export { getStorageKey, loadSessions, saveSessions } from "./storage";
+export { type ChatMessage, createMessage } from "./types";
 export { extractAgentText, extractTextsFromParts, extractResponseText } from "./message-parser";
