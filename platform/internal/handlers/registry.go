@@ -153,7 +153,9 @@ func (h *RegistryHandler) evaluateStatus(c *gin.Context, payload models.Heartbea
 	}
 
 	if currentStatus == "online" && payload.ErrorRate >= 0.5 {
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'degraded', updated_at = now() WHERE id = $1`, payload.WorkspaceID)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'degraded', updated_at = now() WHERE id = $1`, payload.WorkspaceID); err != nil {
+			log.Printf("Heartbeat: failed to mark %s degraded: %v", payload.WorkspaceID, err)
+		}
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_DEGRADED", payload.WorkspaceID, map[string]interface{}{
 			"error_rate":   payload.ErrorRate,
 			"sample_error": payload.SampleError,
@@ -161,13 +163,17 @@ func (h *RegistryHandler) evaluateStatus(c *gin.Context, payload models.Heartbea
 	}
 
 	if currentStatus == "degraded" && payload.ErrorRate < 0.1 {
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, payload.WorkspaceID)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, payload.WorkspaceID); err != nil {
+			log.Printf("Heartbeat: failed to recover %s to online: %v", payload.WorkspaceID, err)
+		}
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.WorkspaceID, map[string]interface{}{})
 	}
 
 	// Recovery: if workspace was offline but is now sending heartbeats, bring it back online
 	if currentStatus == "offline" {
-		db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, payload.WorkspaceID)
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, payload.WorkspaceID); err != nil {
+			log.Printf("Heartbeat: failed to recover %s from offline: %v", payload.WorkspaceID, err)
+		}
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.WorkspaceID, map[string]interface{}{})
 	}
 }

@@ -185,9 +185,13 @@ func (h *AgentHandler) Move(c *gin.Context) {
 
 	// Check target doesn't already have an agent
 	var targetAgentCount int
-	db.DB.QueryRowContext(ctx,
+	if err := db.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM agents WHERE workspace_id = $1 AND status = 'active'`, body.TargetWorkspaceID,
-	).Scan(&targetAgentCount)
+	).Scan(&targetAgentCount); err != nil {
+		log.Printf("Move agent target check error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "target lookup failed"})
+		return
+	}
 	if targetAgentCount > 0 {
 		c.JSON(http.StatusConflict, gin.H{"error": "target workspace already has an active agent"})
 		return
