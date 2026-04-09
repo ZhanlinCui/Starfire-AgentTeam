@@ -218,7 +218,8 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | POST | /registry/check-access | discovery.go |
 | GET | /bundles/export/:id | bundle.go |
 | POST | /bundles/import | bundle.go |
-| GET | /events[/:workspaceId] | events.go |
+| GET | /org/templates | org.go (list available org templates) |
+| POST | /org/import | org.go (import entire org hierarchy from YAML) || GET | /events[/:workspaceId] | events.go |
 | GET | /ws | socket.go |
 
 ## Database
