@@ -130,10 +130,10 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 	var wsName, status, dbRuntime string
 	var tier int
 	err := db.DB.QueryRowContext(ctx,
-		`SELECT name, status, tier, COALESCE(runtime, 'langgraph') FROM workspaces WHERE id = $1 AND status != 'removed'`, workspaceID,
+		`SELECT name, status, tier, COALESCE(runtime, 'langgraph') FROM workspaces WHERE id = $1 AND status NOT IN ('removed', 'paused')`, workspaceID,
 	).Scan(&wsName, &status, &tier, &dbRuntime)
 	if err != nil {
-		return
+		return // includes paused — don't auto-restart paused workspaces
 	}
 
 	// If still provisioning, brief wait so container exists for Stop()
@@ -157,4 +157,82 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 
 	// On auto-restart, do NOT re-apply templates — preserve existing config volume.
 	go h.provisionWorkspace(workspaceID, "", nil, payload)
+}
+
+// Pause handles POST /workspaces/:id/pause
+// Stops the container and sets status to 'paused'. The workspace remains on the canvas
+// but won't receive heartbeats, won't be auto-restarted, and won't consume resources.
+// Config volume is preserved — resume will re-provision with the same config.
+func (h *WorkspaceHandler) Pause(c *gin.Context) {
+	id := c.Param("id")
+	ctx := c.Request.Context()
+
+	var status, wsName string
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT status, name FROM workspaces WHERE id = $1 AND status NOT IN ('removed', 'paused')`, id,
+	).Scan(&status, &wsName)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found or already paused"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+
+	// Stop container if provisioner is available
+	if h.provisioner != nil {
+		h.provisioner.Stop(ctx, id)
+	}
+
+	// Mark as paused — health sweep and liveness monitor will skip this workspace
+	db.DB.ExecContext(ctx,
+		`UPDATE workspaces SET status = 'paused', url = '', updated_at = now() WHERE id = $1`, id)
+	db.ClearWorkspaceKeys(ctx, id)
+
+	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PAUSED", id, map[string]interface{}{
+		"name": wsName,
+	})
+
+	log.Printf("Paused workspace %s (%s)", wsName, id)
+	c.JSON(http.StatusOK, gin.H{"status": "paused"})
+}
+
+// Resume handles POST /workspaces/:id/resume
+// Re-provisions a paused workspace. Config volume is preserved from before the pause.
+func (h *WorkspaceHandler) Resume(c *gin.Context) {
+	id := c.Param("id")
+	ctx := c.Request.Context()
+
+	var wsName, dbRuntime string
+	var tier int
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT name, tier, COALESCE(runtime, 'langgraph') FROM workspaces WHERE id = $1 AND status = 'paused'`, id,
+	).Scan(&wsName, &tier, &dbRuntime)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found or not paused"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+
+	if h.provisioner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provisioner not available"})
+		return
+	}
+
+	db.DB.ExecContext(ctx,
+		`UPDATE workspaces SET status = 'provisioning', updated_at = now() WHERE id = $1`, id)
+	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", id, map[string]interface{}{
+		"name": wsName, "tier": tier,
+	})
+
+	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: dbRuntime}
+	// Resume uses existing config volume — no template needed
+	go h.provisionWorkspace(id, "", nil, payload)
+
+	log.Printf("Resuming workspace %s (%s)", wsName, id)
+	c.JSON(http.StatusOK, gin.H{"status": "provisioning"})
 }

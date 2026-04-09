@@ -99,6 +99,28 @@ export function ContextMenu() {
     closeContextMenu();
   }, [contextMenu, updateNodeData, closeContextMenu]);
 
+  const handlePause = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      await api.post(`/workspaces/${contextMenu.nodeId}/pause`, {});
+      updateNodeData(contextMenu.nodeId, { status: "paused" });
+    } catch (e) {
+      showToast("Pause failed", "error");
+    }
+    closeContextMenu();
+  }, [contextMenu, updateNodeData, closeContextMenu]);
+
+  const handleResume = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      await api.post(`/workspaces/${contextMenu.nodeId}/resume`, {});
+      updateNodeData(contextMenu.nodeId, { status: "provisioning" });
+    } catch (e) {
+      showToast("Resume failed", "error");
+    }
+    closeContextMenu();
+  }, [contextMenu, updateNodeData, closeContextMenu]);
+
   const handleDelete = useCallback(() => {
     if (!contextMenu) return;
     // Don't close context menu yet — keep it mounted so ConfirmDialog renders
@@ -173,6 +195,7 @@ export function ContextMenu() {
 
   const isOfflineOrFailed = contextMenu.nodeData.status === "offline" || contextMenu.nodeData.status === "failed";
   const isOnline = contextMenu.nodeData.status === "online";
+  const isPaused = contextMenu.nodeData.status === "paused";
   const isChild = !!contextMenu.nodeData.parentId;
 
   const items: MenuItem[] = [
@@ -189,7 +212,10 @@ export function ContextMenu() {
       ? [{ label: "Collapse Team", icon: "◁", action: handleCollapse }]
       : [{ label: "Expand to Team", icon: "▷", action: handleExpand }]),
     { label: "", icon: "", action: () => {}, divider: true },
-    { label: "Restart", icon: "↻", action: handleRestart, disabled: !isOfflineOrFailed },
+    ...(isPaused
+      ? [{ label: "Resume", icon: "▶", action: handleResume }]
+      : [{ label: "Pause", icon: "⏸", action: handlePause, disabled: !isOnline }]),
+    { label: "Restart", icon: "↻", action: handleRestart, disabled: !(isOfflineOrFailed || isPaused) },
     { label: "Delete", icon: "✕", action: handleDelete, danger: true },
   ];
 

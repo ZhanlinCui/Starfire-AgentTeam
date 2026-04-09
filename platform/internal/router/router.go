@@ -66,6 +66,8 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.PATCH("/workspaces/:id", wh.Update)
 	r.DELETE("/workspaces/:id", wh.Delete)
 	r.POST("/workspaces/:id/restart", wh.Restart)
+	r.POST("/workspaces/:id/pause", wh.Pause)
+	r.POST("/workspaces/:id/resume", wh.Resume)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
 	// Traces (Langfuse proxy)

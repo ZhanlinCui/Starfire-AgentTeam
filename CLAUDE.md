@@ -173,7 +173,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 - Config save: "Save & Restart" writes config.yaml and auto-restarts the workspace. "Save" writes only (shows restart banner). Secrets POST/DELETE auto-restart on the platform side.
 
 ### Workspace Lifecycle
-`provisioning` → `online` (on register) → `degraded` (error_rate > 0.5) → `online` (recovered) → `offline` (Redis TTL expired OR health sweep detects dead container) → auto-restart → `provisioning` → ... → `removed` (deleted)
+`provisioning` → `online` (on register) → `degraded` (error_rate > 0.5) → `online` (recovered) → `offline` (Redis TTL expired OR health sweep detects dead container) → auto-restart → `provisioning` → ... → `removed` (deleted). Any state → `paused` (user pauses) → `provisioning` (user resumes). Paused workspaces skip health sweep, liveness monitor, and auto-restart.
 
 ## Platform API Routes
 
@@ -202,6 +202,8 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | GET/POST | /workspaces/:id/activity | activity.go |
 | POST | /workspaces/:id/notify | activity.go (agent→user push message via WS) |
 | POST | /workspaces/:id/restart | workspace.go |
+| POST | /workspaces/:id/pause | workspace.go (stops container, status→paused) |
+| POST | /workspaces/:id/resume | workspace.go (re-provisions paused workspace) |
 | POST | /workspaces/:id/a2a | workspace.go |
 | GET | /workspaces/:id/shared-context | templates.go |
 | GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
