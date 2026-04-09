@@ -30,6 +30,7 @@ export function ChatTab({ workspaceId, data }: Props) {
   const cleanupRef = useRef<(() => void) | undefined>(undefined);
   const currentTaskRef = useRef(data.currentTask);
   const sendingFromAPIRef = useRef(false); // tracks whether WE initiated the send
+  const responseReceivedRef = useRef(false); // prevents duplicate message from poll+WS race
   const [agentReachable, setAgentReachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -75,7 +76,9 @@ export function ChatTab({ workspaceId, data }: Props) {
   // Clean up poll timer on unmount
   useEffect(() => () => cleanupRef.current?.(), []);
 
-  // On page load/refresh: if agent has an active task, start polling for the response.
+  // Recovery poll: on page load/refresh, if agent has an active task, start a
+  // slow fallback poll. The primary response path is WebSocket (A2A_RESPONSE event),
+  // but if the response was broadcast while the page was refreshing, we need this.
   useEffect(() => {
     if (!sending || sendingFromAPIRef.current) return;
     const lastMsgTime = messages.length > 0
@@ -119,6 +122,8 @@ export function ChatTab({ workspaceId, data }: Props) {
     }
     setActivityLog(["Processing with Claude..."]);
 
+    // TODO: Refactor to subscribe to ACTIVITY_LOGGED/TASK_UPDATED via the shared
+    // ReconnectingSocket (canvas store) instead of opening a second WS connection.
     const ws = new WebSocket(WS_URL);
 
     ws.onmessage = (event) => {
@@ -204,22 +209,42 @@ export function ChatTab({ workspaceId, data }: Props) {
     [activeSessionId]
   );
 
-  // Consume agent-pushed messages from the global store (routed via existing WS → applyEvent).
-  // No extra WebSocket connection needed — the main canvas WS handles AGENT_MESSAGE.
+  // Consume agent messages from the global store.
+  // These arrive via WebSocket: AGENT_MESSAGE (push notifications) and A2A_RESPONSE
+  // (instant response delivery from the A2A proxy, replacing the old 3s polling).
   const pendingAgentMsgs = useCanvasStore((s) => s.agentMessages[workspaceId]);
   useEffect(() => {
     if (!pendingAgentMsgs || pendingAgentMsgs.length === 0) return;
+    // Skip if fallback poll already delivered this response (prevents duplicates).
+    // Only apply while actively waiting for a response — otherwise AGENT_MESSAGE
+    // push notifications that arrive between request/response cycles get swallowed.
+    if (sending && responseReceivedRef.current) return;
     const consume = useCanvasStore.getState().consumeAgentMessages;
     const msgs = consume(workspaceId);
     for (const m of msgs) {
       addMessage(createMessage("agent", m.content));
     }
-  }, [pendingAgentMsgs, workspaceId, addMessage]);
+    // Response arrived via WebSocket — clear the loading state and cancel any recovery poll.
+    if (sending) {
+      responseReceivedRef.current = true;
+      setSending(false);
+      sendingFromAPIRef.current = false;
+      cleanupRef.current?.();
+    }
+  }, [pendingAgentMsgs, workspaceId, addMessage, sending]);
 
-  // Poll activity log for agent response — survives page refresh, tab switches, etc.
+  // Fallback poll: checks activity logs for agent response at 10s intervals.
+  // Primary delivery is instant via WebSocket (A2A_RESPONSE → agentMessages store).
+  // This poll catches edge cases: WS briefly disconnected, page refresh mid-response, etc.
   const pollForResponse = useCallback(
     (sentAfter: string) => {
       const pollInterval = setInterval(async () => {
+        // WebSocket already delivered the response — stop polling
+        if (responseReceivedRef.current) {
+          clearInterval(pollInterval);
+          return;
+        }
+
         try {
           const activities = await api.get<Array<{
             activity_type: string;
@@ -229,16 +254,21 @@ export function ChatTab({ workspaceId, data }: Props) {
             error_detail: string | null;
           }>>(`/workspaces/${workspaceId}/activity?type=a2a_receive&limit=3`);
 
-          // Find a response that came after we sent the message
           for (const a of activities) {
             if (a.created_at <= sentAfter) continue;
             if (!a.response_body) continue;
 
-            // Found it — extract text
             const text = extractResponseText(a.response_body);
             if (!text) continue;
 
+            // Guard against duplicate if WS delivered between poll start and now
+            if (responseReceivedRef.current) {
+              clearInterval(pollInterval);
+              return;
+            }
+
             clearInterval(pollInterval);
+            responseReceivedRef.current = true;
             if (a.status === "error" || text.toLowerCase().startsWith("agent error")) {
               addMessage(createMessage("system", text));
             } else {
@@ -252,11 +282,9 @@ export function ChatTab({ workspaceId, data }: Props) {
           // Poll failed — keep trying
         }
 
-        // Also check if agent stopped working (no more current_task)
-        // but only after giving it time to start (30s grace period)
+        // Check if agent stopped working (no more current_task) after 30s grace period
         const elapsed = (Date.now() - new Date(sentAfter).getTime()) / 1000;
         if (elapsed > 30 && !currentTaskRef.current) {
-          // Agent finished but we didn't find a response — check one more time
           try {
             const activities = await api.get<Array<{
               activity_type: string;
@@ -265,8 +293,9 @@ export function ChatTab({ workspaceId, data }: Props) {
             }>>(`/workspaces/${workspaceId}/activity?type=a2a_receive&limit=1`);
             if (activities[0]?.created_at > sentAfter && activities[0]?.response_body) {
               const text = extractResponseText(activities[0].response_body);
-              if (text) {
+              if (text && !responseReceivedRef.current) {
                 clearInterval(pollInterval);
+                responseReceivedRef.current = true;
                 addMessage(createMessage("agent", text));
                 setSending(false);
                 sendingFromAPIRef.current = false;
@@ -275,7 +304,7 @@ export function ChatTab({ workspaceId, data }: Props) {
             }
           } catch { /* ignore */ }
         }
-      }, 3000);
+      }, 10000);
 
       return pollInterval;
     },
@@ -290,11 +319,10 @@ export function ChatTab({ workspaceId, data }: Props) {
     addMessage(createMessage("user", text));
     setSending(true);
     sendingFromAPIRef.current = true;
+    responseReceivedRef.current = false;
     setError(null);
 
-    const sentAt = new Date().toISOString();
-
-    // Clean up any previous poll
+    // Clean up any previous recovery poll
     cleanupRef.current?.();
 
     // Build conversation history from prior messages in this session (last 20 to limit payload)
@@ -306,8 +334,10 @@ export function ChatTab({ workspaceId, data }: Props) {
         parts: [{ kind: "text", text: m.content }],
       }));
 
-    // Fire the A2A request — don't wait for the response.
-    // The poll loop picks up the result from the activity log.
+    const sentAt = new Date().toISOString();
+
+    // Fire the A2A request. The response arrives instantly via WebSocket
+    // (A2A_RESPONSE event broadcast by the platform proxy) instead of polling.
     api.post(`/workspaces/${workspaceId}/a2a`, {
       method: "message/send",
       params: {
@@ -318,9 +348,16 @@ export function ChatTab({ workspaceId, data }: Props) {
         },
         metadata: { history },
       },
-    }).catch(() => {}); // Ignore — we poll for the result instead
+    }).catch(() => {
+      setSending(false);
+      sendingFromAPIRef.current = false;
+      cleanupRef.current?.();
+      setError("Failed to send message — agent may be unreachable");
+    });
 
-    // Start polling for the response
+    // Start a fallback poll in case the WebSocket misses the A2A_RESPONSE event
+    // (e.g., brief WS disconnect). If WS delivers first, the agentMessages effect
+    // clears sending and cancels this poll via cleanupRef.
     const pollTimer = pollForResponse(sentAt);
     cleanupRef.current = () => clearInterval(pollTimer);
   };

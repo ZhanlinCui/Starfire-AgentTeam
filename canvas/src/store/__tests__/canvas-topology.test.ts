@@ -23,6 +23,7 @@ function makeWS(overrides: Partial<WorkspaceData> & { id: string }): WorkspaceDa
     x: 0,
     y: 0,
     collapsed: false,
+    runtime: "",
     ...overrides,
   };
 }

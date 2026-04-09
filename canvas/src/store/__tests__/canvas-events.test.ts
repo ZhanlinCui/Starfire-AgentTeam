@@ -30,6 +30,7 @@ function makeNode(
       parentId: null,
       currentTask: "",
       needsRestart: false,
+      runtime: "",
       ...overrides,
     },
   };
@@ -494,6 +495,76 @@ describe("handleCanvasEvent – AGENT_MESSAGE", () => {
 
     handleCanvasEvent(
       makeMsg({ event: "AGENT_MESSAGE", workspace_id: "ws-1", payload: {} }),
+      get,
+      set
+    );
+
+    expect(set).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A2A_RESPONSE
+// ---------------------------------------------------------------------------
+
+describe("handleCanvasEvent – A2A_RESPONSE", () => {
+  it("extracts text from response_body and stores as agentMessage", () => {
+    const node = makeNode("ws-1");
+    const { get, set } = makeStore([node], [], null, {});
+
+    handleCanvasEvent(
+      makeMsg({
+        event: "A2A_RESPONSE",
+        workspace_id: "ws-1",
+        payload: {
+          response_body: {
+            result: { parts: [{ kind: "text", text: "Here is my analysis" }] },
+          },
+          method: "message/send",
+          duration_ms: 1500,
+        },
+      }),
+      get,
+      set
+    );
+
+    expect(set).toHaveBeenCalledOnce();
+    const { agentMessages } = set.mock.calls[0][0] as {
+      agentMessages: Record<string, Array<{ id: string; content: string; timestamp: string }>>;
+    };
+    expect(agentMessages["ws-1"]).toHaveLength(1);
+    expect(agentMessages["ws-1"][0].content).toBe("Here is my analysis");
+  });
+
+  it("is a no-op when response_body is missing", () => {
+    const node = makeNode("ws-1");
+    const { get, set } = makeStore([node]);
+
+    handleCanvasEvent(
+      makeMsg({
+        event: "A2A_RESPONSE",
+        workspace_id: "ws-1",
+        payload: { method: "message/send" },
+      }),
+      get,
+      set
+    );
+
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when response text is empty", () => {
+    const node = makeNode("ws-1");
+    const { get, set } = makeStore([node]);
+
+    handleCanvasEvent(
+      makeMsg({
+        event: "A2A_RESPONSE",
+        workspace_id: "ws-1",
+        payload: {
+          response_body: { result: { parts: [] } },
+        },
+      }),
       get,
       set
     );

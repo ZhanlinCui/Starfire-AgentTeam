@@ -19,8 +19,29 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, templatePath string, 
 	ctx, cancel := context.WithTimeout(context.Background(), provisioner.ProvisionTimeout)
 	defer cancel()
 
-	// Load secrets for this workspace from DB
+	// Load global secrets first, then workspace-specific secrets (which override globals).
 	envVars := map[string]string{}
+
+	// 1. Global secrets (platform-wide defaults)
+	globalRows, globalErr := db.DB.QueryContext(ctx,
+		`SELECT key, encrypted_value FROM global_secrets`)
+	if globalErr == nil {
+		defer globalRows.Close()
+		for globalRows.Next() {
+			var k string
+			var v []byte
+			if globalRows.Scan(&k, &v) == nil {
+				decrypted, decErr := crypto.Decrypt(v)
+				if decErr != nil {
+					log.Printf("Provisioner: failed to decrypt global secret %s: %v", k, decErr)
+					continue
+				}
+				envVars[k] = string(decrypted)
+			}
+		}
+	}
+
+	// 2. Workspace-specific secrets (override globals with same key)
 	rows, err := db.DB.QueryContext(ctx,
 		`SELECT key, encrypted_value FROM workspace_secrets WHERE workspace_id = $1`, workspaceID)
 	if err == nil {
@@ -46,8 +67,10 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, templatePath string, 
 	url, err := h.provisioner.Start(ctx, cfg)
 	if err != nil {
 		log.Printf("Provisioner: failed to start workspace %s: %v", workspaceID, err)
-		db.DB.ExecContext(ctx,
-			`UPDATE workspaces SET status = 'failed', updated_at = now() WHERE id = $1`, workspaceID)
+		if _, dbErr := db.DB.ExecContext(ctx,
+			`UPDATE workspaces SET status = 'failed', updated_at = now() WHERE id = $1`, workspaceID); dbErr != nil {
+			log.Printf("Provisioner: failed to mark workspace %s as failed: %v", workspaceID, dbErr)
+		}
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISION_FAILED", workspaceID, map[string]interface{}{
 			"error": err.Error(),
 		})
