@@ -38,8 +38,9 @@ func StartHealthSweep(ctx context.Context, checker ContainerChecker, interval ti
 }
 
 func sweepOnlineWorkspaces(ctx context.Context, checker ContainerChecker, onOffline OfflineHandler) {
+	// Skip external workspaces (runtime='external') — they have no Docker container
 	rows, err := db.DB.QueryContext(ctx,
-		`SELECT id FROM workspaces WHERE status IN ('online', 'degraded')`)
+		`SELECT id FROM workspaces WHERE status IN ('online', 'degraded') AND COALESCE(runtime, 'langgraph') != 'external'`)
 	if err != nil {
 		log.Printf("Health sweep: query error: %v", err)
 		return

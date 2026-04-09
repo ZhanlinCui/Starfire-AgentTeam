@@ -168,9 +168,11 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 		log.Printf("ProxyA2A forward error: %v", err)
 
 		// Reactive health check: if the request failed, check if the container is actually dead.
-		// If so, mark offline, clear stale caches, and trigger auto-restart.
+		// Skip for external workspaces (no Docker container).
 		containerDead := false
-		if h.provisioner != nil {
+		var wsRuntime string
+		db.DB.QueryRowContext(ctx, `SELECT COALESCE(runtime, 'langgraph') FROM workspaces WHERE id = $1`, workspaceID).Scan(&wsRuntime)
+		if h.provisioner != nil && wsRuntime != "external" {
 			if running, _ := h.provisioner.IsRunning(ctx, workspaceID); !running {
 				containerDead = true
 				log.Printf("ProxyA2A: container for %s is dead — marking offline and triggering restart", workspaceID)
