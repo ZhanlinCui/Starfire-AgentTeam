@@ -258,6 +258,33 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 			configFiles["system-prompt.md"] = []byte(ws.SystemPrompt)
 		}
 
+		// Auth token: check workspace folder → org root → claude-code-default template
+		if configFiles == nil {
+			configFiles = map[string][]byte{}
+		}
+		authToken := ""
+		if orgBaseDir != "" && ws.FilesDir != "" {
+			// 1. Workspace-specific .auth-token
+			if data, err := os.ReadFile(filepath.Join(orgBaseDir, ws.FilesDir, ".auth-token")); err == nil {
+				authToken = string(data)
+			}
+		}
+		if authToken == "" && orgBaseDir != "" {
+			// 2. Org root .auth-token (shared across all workspaces)
+			if data, err := os.ReadFile(filepath.Join(orgBaseDir, ".auth-token")); err == nil {
+				authToken = string(data)
+			}
+		}
+		if authToken == "" {
+			// 3. Fall back to claude-code-default template
+			if data, err := os.ReadFile(filepath.Join(h.configsDir, "claude-code-default", ".auth-token")); err == nil {
+				authToken = string(data)
+			}
+		}
+		if authToken != "" {
+			configFiles[".auth-token"] = []byte(authToken)
+		}
+
 		go h.workspace.provisionWorkspace(id, templatePath, configFiles, payload)
 	}
 
