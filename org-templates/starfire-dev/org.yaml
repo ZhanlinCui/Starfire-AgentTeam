@@ -1,0 +1,58 @@
+# Starfire Dev Team — PM + 3 leads + specialists
+name: Starfire Dev Team
+description: 15-person AI agent company for building Agent Molecule
+defaults:
+  runtime: claude-code
+  tier: 2
+
+workspaces:
+  - name: PM
+    role: Project Manager — coordinates Marketing, Research, Dev
+    tier: 3
+    files_dir: pm
+    canvas: { x: 400, y: 50 }
+    children:
+      - name: Marketing Lead
+        role: Marketing strategy and team coordination
+        files_dir: marketing-lead
+        canvas: { x: 50, y: 250 }
+        children:
+          - name: Content Writer
+            role: Technical blog posts and documentation
+          - name: SEO Specialist
+            role: Search optimization and keyword strategy
+          - name: Social Media Manager
+            role: Social presence and community engagement
+
+      - name: Research Lead
+        role: Market analysis and technical research
+        canvas: { x: 400, y: 250 }
+        children:
+          - name: Market Analyst
+            role: Market sizing, trends, user research
+          - name: Technical Researcher
+            role: AI frameworks and protocol evaluation
+          - name: Competitive Intelligence
+            role: Competitor tracking and feature comparison
+
+      - name: Dev Lead
+        role: Engineering planning and team coordination
+        tier: 3
+        files_dir: dev-lead
+        canvas: { x: 750, y: 250 }
+        children:
+          - name: Frontend Engineer
+            role: Next.js canvas, React Flow, Zustand
+            tier: 3
+          - name: Backend Engineer
+            role: Go platform, Postgres, Redis, A2A
+            tier: 3
+          - name: DevOps Engineer
+            role: CI/CD, Docker, infrastructure
+            tier: 3
+          - name: Security Auditor
+            role: Security auditing and vulnerability assessment
+            tier: 3
+          - name: QA Engineer
+            role: Testing, quality assurance, test automation
+            tier: 3

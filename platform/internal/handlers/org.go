@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
@@ -57,10 +56,15 @@ type OrgWorkspace struct {
 	Runtime      string         `yaml:"runtime"`
 	Tier         int            `yaml:"tier"`
 	Template     string         `yaml:"template"`
-	SystemPrompt string         `yaml:"system_prompt"`
+	FilesDir     string         `yaml:"files_dir"`     // folder name relative to org template dir
+	SystemPrompt string         `yaml:"system_prompt"` // inline (overridden by files_dir/system-prompt.md)
 	Model        string         `yaml:"model"`
 	External     bool           `yaml:"external"`
 	URL          string         `yaml:"url"`
+	Canvas       struct {
+		X float64 `yaml:"x"`
+		Y float64 `yaml:"y"`
+	} `yaml:"canvas"`
 	Children     []OrgWorkspace `yaml:"children"`
 }
 
@@ -75,12 +79,19 @@ func (h *OrgHandler) ListTemplates(c *gin.Context) {
 	}
 
 	for _, e := range entries {
-		if e.IsDir() || (!strings.HasSuffix(e.Name(), ".yaml") && !strings.HasSuffix(e.Name(), ".yml")) {
+		if !e.IsDir() {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(h.orgDir, e.Name()))
+		// Look for org.yaml inside the directory
+		orgFile := filepath.Join(h.orgDir, e.Name(), "org.yaml")
+		data, err := os.ReadFile(orgFile)
 		if err != nil {
-			continue
+			// Try org.yml
+			orgFile = filepath.Join(h.orgDir, e.Name(), "org.yml")
+			data, err = os.ReadFile(orgFile)
+			if err != nil {
+				continue
+			}
 		}
 		var tmpl OrgTemplate
 		if err := yaml.Unmarshal(data, &tmpl); err != nil {
@@ -88,7 +99,7 @@ func (h *OrgHandler) ListTemplates(c *gin.Context) {
 		}
 		count := countWorkspaces(tmpl.Workspaces)
 		templates = append(templates, map[string]interface{}{
-			"file":        e.Name(),
+			"dir":         e.Name(),
 			"name":        tmpl.Name,
 			"description": tmpl.Description,
 			"workspaces":  count,
@@ -101,7 +112,7 @@ func (h *OrgHandler) ListTemplates(c *gin.Context) {
 // Import handles POST /org/import — creates an entire org from a template.
 func (h *OrgHandler) Import(c *gin.Context) {
 	var body struct {
-		File     string      `json:"file"`     // template filename (from org-templates/)
+		Dir      string      `json:"dir"`      // org template directory name
 		Template OrgTemplate `json:"template"` // or inline template
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -110,12 +121,14 @@ func (h *OrgHandler) Import(c *gin.Context) {
 	}
 
 	var tmpl OrgTemplate
+	var orgBaseDir string // base directory for files_dir resolution
 
-	if body.File != "" {
-		// Load from file
-		data, err := os.ReadFile(filepath.Join(h.orgDir, body.File))
+	if body.Dir != "" {
+		orgBaseDir = filepath.Join(h.orgDir, body.Dir)
+		orgFile := filepath.Join(orgBaseDir, "org.yaml")
+		data, err := os.ReadFile(orgFile)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("template not found: %s", body.File)})
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("org template not found: %s", body.Dir)})
 			return
 		}
 		if err := yaml.Unmarshal(data, &tmpl); err != nil {
@@ -125,7 +138,7 @@ func (h *OrgHandler) Import(c *gin.Context) {
 	} else if body.Template.Name != "" {
 		tmpl = body.Template
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "provide 'file' or 'template'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provide 'dir' or 'template'"})
 		return
 	}
 
@@ -134,7 +147,7 @@ func (h *OrgHandler) Import(c *gin.Context) {
 
 	// Recursively create workspaces
 	for _, ws := range tmpl.Workspaces {
-		if err := h.createWorkspaceTree(ws, nil, tmpl.Defaults, &results); err != nil {
+		if err := h.createWorkspaceTree(ws, nil, tmpl.Defaults, orgBaseDir, &results); err != nil {
 			createErr = err
 			break
 		}
@@ -156,7 +169,7 @@ func (h *OrgHandler) Import(c *gin.Context) {
 }
 
 // createWorkspaceTree recursively creates a workspace and its children.
-func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defaults OrgDefaults, results *[]map[string]interface{}) error {
+func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defaults OrgDefaults, orgBaseDir string, results *[]map[string]interface{}) error {
 	// Apply defaults
 	runtime := ws.Runtime
 	if runtime == "" {
@@ -191,8 +204,8 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		return fmt.Errorf("failed to create %s: %w", ws.Name, err)
 	}
 
-	// Canvas layout
-	db.DB.Exec(`INSERT INTO canvas_layouts (workspace_id, x, y) VALUES ($1, 0, 0)`, id)
+	// Canvas layout with coordinates from YAML
+	db.DB.Exec(`INSERT INTO canvas_layouts (workspace_id, x, y) VALUES ($1, $2, $3)`, id, ws.Canvas.X, ws.Canvas.Y)
 
 	// Broadcast
 	h.broadcaster.RecordAndBroadcast(context.Background(), "WORKSPACE_PROVISIONING", id, map[string]interface{}{
@@ -229,7 +242,15 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 			configFiles = h.workspace.ensureDefaultConfig(id, payload)
 		}
 
-		// Write system prompt if provided
+		// Load files from files_dir (system-prompt.md, CLAUDE.md, skills/, etc.)
+		if ws.FilesDir != "" && orgBaseDir != "" {
+			filesPath := filepath.Join(orgBaseDir, ws.FilesDir)
+			if info, err := os.Stat(filesPath); err == nil && info.IsDir() {
+				templatePath = filesPath // copy entire directory into /configs
+			}
+		}
+
+		// Inline system_prompt (only if no files_dir provides one)
 		if ws.SystemPrompt != "" {
 			if configFiles == nil {
 				configFiles = map[string][]byte{}
@@ -248,7 +269,7 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 
 	// Recurse into children
 	for _, child := range ws.Children {
-		if err := h.createWorkspaceTree(child, &id, defaults, results); err != nil {
+		if err := h.createWorkspaceTree(child, &id, defaults, orgBaseDir, results); err != nil {
 			return err
 		}
 		time.Sleep(500 * time.Millisecond) // stagger to avoid Docker throttling
