@@ -475,8 +475,8 @@ export function FilesTab({ workspaceId }: Props) {
   );
 }
 
-// Tree building utilities
-interface TreeNode {
+// Tree building utilities — exported for testing
+export interface TreeNode {
   name: string;
   path: string;
   isDir: boolean;
@@ -484,7 +484,7 @@ interface TreeNode {
   size: number;
 }
 
-function buildTree(files: FileEntry[]): TreeNode[] {
+export function buildTree(files: FileEntry[]): TreeNode[] {
   const root: TreeNode[] = [];
   const dirMap = new Map<string, TreeNode>();
 
