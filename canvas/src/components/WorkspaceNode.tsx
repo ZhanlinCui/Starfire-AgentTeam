@@ -321,6 +321,11 @@ function TeamMemberChip({
         e.stopPropagation();
         onSelect(node.id);
       }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        useCanvasStore.getState().openContextMenu({ x: e.clientX, y: e.clientY, nodeId: node.id, nodeData: data });
+      }}
     >
       {/* Status gradient bar */}
       <div className={`absolute inset-x-0 top-0 h-5 bg-gradient-to-b ${statusCfg.bar} pointer-events-none`} />
