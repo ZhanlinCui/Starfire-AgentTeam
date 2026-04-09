@@ -330,6 +330,72 @@ export async function handleGetWorkspaceApprovals(params: { workspace_id: string
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+// === PLUGINS ===
+
+export async function handleListPluginRegistry() {
+  const data = await apiCall("GET", "/plugins");
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleListInstalledPlugins(params: { workspace_id: string }) {
+  const data = await apiCall("GET", `/workspaces/${params.workspace_id}/plugins`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleInstallPlugin(params: { workspace_id: string; name: string }) {
+  const { workspace_id, name } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/plugins`, { name });
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleUninstallPlugin(params: { workspace_id: string; name: string }) {
+  const { workspace_id, name } = params;
+  const data = await apiCall("DELETE", `/workspaces/${workspace_id}/plugins/${name}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// === GLOBAL SECRETS ===
+
+export async function handleListGlobalSecrets() {
+  const data = await apiCall("GET", "/settings/secrets");
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleSetGlobalSecret(params: { key: string; value: string }) {
+  const { key, value } = params;
+  const data = await apiCall("PUT", "/settings/secrets", { key, value });
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleDeleteGlobalSecret(params: { key: string }) {
+  const data = await apiCall("DELETE", `/settings/secrets/${params.key}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// === PAUSE / RESUME ===
+
+export async function handlePauseWorkspace(params: { workspace_id: string }) {
+  const data = await apiCall("POST", `/workspaces/${params.workspace_id}/pause`, {});
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleResumeWorkspace(params: { workspace_id: string }) {
+  const data = await apiCall("POST", `/workspaces/${params.workspace_id}/resume`, {});
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// === ORG TEMPLATES ===
+
+export async function handleListOrgTemplates() {
+  const data = await apiCall("GET", "/org/templates");
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleImportOrg(params: { dir: string }) {
+  const data = await apiCall("POST", "/org/import", { dir: params.dir });
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
 // ============================================================
 // MCP Server registration
 // ============================================================
@@ -698,6 +764,85 @@ export function createServer() {
     handleGetWorkspaceApprovals
   );
 
+  // === PLUGINS ===
+
+  srv.tool("list_plugin_registry", "List all available plugins from the registry", {}, handleListPluginRegistry);
+
+  srv.tool(
+    "list_installed_plugins",
+    "List plugins installed in a workspace",
+    { workspace_id: z.string().describe("Workspace ID") },
+    handleListInstalledPlugins
+  );
+
+  srv.tool(
+    "install_plugin",
+    "Install a plugin from the registry into a workspace (auto-restarts)",
+    {
+      workspace_id: z.string().describe("Workspace ID"),
+      name: z.string().describe("Plugin name from registry"),
+    },
+    handleInstallPlugin
+  );
+
+  srv.tool(
+    "uninstall_plugin",
+    "Remove a plugin from a workspace (auto-restarts)",
+    {
+      workspace_id: z.string().describe("Workspace ID"),
+      name: z.string().describe("Plugin name to remove"),
+    },
+    handleUninstallPlugin
+  );
+
+  // === GLOBAL SECRETS ===
+
+  srv.tool("list_global_secrets", "List global secret keys (values never exposed)", {}, handleListGlobalSecrets);
+
+  srv.tool(
+    "set_global_secret",
+    "Set a global secret (available to all workspaces)",
+    {
+      key: z.string().describe("Secret key (e.g., GITHUB_TOKEN)"),
+      value: z.string().describe("Secret value"),
+    },
+    handleSetGlobalSecret
+  );
+
+  srv.tool(
+    "delete_global_secret",
+    "Delete a global secret",
+    { key: z.string().describe("Secret key") },
+    handleDeleteGlobalSecret
+  );
+
+  // === PAUSE / RESUME ===
+
+  srv.tool(
+    "pause_workspace",
+    "Pause a workspace (stops container, preserves config)",
+    { workspace_id: z.string().describe("Workspace ID") },
+    handlePauseWorkspace
+  );
+
+  srv.tool(
+    "resume_workspace",
+    "Resume a paused workspace",
+    { workspace_id: z.string().describe("Workspace ID") },
+    handleResumeWorkspace
+  );
+
+  // === ORG TEMPLATES ===
+
+  srv.tool("list_org_templates", "List available org templates", {}, handleListOrgTemplates);
+
+  srv.tool(
+    "import_org",
+    "Import an org template to create an entire workspace hierarchy",
+    { dir: z.string().describe("Org template directory name (e.g., 'starfire-dev')") },
+    handleImportOrg
+  );
+
   return srv;
 }
 
@@ -721,7 +866,7 @@ async function main() {
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Starfire MCP server running on stdio (20 tools available)");
+  console.error("Starfire MCP server running on stdio (52 tools available)");
 }
 
 // Only auto-start when run directly (not when imported for testing).

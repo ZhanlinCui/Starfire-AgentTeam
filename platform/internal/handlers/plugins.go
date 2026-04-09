@@ -159,6 +159,11 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 		return
 	}
 
+	// Fix ownership so the agent user (UID 1000) can read/write plugin files
+	h.execAsRoot(ctx, containerName, []string{
+		"chown", "-R", "1000:1000", "/configs/plugins/" + body.Name,
+	})
+
 	// Auto-restart workspace to pick up the plugin
 	if h.restartFunc != nil {
 		go h.restartFunc(workspaceID)
