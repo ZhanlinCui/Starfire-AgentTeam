@@ -27,6 +27,7 @@ var RuntimeImages = map[string]string{
 	"langgraph":   "workspace-template:langgraph",
 	"claude-code": "workspace-template:claude-code",
 	"openclaw":    "workspace-template:openclaw",
+	"nemoclaw":    "workspace-template:nemoclaw",
 	"deepagents":  "workspace-template:deepagents",
 	"crewai":      "workspace-template:crewai",
 	"autogen":     "workspace-template:autogen",
@@ -183,13 +184,17 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	// Apply tier-based container configuration
 	ApplyTierConfig(hostCfg, cfg, configMount, name)
 
-	// Network config — join agent-molecule-net with container name as alias
-	networkCfg := &network.NetworkingConfig{
-		EndpointsConfig: map[string]*network.EndpointSettings{
-			DefaultNetwork: {
-				Aliases: []string{name},
+	// Network config — join agent-molecule-net with container name as alias.
+	// T4 uses host networking and cannot join Docker networks simultaneously.
+	var networkCfg *network.NetworkingConfig
+	if hostCfg.NetworkMode != "host" {
+		networkCfg = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				DefaultNetwork: {
+					Aliases: []string{name},
+				},
 			},
-		},
+		}
 	}
 
 	// Create and start container
@@ -218,20 +223,26 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		}
 	}
 
-	// Resolve the host-mapped port so the platform can reach the container from the host.
-	// The provisioner uses ephemeral port binding (127.0.0.1:0 → 8000/tcp), so we need
-	// to inspect the container to find the actual assigned port.
-	hostURL := InternalURL(cfg.WorkspaceID) // fallback to Docker-internal
-	info, inspectErr := p.cli.ContainerInspect(ctx, resp.ID)
-	if inspectErr == nil {
-		portBindings := info.NetworkSettings.Ports[nat.Port(DefaultPort+"/tcp")]
-		if len(portBindings) > 0 {
-			hostPort := portBindings[0].HostPort
-			hostIP := portBindings[0].HostIP
-			if hostIP == "" {
-				hostIP = "127.0.0.1"
+	// Resolve the host-accessible URL for the workspace container.
+	var hostURL string
+	if hostCfg.NetworkMode == "host" {
+		// T4 host networking: container binds directly to host ports.
+		// The agent listens on DefaultPort (8000) which is accessible on localhost.
+		hostURL = fmt.Sprintf("http://127.0.0.1:%s", DefaultPort)
+	} else {
+		// Normal: ephemeral port binding (127.0.0.1:0 → 8000/tcp).
+		hostURL = InternalURL(cfg.WorkspaceID) // fallback to Docker-internal
+		info, inspectErr := p.cli.ContainerInspect(ctx, resp.ID)
+		if inspectErr == nil {
+			portBindings := info.NetworkSettings.Ports[nat.Port(DefaultPort+"/tcp")]
+			if len(portBindings) > 0 {
+				hostPort := portBindings[0].HostPort
+				hostIP := portBindings[0].HostIP
+				if hostIP == "" {
+					hostIP = "127.0.0.1"
+				}
+				hostURL = fmt.Sprintf("http://%s:%s", hostIP, hostPort)
 			}
-			hostURL = fmt.Sprintf("http://%s:%s", hostIP, hostPort)
 		}
 	}
 

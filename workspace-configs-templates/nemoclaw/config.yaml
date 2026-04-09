@@ -1,0 +1,24 @@
+name: NemoClaw Agent
+description: NemoClaw runtime — OpenClaw-compatible sandbox and lifecycle management
+version: 1.0.0
+tier: 4  # NemoClaw requires Docker access (T4 = Docker socket mount)
+
+runtime: nemoclaw
+model: openai:gpt-4.1-mini
+
+prompt_files:
+  - SOUL.md
+  - BOOTSTRAP.md
+  - AGENTS.md
+  - HEARTBEAT.md
+  - TOOLS.md
+  - USER.md
+
+a2a:
+  port: 8000
+  streaming: true
+  push_notifications: true
+
+env:
+  required:
+    - OPENAI_API_KEY
