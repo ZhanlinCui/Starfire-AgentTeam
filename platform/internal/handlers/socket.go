@@ -21,7 +21,7 @@ var upgrader = websocket.Upgrader{
 		}
 		origin := r.Header.Get("Origin")
 		for _, allowed := range strings.Split(origins, ",") {
-			if strings.TrimSpace(allowed) == origin {
+			if strings.EqualFold(strings.TrimSpace(allowed), origin) {
 				return true
 			}
 		}
