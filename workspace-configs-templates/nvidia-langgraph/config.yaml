@@ -1,0 +1,30 @@
+name: NVIDIA LangGraph Agent
+description: LangGraph workspace sample using NVIDIA-hosted NIM models and optional NeMo Agent Toolkit MCP servers
+version: 1.0.0
+tier: 2
+
+model: nvidia:meta/llama3-8b-instruct
+
+skills: []
+
+tools:
+  - web_search
+  - filesystem
+
+a2a:
+  port: 8000
+  streaming: true
+  push_notifications: true
+
+delegation:
+  retry_attempts: 3
+  retry_delay: 5
+  timeout: 120
+  escalate: true
+
+env:
+  required:
+    - NVIDIA_API_KEY
+  optional:
+    - NVIDIA_BASE_URL
+    - NVIDIA_MCP_SERVERS_JSON

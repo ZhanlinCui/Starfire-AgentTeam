@@ -112,6 +112,8 @@ Environment variables:
 - `NVIDIA_API_KEY` for NVIDIA AI Endpoints / NIM access
 - `NVIDIA_BASE_URL` for an alternate NVIDIA-compatible endpoint, such as a self-hosted gateway
 
+A ready-to-copy example workspace template is available at `workspace-configs-templates/nvidia-langgraph/`.
+
 ### NeMo Agent Toolkit MCP
 
 If you have a NeMo Agent Toolkit server exposing MCP tools, you can merge it into the built-in A2A MCP bridge by setting:
