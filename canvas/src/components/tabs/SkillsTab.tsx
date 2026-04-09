@@ -41,8 +41,14 @@ export function SkillsTab({ data }: Props) {
   const [uninstalling, setUninstalling] = useState<string | null>(null);
   const [showRegistry, setShowRegistry] = useState(false);
   const mountedRef = useRef(true);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useEffect(() => { return () => { mountedRef.current = false; }; }, []);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(reloadTimerRef.current);
+    };
+  }, []);
 
   const workspaceId = data.id;
 
@@ -72,8 +78,7 @@ export function SkillsTab({ data }: Props) {
     try {
       await api.post(`/workspaces/${workspaceId}/plugins`, { name: pluginName });
       showToast(`Installed ${pluginName} — restarting workspace`, "success");
-      // Reload after restart settles
-      setTimeout(() => loadInstalled(), PLUGIN_RELOAD_DELAY_MS);
+      reloadTimerRef.current = setTimeout(() => loadInstalled(), PLUGIN_RELOAD_DELAY_MS);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Install failed", "error");
     } finally {
@@ -87,7 +92,7 @@ export function SkillsTab({ data }: Props) {
       await api.del(`/workspaces/${data.id}/plugins/${pluginName}`);
       showToast(`Removed ${pluginName} — restarting workspace`, "success");
       setInstalled((prev) => prev.filter((p) => p.name !== pluginName));
-      setTimeout(() => loadInstalled(), PLUGIN_RELOAD_DELAY_MS);
+      reloadTimerRef.current = setTimeout(() => loadInstalled(), PLUGIN_RELOAD_DELAY_MS);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Uninstall failed", "error");
     } finally {
