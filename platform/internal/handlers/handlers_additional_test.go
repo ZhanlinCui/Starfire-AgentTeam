@@ -393,7 +393,7 @@ func TestProxyA2A_AgentUnreachable(t *testing.T) {
 	mr.Set(fmt.Sprintf("ws:%s:url", "ws-dead"), "http://127.0.0.1:1")
 
 	// Expect workspace name query for error activity log
-	mock.ExpectQuery("SELECT name FROM workspaces").
+	mock.ExpectQuery("SELECT name FROM workspaces WHERE id =").
 		WithArgs("ws-dead").
 		WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("Dead Agent"))
 	mock.ExpectExec("INSERT INTO activity_logs").

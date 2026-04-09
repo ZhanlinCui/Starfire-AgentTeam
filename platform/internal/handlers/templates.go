@@ -132,11 +132,20 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		return
 	}
 	subPath := c.DefaultQuery("path", "")
+	if subPath != "" {
+		if err := validateRelPath(subPath); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	depth := 1
 	if d := c.Query("depth"); d != "" {
-		if n, err := strconv.Atoi(d); err == nil && n >= 1 && n <= 5 {
-			depth = n
+		n, err := strconv.Atoi(d)
+		if err != nil || n < 1 || n > 5 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "depth must be 1-5"})
+			return
 		}
+		depth = n
 	}
 	listPath := rootPath
 	if subPath != "" {
@@ -197,19 +206,30 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		return
 	}
 
-	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+	walkRoot := configDir
+	if subPath != "" {
+		walkRoot = filepath.Join(configDir, subPath)
+	}
+	if _, err := os.Stat(walkRoot); os.IsNotExist(err) {
 		c.JSON(http.StatusOK, []fileEntry{})
 		return
 	}
 
 	var files []fileEntry
-	filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || path == configDir {
+	filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || path == walkRoot {
 			return nil
 		}
-		rel, _ := filepath.Rel(configDir, path)
+		rel, _ := filepath.Rel(walkRoot, path)
+		// Enforce depth limit
+		if strings.Count(rel, string(filepath.Separator))+1 > depth {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		base := filepath.Base(rel)
-		if base == ".git" || base == ".DS_Store" {
+		if base == ".git" || base == ".DS_Store" || base == "__pycache__" || base == "node_modules" {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

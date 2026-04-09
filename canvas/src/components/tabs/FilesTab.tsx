@@ -70,11 +70,16 @@ export function FilesTab({ workspaceId }: Props) {
         // Root load — replace all
         setFiles(data);
       } else {
-        // Subfolder load — merge into existing files (remove old children, add new)
+        // Subfolder load — merge direct children only (preserve expanded grandchildren)
         setFiles((prev) => {
           const prefix = subPath + "/";
-          const filtered = prev.filter((f) => !f.path.startsWith(prefix) || f.path === subPath);
-          // Add the subfolder's children with full paths
+          // Remove only direct children of this subPath (not deeper descendants)
+          const filtered = prev.filter((f) => {
+            if (!f.path.startsWith(prefix)) return true;
+            const remainder = f.path.slice(prefix.length);
+            // Keep entries that are nested deeper (grandchildren of other expanded dirs)
+            return remainder.includes("/");
+          });
           const newFiles = data.map((f) => ({ ...f, path: subPath + "/" + f.path }));
           return [...filtered, ...newFiles];
         });
@@ -88,18 +93,20 @@ export function FilesTab({ workspaceId }: Props) {
   }, [workspaceId, root]);
 
   const toggleDir = useCallback((dirPath: string) => {
+    const wasExpanded = expandedDirs.has(dirPath);
     setExpandedDirs((prev) => {
       const next = new Set(prev);
       if (next.has(dirPath)) {
         next.delete(dirPath);
       } else {
         next.add(dirPath);
-        // Lazy load children
-        loadFiles(dirPath, 1);
       }
       return next;
     });
-  }, [loadFiles]);
+    if (!wasExpanded) {
+      loadFiles(dirPath, 1);
+    }
+  }, [loadFiles, expandedDirs]);
 
   useEffect(() => {
     setExpandedDirs(new Set());
