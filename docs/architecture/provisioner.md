@@ -72,6 +72,8 @@ provisioning -> online <-----> degraded
 - `provisioning -> failed`: 3min timeout or immediate Docker error
 - `failed -> provisioning`: user clicks Retry on canvas
 - `offline -> online`: workspace re-registers (after auto-restart or manual restart)
+- `any -> paused`: user pauses workspace (container stopped, config preserved)
+- `paused -> provisioning`: user resumes workspace
 - `any -> removed`: user deletes workspace
 
 | Status | Meaning | Canvas Display |
@@ -80,6 +82,7 @@ provisioning -> online <-----> degraded
 | `online` | Heartbeat received, reachable, accepting A2A messages | Green node |
 | `degraded` | Online but error rate above 50%, self-reported via heartbeat | Yellow node with warning |
 | `offline` | Heartbeat TTL expired, unreachable but not deleted | Gray node |
+| `paused` | User paused — container stopped, config preserved, no auto-restart | Indigo node |
 | `failed` | Provisioning timed out or immediate launch error | Red node + retry button |
 | `removed` | User deleted it, kept in DB for event log + 410 responses | Node removed from canvas |
 
