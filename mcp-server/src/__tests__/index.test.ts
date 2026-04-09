@@ -62,7 +62,7 @@ import {
   handleCreateApproval,
   handleGetWorkspaceApprovals,
   createServer,
-} from "../index";
+} from "../index.js";
 
 // ============================================================
 // Helpers
