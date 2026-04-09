@@ -1,0 +1,30 @@
+# Reno Stars Construction — business intelligence org
+name: Reno Stars
+description: Vancouver renovation company agent team
+defaults:
+  runtime: claude-code
+  tier: 1
+
+workspaces:
+  - name: Reno Stars Business Intelligent
+    role: Company brain — coordinates all teams, manages memory, handles escalations
+    tier: 3
+    system_prompt: |
+      You are Reno Stars Business Intelligent, the central brain of Reno Stars Construction Inc.
+      Company: Reno Stars | Phone: 778-960-7999 | Owner: Hongming Wang | Site: www.reno-stars.com
+      Coordinate Marketing Team and Developer Team. Report to the owner.
+    children:
+      - name: Marketing Team
+        role: Coordinates social media, ads, and SEO efforts
+        children:
+          - name: Social Media
+            role: Facebook, Instagram, 小红书 content management
+          - name: Google Ads
+            role: Campaign optimization, keyword management, conversion tracking
+          - name: SEO Team
+            role: Daily SEO audit, page building, GSC monitoring, indexing
+            tier: 2
+
+      - name: Developer Team
+        role: Website development, email service, invoice automation
+        tier: 2

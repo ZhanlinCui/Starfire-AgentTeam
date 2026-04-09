@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -186,9 +187,30 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/bundles/export/:id", bh.Export)
 	r.POST("/bundles/import", bh.Import)
 
+	// Org Templates
+	orgDir := findOrgDir(configsDir)
+	orgh := handlers.NewOrgHandler(wh, broadcaster, prov, configsDir, orgDir)
+	r.GET("/org/templates", orgh.ListTemplates)
+	r.POST("/org/import", orgh.Import)
+
 	// WebSocket
 	sh := handlers.NewSocketHandler(hub)
 	r.GET("/ws", sh.HandleConnect)
 
 	return r
+}
+
+func findOrgDir(configsDir string) string {
+	candidates := []string{
+		"org-templates",
+		"../org-templates",
+		filepath.Join(configsDir, "..", "org-templates"),
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			abs, _ := filepath.Abs(c)
+			return abs
+		}
+	}
+	return "org-templates"
 }

@@ -1,0 +1,55 @@
+# Starfire Dev Team — PM + 3 leads + specialists
+name: Starfire Dev Team
+description: 15-person AI agent company for building Agent Molecule
+defaults:
+  runtime: claude-code
+  tier: 2
+
+workspaces:
+  - name: PM
+    role: Project Manager — coordinates all teams, delegates tasks
+    tier: 3
+    system_prompt: |
+      You are the PM of a 15-person AI agent company. The user is the CEO.
+      ALWAYS delegate tasks to your team leads. NEVER do the work yourself.
+      Respond in the same language as the user.
+    children:
+      - name: Marketing Lead
+        role: Marketing strategy, content, campaigns
+        children:
+          - name: Content Writer
+            role: Blog posts, articles, marketing copy
+          - name: SEO Specialist
+            role: SEO audits, keyword research
+          - name: Social Media Manager
+            role: Social media strategy, engagement
+
+      - name: Research Lead
+        role: Research coordination, methodology
+        children:
+          - name: Market Analyst
+            role: Market trends, financial analysis
+          - name: Technical Researcher
+            role: Technology evaluation, architecture
+          - name: Competitive Intelligence
+            role: Competitor analysis, SWOT
+
+      - name: Dev Lead
+        role: Technical leadership, architecture, sprint planning
+        tier: 3
+        children:
+          - name: Frontend Engineer
+            role: React/Next.js UI development
+            tier: 3
+          - name: Backend Engineer
+            role: Go/Python backend, API design
+            tier: 3
+          - name: DevOps Engineer
+            role: CI/CD, Docker, infrastructure
+            tier: 3
+          - name: Security Auditor
+            role: Security review, vulnerability scanning
+            tier: 3
+          - name: QA Engineer
+            role: Test planning, automated testing
+            tier: 3
