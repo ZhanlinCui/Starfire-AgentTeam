@@ -6,6 +6,8 @@ defaults:
   runtime: claude-code
   tier: 2
   auth_token_file: .auth-token  # gitignored, placed in each workspace folder
+  # workspace_dir: not set by default — each agent gets an isolated Docker volume
+  # Set per-workspace to bind-mount a host directory as /workspace
 
 workspaces:
   - name: PM

@@ -58,11 +58,17 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		role = payload.Role
 	}
 
+	// Convert empty workspace_dir to NULL
+	var workspaceDir interface{}
+	if payload.WorkspaceDir != "" {
+		workspaceDir = payload.WorkspaceDir
+	}
+
 	// Insert workspace with runtime persisted in DB
 	_, err := db.DB.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id)
-		VALUES ($1, $2, $3, $4, $5, $6, 'provisioning', $7)
-	`, id, payload.Name, role, payload.Tier, payload.Runtime, awarenessNamespace, payload.ParentID)
+		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id, workspace_dir)
+		VALUES ($1, $2, $3, $4, $5, $6, 'provisioning', $7, $8)
+	`, id, payload.Name, role, payload.Tier, payload.Runtime, awarenessNamespace, payload.ParentID, workspaceDir)
 	if err != nil {
 		log.Printf("Create workspace error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workspace"})
@@ -154,7 +160,7 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 func scanWorkspaceRow(rows interface {
 	Scan(dest ...interface{}) error
 }) (map[string]interface{}, error) {
-	var id, name, role, status, url, sampleError, currentTask, runtime string
+	var id, name, role, status, url, sampleError, currentTask, runtime, workspaceDir string
 	var tier, activeTasks, uptimeSeconds int
 	var errorRate, x, y float64
 	var collapsed bool
@@ -163,7 +169,7 @@ func scanWorkspaceRow(rows interface {
 
 	err := rows.Scan(&id, &name, &role, &tier, &status, &agentCard, &url,
 		&parentID, &activeTasks, &errorRate, &sampleError, &uptimeSeconds,
-		&currentTask, &runtime, &x, &y, &collapsed)
+		&currentTask, &runtime, &workspaceDir, &x, &y, &collapsed)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +187,7 @@ func scanWorkspaceRow(rows interface {
 		"uptime_seconds":    uptimeSeconds,
 		"current_task":      currentTask,
 		"runtime":           runtime,
+		"workspace_dir":     nilIfEmpty(workspaceDir),
 		"x":                 x,
 		"y":                 y,
 		"collapsed":         collapsed,
@@ -209,6 +216,7 @@ const workspaceListQuery = `
 		   w.parent_id, w.active_tasks, w.last_error_rate,
 		   COALESCE(w.last_sample_error, ''), w.uptime_seconds,
 		   COALESCE(w.current_task, ''), COALESCE(w.runtime, 'langgraph'),
+		   COALESCE(w.workspace_dir, ''),
 		   COALESCE(cl.x, 0), COALESCE(cl.y, 0), COALESCE(cl.collapsed, false)
 	FROM workspaces w
 	LEFT JOIN canvas_layouts cl ON cl.workspace_id = w.id
@@ -248,6 +256,7 @@ func (h *WorkspaceHandler) Get(c *gin.Context) {
 			   w.parent_id, w.active_tasks, w.last_error_rate,
 			   COALESCE(w.last_sample_error, ''), w.uptime_seconds,
 			   COALESCE(w.current_task, ''), COALESCE(w.runtime, 'langgraph'),
+			   COALESCE(w.workspace_dir, ''),
 			   COALESCE(cl.x, 0), COALESCE(cl.y, 0), COALESCE(cl.collapsed, false)
 		FROM workspaces w
 		LEFT JOIN canvas_layouts cl ON cl.workspace_id = w.id
@@ -303,6 +312,11 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 	if runtime, ok := body["runtime"]; ok {
 		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET runtime = $2, updated_at = now() WHERE id = $1`, id, runtime); err != nil {
 			log.Printf("Update runtime error for %s: %v", id, err)
+		}
+	}
+	if wsDir, ok := body["workspace_dir"]; ok {
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET workspace_dir = $2, updated_at = now() WHERE id = $1`, id, wsDir); err != nil {
+			log.Printf("Update workspace_dir error for %s: %v", id, err)
 		}
 	}
 
