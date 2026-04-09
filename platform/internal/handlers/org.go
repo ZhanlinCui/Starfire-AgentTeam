@@ -273,12 +273,18 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 				parseEnvFile(filepath.Join(orgBaseDir, ws.FilesDir, ".env"), envVars)
 			}
 		}
-		// Store as workspace secrets via DB
+		// Store as workspace secrets via DB (encrypted if key is set, raw otherwise)
 		for key, value := range envVars {
-			encrypted, err := crypto.Encrypt([]byte(value))
-			if err != nil {
-				log.Printf("Org import: failed to encrypt secret %s for %s: %v", key, ws.Name, err)
-				continue
+			var encrypted []byte
+			if crypto.IsEnabled() {
+				var err error
+				encrypted, err = crypto.Encrypt([]byte(value))
+				if err != nil {
+					log.Printf("Org import: failed to encrypt secret %s for %s: %v", key, ws.Name, err)
+					continue
+				}
+			} else {
+				encrypted = []byte(value) // store raw when encryption disabled
 			}
 			db.DB.Exec(`
 				INSERT INTO workspace_secrets (workspace_id, key, encrypted_value)
