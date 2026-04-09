@@ -39,7 +39,7 @@ go run ./cmd/server          # Run server (requires Postgres + Redis running)
 go build -o molecli ./cmd/cli  # Build TUI dashboard
 ./molecli                    # Run TUI dashboard (requires platform running)
 ```
-Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (default `/plugins`), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`), `CORS_ORIGINS` (comma-separated, default `http://localhost:3000,http://localhost:3001`), `RATE_LIMIT` (requests/min, default `600`), `WORKSPACE_DIR` (optional — global fallback host path for `/workspace` bind-mount; overridden by per-workspace `workspace_dir` column in DB; if neither is set, each workspace gets an isolated Docker named volume), `AWARENESS_URL` (optional — if set, injected into workspace containers along with a deterministic `AWARENESS_NAMESPACE` derived from workspace ID).
+Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (deprecated — plugins are now installed per-workspace via API; the `plugins/` registry at repo root is auto-discovered), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`), `CORS_ORIGINS` (comma-separated, default `http://localhost:3000,http://localhost:3001`), `RATE_LIMIT` (requests/min, default `600`), `WORKSPACE_DIR` (optional — global fallback host path for `/workspace` bind-mount; overridden by per-workspace `workspace_dir` column in DB; if neither is set, each workspace gets an isolated Docker named volume), `AWARENESS_URL` (optional — if set, injected into workspace containers along with a deterministic `AWARENESS_NAMESPACE` derived from workspace ID).
 
 `molecli` reads `MOLECLI_URL` (default http://localhost:8080) to locate the platform. Logs are written to `molecli.log` in the working directory (already covered by `*.log` in `.gitignore`).
 
@@ -216,6 +216,8 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | GET | /registry/discover/:id | discovery.go |
 | GET | /registry/:id/peers | discovery.go |
 | POST | /registry/check-access | discovery.go |
+| GET | /plugins | plugins.go (list registry) |
+| GET/POST/DELETE | /workspaces/:id/plugins[/:name] | plugins.go (install/uninstall per-workspace) |
 | GET | /bundles/export/:id | bundle.go |
 | POST | /bundles/import | bundle.go |
 | GET | /org/templates | org.go (list available org templates) |

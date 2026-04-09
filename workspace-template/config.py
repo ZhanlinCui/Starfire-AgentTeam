@@ -194,6 +194,7 @@ class WorkspaceConfig:
     runtime: str = "langgraph"  # langgraph | claude-code | codex | ollama | custom
     runtime_config: RuntimeConfig = field(default_factory=RuntimeConfig)
     skills: list[str] = field(default_factory=list)
+    plugins: list[str] = field(default_factory=list)  # installed plugin names
     tools: list[str] = field(default_factory=list)
     prompt_files: list[str] = field(default_factory=list)
     shared_context: list[str] = field(default_factory=list)
@@ -253,6 +254,7 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
             model=runtime_raw.get("model", ""),
         ),
         skills=raw.get("skills", []),
+        plugins=raw.get("plugins", []),
         tools=raw.get("tools", []),
         prompt_files=raw.get("prompt_files", []),
         shared_context=raw.get("shared_context", []),

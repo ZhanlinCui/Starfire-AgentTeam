@@ -277,6 +277,17 @@ If error_rate > 0.5, broadcasts `WORKSPACE_DEGRADED`. Recovery broadcasts `WORKS
 
 ---
 
+### Plugins
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plugins` | List available plugins from registry |
+| `GET` | `/workspaces/:id/plugins` | List plugins installed in workspace |
+| `POST` | `/workspaces/:id/plugins` | Install plugin (`{"name":"ecc"}`) — auto-restarts |
+| `DELETE` | `/workspaces/:id/plugins/:name` | Uninstall plugin — auto-restarts |
+
+---
+
 ### Bundles
 
 | Method | Path | Description |

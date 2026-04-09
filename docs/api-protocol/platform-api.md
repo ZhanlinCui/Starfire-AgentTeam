@@ -127,6 +127,17 @@ Backward-compatible admin aliases also exist under `/admin/secrets`.
 | `POST` | `/workspaces/:id/expand` | Expand workspace into a team |
 | `POST` | `/workspaces/:id/collapse` | Collapse team back down |
 
+### Plugins
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/plugins` | List available plugins from registry |
+| `GET` | `/workspaces/:id/plugins` | List installed plugins in workspace |
+| `POST` | `/workspaces/:id/plugins` | Install plugin `{"name":"ecc"}` — copies to container, auto-restarts |
+| `DELETE` | `/workspaces/:id/plugins/:name` | Uninstall plugin — removes from container, auto-restarts |
+
+Plugins are installed per-workspace into `/configs/plugins/<name>/`. The registry is the `plugins/` directory at the repo root, each containing a `plugin.yaml` manifest. Plugin names are validated (no path traversal).
+
 ### Files and templates
 
 | Method | Path | Description |

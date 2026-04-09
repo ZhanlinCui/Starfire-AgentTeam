@@ -60,27 +60,22 @@ func TestApplyTierConfig_Tier1_Sandboxed(t *testing.T) {
 	}
 }
 
-func TestApplyTierConfig_Tier1_WithPlugins(t *testing.T) {
+func TestApplyTierConfig_Tier1_NoGlobalPlugins(t *testing.T) {
 	configMount := "ws-abc123-configs:/configs"
-	hc := baseHostConfig("/host/plugins")
+	hc := baseHostConfig("")
 	cfg := WorkspaceConfig{
 		WorkspaceID: "abc123",
 		Tier:        1,
-		PluginsPath: "/host/plugins",
 	}
 
 	ApplyTierConfig(hc, cfg, configMount, "ws-abc123")
 
-	// T1 with plugins should have exactly 2 binds: config + plugins
-	if len(hc.Binds) != 2 {
-		t.Fatalf("T1+plugins: expected 2 binds, got %d: %v", len(hc.Binds), hc.Binds)
+	// T1 should have only 1 bind: config (plugins are per-workspace in /configs/plugins/)
+	if len(hc.Binds) != 1 {
+		t.Fatalf("T1: expected 1 bind, got %d: %v", len(hc.Binds), hc.Binds)
 	}
 	if hc.Binds[0] != configMount {
-		t.Errorf("T1+plugins: expected first bind %q, got %q", configMount, hc.Binds[0])
-	}
-	expectedPlugins := "/host/plugins:/plugins:ro"
-	if hc.Binds[1] != expectedPlugins {
-		t.Errorf("T1+plugins: expected second bind %q, got %q", expectedPlugins, hc.Binds[1])
+		t.Errorf("T1: expected bind %q, got %q", configMount, hc.Binds[0])
 	}
 }
 

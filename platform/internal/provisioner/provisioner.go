@@ -161,13 +161,12 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	}
 
 	// Mount configs as read-write named volume (agent and Files API need to write)
+	// Plugins are installed per-workspace into /configs/plugins/ via the platform API.
+	// No global /plugins mount — each workspace owns its plugin set.
 	configMount := fmt.Sprintf("%s:/configs", configVolume)
 	binds := []string{
 		configMount,
 		workspaceMount,
-	}
-	if cfg.PluginsPath != "" {
-		binds = append(binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
 	}
 
 	hostCfg := &container.HostConfig{
@@ -257,11 +256,8 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 func ApplyTierConfig(hostCfg *container.HostConfig, cfg WorkspaceConfig, configMount, name string) {
 	switch cfg.Tier {
 	case 1:
-		// Sandboxed: strip /workspace mount, keep only config + plugins
+		// Sandboxed: strip /workspace mount, keep only config (plugins are in /configs/plugins/)
 		tier1Binds := []string{configMount}
-		if cfg.PluginsPath != "" {
-			tier1Binds = append(tier1Binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
-		}
 		hostCfg.Binds = tier1Binds
 		// Readonly root filesystem with tmpfs for /tmp (agent needs scratch space)
 		hostCfg.ReadonlyRootfs = true

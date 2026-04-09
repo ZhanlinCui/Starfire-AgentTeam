@@ -37,7 +37,7 @@ _ensure_autogen_mock()
 
 # --- Mock helpers ---
 
-def _mock_load_plugins():
+def _mock_load_plugins(**kwargs):
     plugins = MagicMock()
     plugins.plugin_names = []
     plugins.skill_dirs = []

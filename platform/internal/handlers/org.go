@@ -49,8 +49,9 @@ type OrgTemplate struct {
 }
 
 type OrgDefaults struct {
-	Runtime string `yaml:"runtime"`
-	Tier    int    `yaml:"tier"`
+	Runtime string   `yaml:"runtime"`
+	Tier    int      `yaml:"tier"`
+	Plugins []string `yaml:"plugins"`
 }
 
 type OrgWorkspace struct {
@@ -63,6 +64,7 @@ type OrgWorkspace struct {
 	SystemPrompt string         `yaml:"system_prompt"`  // inline (overridden by files_dir/system-prompt.md)
 	Model        string         `yaml:"model"`
 	WorkspaceDir string         `yaml:"workspace_dir"`  // host path to mount as /workspace (empty = isolated volume)
+	Plugins      []string       `yaml:"plugins"`        // plugins to pre-install from registry
 	External     bool           `yaml:"external"`
 	URL          string         `yaml:"url"`
 	Canvas       struct {
@@ -260,6 +262,36 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 			filesPath := filepath.Join(orgBaseDir, ws.FilesDir)
 			if info, err := os.Stat(filesPath); err == nil && info.IsDir() {
 				templatePath = filesPath
+			}
+		}
+
+		// Pre-install plugins: copy from registry into configFiles as plugins/<name>/*
+		plugins := ws.Plugins
+		if len(plugins) == 0 {
+			plugins = defaults.Plugins
+		}
+		if len(plugins) > 0 {
+			if configFiles == nil {
+				configFiles = map[string][]byte{}
+			}
+			pluginsBase, _ := filepath.Abs(filepath.Join(h.configsDir, "..", "plugins"))
+			for _, pluginName := range plugins {
+				pluginSrc := filepath.Join(pluginsBase, pluginName)
+				if info, err := os.Stat(pluginSrc); err != nil || !info.IsDir() {
+					log.Printf("Org import: plugin %s not found at %s, skipping", pluginName, pluginSrc)
+					continue
+				}
+				filepath.Walk(pluginSrc, func(path string, info os.FileInfo, err error) error {
+					if err != nil || info.IsDir() {
+						return nil
+					}
+					rel, _ := filepath.Rel(pluginSrc, path)
+					data, readErr := os.ReadFile(path)
+					if readErr == nil {
+						configFiles["plugins/"+pluginName+"/"+rel] = data
+					}
+					return nil
+				})
 			}
 		}
 
