@@ -118,14 +118,14 @@ func (h *WorkspaceHandler) buildProvisionerConfig(
 	// If neither is set, the provisioner creates an isolated Docker volume.
 	workspacePath := payload.WorkspaceDir
 	if workspacePath == "" {
-		// Try DB (for restarts where payload.WorkspaceDir isn't set)
+		// Check DB — needed for restarts where payload.WorkspaceDir isn't populated
 		var dbDir string
-		db.DB.QueryRow(`SELECT COALESCE(workspace_dir, '') FROM workspaces WHERE id = $1`, workspaceID).Scan(&dbDir)
-		if dbDir != "" {
+		if err := db.DB.QueryRow(`SELECT COALESCE(workspace_dir, '') FROM workspaces WHERE id = $1`, workspaceID).Scan(&dbDir); err == nil && dbDir != "" {
 			workspacePath = dbDir
-		} else {
-			workspacePath = os.Getenv("WORKSPACE_DIR")
 		}
+	}
+	if workspacePath == "" {
+		workspacePath = os.Getenv("WORKSPACE_DIR")
 	}
 
 	return provisioner.WorkspaceConfig{

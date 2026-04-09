@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -58,9 +59,13 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		role = payload.Role
 	}
 
-	// Convert empty workspace_dir to NULL
+	// Validate and convert workspace_dir
 	var workspaceDir interface{}
 	if payload.WorkspaceDir != "" {
+		if err := validateWorkspaceDir(payload.WorkspaceDir); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		workspaceDir = payload.WorkspaceDir
 	}
 
@@ -314,10 +319,21 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 			log.Printf("Update runtime error for %s: %v", id, err)
 		}
 	}
+	needsRestart := false
 	if wsDir, ok := body["workspace_dir"]; ok {
+		// Allow null to clear workspace_dir
+		if wsDir != nil {
+			if dirStr, isStr := wsDir.(string); isStr && dirStr != "" {
+				if err := validateWorkspaceDir(dirStr); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+			}
+		}
 		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET workspace_dir = $2, updated_at = now() WHERE id = $1`, id, wsDir); err != nil {
 			log.Printf("Update workspace_dir error for %s: %v", id, err)
 		}
+		needsRestart = true
 	}
 
 	// Update canvas position if both x and y provided
@@ -333,7 +349,22 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+	resp := gin.H{"status": "updated"}
+	if needsRestart {
+		resp["needs_restart"] = true
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// validateWorkspaceDir checks that a workspace_dir path is safe to bind-mount.
+func validateWorkspaceDir(dir string) error {
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("workspace_dir must be an absolute path")
+	}
+	if strings.Contains(dir, "..") {
+		return fmt.Errorf("workspace_dir must not contain '..'")
+	}
+	return nil
 }
 
 // Delete handles DELETE /workspaces/:id
