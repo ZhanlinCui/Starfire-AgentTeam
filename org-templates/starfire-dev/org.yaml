@@ -1,0 +1,57 @@
+# Starfire Dev Team — PM + Research + Dev
+name: Starfire Dev Team
+description: AI agent company for building Agent Molecule
+
+defaults:
+  runtime: claude-code
+  tier: 2
+  auth_token_file: .auth-token  # gitignored, placed in each workspace folder
+
+workspaces:
+  - name: PM
+    role: Project Manager — coordinates Research and Dev teams
+    tier: 3
+    files_dir: pm
+    canvas: { x: 400, y: 50 }
+    children:
+      - name: Research Lead
+        role: Market analysis and technical research
+        files_dir: research-lead
+        canvas: { x: 200, y: 250 }
+        children:
+          - name: Market Analyst
+            role: Market sizing, trends, user research
+            files_dir: market-analyst
+          - name: Technical Researcher
+            role: AI frameworks and protocol evaluation
+            files_dir: technical-researcher
+          - name: Competitive Intelligence
+            role: Competitor tracking and feature comparison
+            files_dir: competitive-intelligence
+
+      - name: Dev Lead
+        role: Engineering planning and team coordination
+        tier: 3
+        files_dir: dev-lead
+        canvas: { x: 650, y: 250 }
+        children:
+          - name: Frontend Engineer
+            role: Next.js canvas, React Flow, Zustand
+            tier: 3
+            files_dir: frontend-engineer
+          - name: Backend Engineer
+            role: Go platform, Postgres, Redis, A2A
+            tier: 3
+            files_dir: backend-engineer
+          - name: DevOps Engineer
+            role: CI/CD, Docker, infrastructure
+            tier: 3
+            files_dir: devops-engineer
+          - name: Security Auditor
+            role: Security auditing and vulnerability assessment
+            tier: 3
+            files_dir: security-auditor
+          - name: QA Engineer
+            role: Testing, quality assurance, test automation
+            tier: 3
+            files_dir: qa-engineer
