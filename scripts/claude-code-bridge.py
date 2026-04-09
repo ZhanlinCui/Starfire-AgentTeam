@@ -1,274 +1,278 @@
 #!/usr/bin/env python3
-"""Claude Code A2A Bridge — registers as a workspace and receives messages from agents.
+"""Claude Code A2A Bridge — native external workspace with instant delivery.
 
-Runs a lightweight HTTP server on port 9999 that accepts A2A JSON-RPC messages.
-Incoming messages are written to a queue file for Claude Code to process.
-Responses can be sent by writing to a response file.
+Registers as an external workspace (no Docker container) and receives
+A2A messages from agents in real-time. Sends macOS notifications for
+instant awareness.
 
 Usage:
-  python3 scripts/claude-code-bridge.py          # Start the bridge
-  python3 scripts/claude-code-bridge.py --stop   # Stop the bridge
-
-The bridge:
-1. Registers as a workspace named "Claude Code Advisor" with the platform
-2. Listens on port 9999 for A2A messages from other workspaces
-3. Writes incoming messages to .claude-bridge/inbox.jsonl
-4. Reads responses from .claude-bridge/outbox.jsonl
+  python3 scripts/claude-code-bridge.py          # Start
+  python3 scripts/claude-code-bridge.py --stop   # Stop
+  python3 scripts/claude-code-bridge.py --inbox  # Show unread messages
+  python3 scripts/claude-code-bridge.py --clear  # Clear inbox
 """
 
-import asyncio
 import json
 import logging
 import os
+import platform
 import signal
+import subprocess
 import sys
 import time
 import uuid
-from pathlib import Path
-
-import httpx
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 import threading
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+try:
+    import httpx
+except ImportError:
+    print("pip install httpx")
+    sys.exit(1)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [bridge] %(message)s")
 logger = logging.getLogger("claude-bridge")
 
 PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://localhost:8080")
 BRIDGE_PORT = int(os.environ.get("BRIDGE_PORT", "9999"))
-BRIDGE_DIR = Path(".claude-bridge")
+BRIDGE_DIR = Path(__file__).parent.parent / ".claude-bridge"
 INBOX = BRIDGE_DIR / "inbox.jsonl"
-OUTBOX = BRIDGE_DIR / "outbox.jsonl"
 PID_FILE = BRIDGE_DIR / "bridge.pid"
-WORKSPACE_ID_FILE = BRIDGE_DIR / "workspace_id"
+WS_ID_FILE = BRIDGE_DIR / "workspace_id"
 
-# Create bridge directory
 BRIDGE_DIR.mkdir(exist_ok=True)
 
 
+def notify(title: str, body: str):
+    """Send a macOS notification for instant awareness."""
+    if platform.system() == "Darwin":
+        try:
+            subprocess.run([
+                "osascript", "-e",
+                f'display notification "{body}" with title "{title}"'
+            ], capture_output=True, timeout=3)
+        except Exception:
+            pass
+
+
+def resolve_workspace_name(workspace_id: str) -> str:
+    """Look up workspace name from platform."""
+    try:
+        resp = httpx.get(f"{PLATFORM_URL}/workspaces/{workspace_id}", timeout=3)
+        if resp.status_code == 200:
+            return resp.json().get("name", workspace_id[:8])
+    except Exception:
+        pass
+    return workspace_id[:8]
+
+
 class A2AHandler(BaseHTTPRequestHandler):
-    """Handles incoming A2A JSON-RPC requests from agents."""
+    """Handles incoming A2A JSON-RPC requests."""
 
     def log_message(self, format, *args):
-        logger.info(f"A2A: {args[0]}")
+        pass  # Suppress default HTTP logging
 
     def do_POST(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
-
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         try:
             request = json.loads(body)
         except json.JSONDecodeError:
-            self.send_error(400, "Invalid JSON")
+            self.send_error(400)
             return
 
         method = request.get("method", "")
         req_id = request.get("id", str(uuid.uuid4()))
 
         if method == "message/send":
-            # Extract the message text
             params = request.get("params", {})
             message = params.get("message", {})
             parts = message.get("parts", [])
             text = parts[0].get("text", "") if parts else ""
-            sender = self.headers.get("X-Workspace-ID", "unknown")
+            sender_id = self.headers.get("X-Workspace-ID", "")
+            sender_name = resolve_workspace_name(sender_id) if sender_id else "canvas"
 
-            logger.info(f"Message from {sender}: {text[:100]}")
+            logger.info(f"📨 {sender_name}: {text[:80]}")
 
-            # Write to inbox for Claude Code to process
+            # Write to inbox
             entry = {
                 "id": req_id,
-                "sender": sender,
+                "sender_id": sender_id,
+                "sender_name": sender_name,
                 "text": text,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "responded": False,
+                "read": False,
             }
             with open(INBOX, "a") as f:
                 f.write(json.dumps(entry) + "\n")
 
-            # Check if there's a pre-written response in the outbox
-            response_text = self._check_outbox(req_id)
-            if not response_text:
-                response_text = (
-                    f"Message received. Claude Code will review and respond. "
-                    f"(Queue position: {self._inbox_count()})"
-                )
+            # macOS notification for instant awareness
+            notify(f"Message from {sender_name}", text[:100])
 
-            # Return A2A response
-            response = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "kind": "message",
-                    "messageId": str(uuid.uuid4()),
-                    "role": "agent",
-                    "parts": [{"kind": "text", "text": response_text}],
-                },
-            }
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(response).encode())
+            # Acknowledge
+            response_text = f"Received by Claude Code. Will review shortly."
+            self._send_a2a_response(req_id, response_text)
 
         elif method == "agent/card":
-            card = {
-                "jsonrpc": "2.0",
-                "id": req_id,
+            self._send_json(200, {
+                "jsonrpc": "2.0", "id": req_id,
                 "result": {
                     "name": "Claude Code Advisor",
-                    "description": "CEO's technical advisor — code review, architecture, bug fixes",
+                    "description": "CEO technical advisor — code review, architecture, debugging",
                     "version": "1.0.0",
                     "skills": ["code-review", "architecture", "debugging", "optimization"],
-                    "capabilities": {"streaming": False, "pushNotifications": False},
                 },
-            }
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(card).encode())
+            })
         else:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32601, "message": f"Method not supported: {method}"},
-            }).encode())
+            self._send_json(200, {
+                "jsonrpc": "2.0", "id": req_id,
+                "error": {"code": -32601, "message": f"Unsupported: {method}"},
+            })
 
-    def _inbox_count(self):
-        if not INBOX.exists():
-            return 0
-        return sum(1 for line in INBOX.read_text().splitlines() if line.strip())
+    def _send_a2a_response(self, req_id, text):
+        self._send_json(200, {
+            "jsonrpc": "2.0", "id": req_id,
+            "result": {
+                "kind": "message",
+                "messageId": str(uuid.uuid4()),
+                "role": "agent",
+                "parts": [{"kind": "text", "text": text}],
+            },
+        })
 
-    def _check_outbox(self, req_id):
-        if not OUTBOX.exists():
-            return None
-        lines = OUTBOX.read_text().splitlines()
-        for line in lines:
-            try:
-                entry = json.loads(line)
-                if entry.get("id") == req_id:
-                    return entry.get("text", "")
-            except json.JSONDecodeError:
-                continue
-        return None
+    def _send_json(self, status, data):
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
-def register_workspace():
-    """Register as a workspace in the platform."""
-    workspace_id = None
-    if WORKSPACE_ID_FILE.exists():
-        workspace_id = WORKSPACE_ID_FILE.read_text().strip()
-        # Check if it still exists
+def register_external_workspace() -> str:
+    """Register as a native external workspace (no Docker container)."""
+    # Reuse existing workspace if still alive
+    if WS_ID_FILE.exists():
+        ws_id = WS_ID_FILE.read_text().strip()
         try:
-            resp = httpx.get(f"{PLATFORM_URL}/workspaces/{workspace_id}", timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("status") != "removed":
-                    logger.info(f"Reusing existing workspace: {workspace_id}")
-                    return workspace_id
+            resp = httpx.get(f"{PLATFORM_URL}/workspaces/{ws_id}", timeout=5)
+            if resp.status_code == 200 and resp.json().get("status") not in ("removed",):
+                # Update URL in case port changed
+                httpx.patch(f"{PLATFORM_URL}/workspaces/{ws_id}",
+                    json={"url": f"http://host.docker.internal:{BRIDGE_PORT}"},
+                    timeout=5)
+                logger.info(f"Reusing workspace {ws_id}")
+                return ws_id
         except Exception:
             pass
 
-    # Create new workspace
-    resp = httpx.post(
-        f"{PLATFORM_URL}/workspaces",
-        json={
-            "name": "Claude Code Advisor",
-            "role": "CEO technical advisor — code review, architecture, debugging, optimization",
-            "tier": 3,
-            "runtime": "claude-code",
-        },
-        timeout=10,
-    )
+    # Create new external workspace
+    resp = httpx.post(f"{PLATFORM_URL}/workspaces", json={
+        "name": "Claude Code Advisor",
+        "role": "CEO technical advisor — code review, architecture, debugging, optimization",
+        "tier": 3,
+        "runtime": "external",
+        "external": True,
+        "url": f"http://host.docker.internal:{BRIDGE_PORT}",
+    }, timeout=10)
+
     data = resp.json()
-    workspace_id = data.get("id", "")
-    if not workspace_id:
+    ws_id = data.get("id", "")
+    if not ws_id:
         logger.error(f"Failed to create workspace: {data}")
         sys.exit(1)
 
-    WORKSPACE_ID_FILE.write_text(workspace_id)
-    logger.info(f"Created workspace: {workspace_id}")
+    WS_ID_FILE.write_text(ws_id)
+    logger.info(f"Created external workspace: {ws_id}")
 
-    # Register with our local URL so agents can reach us
-    httpx.post(
-        f"{PLATFORM_URL}/registry/register",
-        json={
-            "workspace_id": workspace_id,
-            "agent_card": {
-                "name": "Claude Code Advisor",
-                "description": "CEO technical advisor — code review, architecture, debugging",
-                "version": "1.0.0",
-                "url": f"http://host.docker.internal:{BRIDGE_PORT}",
-                "skills": ["code-review", "architecture", "debugging"],
-                "capabilities": {"streaming": False, "pushNotifications": False},
-            },
+    # Register agent card
+    httpx.post(f"{PLATFORM_URL}/registry/register", json={
+        "workspace_id": ws_id,
+        "agent_card": {
+            "name": "Claude Code Advisor",
+            "description": "CEO technical advisor — code review, architecture, debugging",
+            "url": f"http://host.docker.internal:{BRIDGE_PORT}",
+            "version": "1.0.0",
+            "skills": ["code-review", "architecture", "debugging"],
+            "capabilities": {"streaming": False, "pushNotifications": False},
         },
-        timeout=10,
-    )
-    logger.info(f"Registered with platform at http://host.docker.internal:{BRIDGE_PORT}")
-    return workspace_id
+    }, timeout=10)
+
+    return ws_id
 
 
-def start_heartbeat(workspace_id):
-    """Send periodic heartbeats to keep the workspace online."""
-    def heartbeat_loop():
-        while True:
-            try:
-                httpx.post(
-                    f"{PLATFORM_URL}/registry/heartbeat",
-                    json={
-                        "workspace_id": workspace_id,
-                        "error_rate": 0,
-                        "sample_error": "",
-                        "uptime_seconds": int(time.time() - start_time),
-                        "active_tasks": 0,
-                        "current_task": "",
-                    },
-                    timeout=5,
-                )
-            except Exception:
-                pass
-            time.sleep(30)
+def heartbeat_loop(ws_id: str):
+    """Keep the workspace online with periodic heartbeats."""
+    start = time.time()
+    while True:
+        try:
+            httpx.post(f"{PLATFORM_URL}/registry/heartbeat", json={
+                "workspace_id": ws_id,
+                "error_rate": 0, "sample_error": "",
+                "uptime_seconds": int(time.time() - start),
+                "active_tasks": 0, "current_task": "",
+            }, timeout=5)
+        except Exception:
+            pass
+        time.sleep(30)
 
-    start_time = time.time()
-    t = threading.Thread(target=heartbeat_loop, daemon=True)
-    t.start()
-    return t
+
+def show_inbox():
+    """Print unread messages."""
+    if not INBOX.exists():
+        print("No messages.")
+        return
+    unread = 0
+    for line in INBOX.read_text().splitlines():
+        try:
+            entry = json.loads(line)
+            if not entry.get("read"):
+                unread += 1
+                ts = entry.get("timestamp", "")
+                sender = entry.get("sender_name", "unknown")
+                text = entry.get("text", "")[:120]
+                print(f"  [{ts}] {sender}: {text}")
+        except json.JSONDecodeError:
+            continue
+    if unread == 0:
+        print("No unread messages.")
+    else:
+        print(f"\n{unread} unread message(s)")
 
 
 def main():
     if "--stop" in sys.argv:
         if PID_FILE.exists():
-            pid = int(PID_FILE.read_text().strip())
             try:
-                os.kill(pid, signal.SIGTERM)
-                logger.info(f"Stopped bridge (PID {pid})")
+                os.kill(int(PID_FILE.read_text().strip()), signal.SIGTERM)
+                print("Bridge stopped")
             except ProcessLookupError:
-                logger.info("Bridge was not running")
+                print("Bridge was not running")
             PID_FILE.unlink(missing_ok=True)
         return
 
-    # Write PID
+    if "--inbox" in sys.argv:
+        show_inbox()
+        return
+
+    if "--clear" in sys.argv:
+        INBOX.unlink(missing_ok=True)
+        print("Inbox cleared")
+        return
+
     PID_FILE.write_text(str(os.getpid()))
 
-    # Register with platform
-    workspace_id = register_workspace()
+    ws_id = register_external_workspace()
+    threading.Thread(target=heartbeat_loop, args=(ws_id,), daemon=True).start()
 
-    # Start heartbeat
-    start_heartbeat(workspace_id)
-
-    # Start A2A server
     server = HTTPServer(("0.0.0.0", BRIDGE_PORT), A2AHandler)
-    logger.info(f"Claude Code A2A Bridge listening on :{BRIDGE_PORT}")
-    logger.info(f"Workspace ID: {workspace_id}")
-    logger.info(f"Inbox: {INBOX}")
-    logger.info("Agents can now discover and message me via list_peers + delegate_task")
+    logger.info(f"Bridge listening on :{BRIDGE_PORT}")
+    logger.info(f"Workspace: {ws_id} (external)")
+    logger.info(f"Agents see me as 'Claude Code Advisor' in list_peers")
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
         server.shutdown()
         PID_FILE.unlink(missing_ok=True)
 
