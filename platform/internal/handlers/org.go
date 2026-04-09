@@ -59,9 +59,10 @@ type OrgWorkspace struct {
 	Runtime      string         `yaml:"runtime"`
 	Tier         int            `yaml:"tier"`
 	Template     string         `yaml:"template"`
-	FilesDir     string         `yaml:"files_dir"`     // folder name relative to org template dir
-	SystemPrompt string         `yaml:"system_prompt"` // inline (overridden by files_dir/system-prompt.md)
+	FilesDir     string         `yaml:"files_dir"`      // folder name relative to org template dir
+	SystemPrompt string         `yaml:"system_prompt"`  // inline (overridden by files_dir/system-prompt.md)
 	Model        string         `yaml:"model"`
+	WorkspaceDir string         `yaml:"workspace_dir"`  // host path to mount as /workspace (empty = isolated volume)
 	External     bool           `yaml:"external"`
 	URL          string         `yaml:"url"`
 	Canvas       struct {
@@ -197,11 +198,20 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		role = ws.Role
 	}
 
+	// Validate and convert workspace_dir to NULL if empty
+	var workspaceDir interface{}
+	if ws.WorkspaceDir != "" {
+		if err := validateWorkspaceDir(ws.WorkspaceDir); err != nil {
+			return fmt.Errorf("workspace %s: %w", ws.Name, err)
+		}
+		workspaceDir = ws.WorkspaceDir
+	}
+
 	// Insert workspace
 	_, err := db.DB.Exec(`
-		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, id, ws.Name, role, tier, runtime, awarenessNS, "provisioning", parentID)
+		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id, workspace_dir)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, id, ws.Name, role, tier, runtime, awarenessNS, "provisioning", parentID, workspaceDir)
 	if err != nil {
 		log.Printf("Org import: failed to create %s: %v", ws.Name, err)
 		return fmt.Errorf("failed to create %s: %w", ws.Name, err)
@@ -225,6 +235,7 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		// Provision container
 		payload := models.CreateWorkspacePayload{
 			Name: ws.Name, Tier: tier, Runtime: runtime, Model: ws.Model,
+			WorkspaceDir: ws.WorkspaceDir,
 		}
 		templatePath := ""
 		if ws.Template != "" {

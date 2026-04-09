@@ -29,7 +29,7 @@ func TestWorkspaceCreate_WithParentID(t *testing.T) {
 
 	parentID := "parent-ws-123"
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Child Agent", nil, 1, "langgraph", sqlmock.AnyArg(), &parentID).
+		WithArgs(sqlmock.AnyArg(), "Child Agent", nil, 1, "langgraph", sqlmock.AnyArg(), &parentID, nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO canvas_layouts").
 		WithArgs(sqlmock.AnyArg(), float64(0), float64(0)).
@@ -62,7 +62,7 @@ func TestWorkspaceCreate_ExplicitClaudeCodeRuntime(t *testing.T) {
 	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
 
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "CC Agent", nil, 2, "claude-code", sqlmock.AnyArg(), (*string)(nil)).
+		WithArgs(sqlmock.AnyArg(), "CC Agent", nil, 2, "claude-code", sqlmock.AnyArg(), (*string)(nil), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO canvas_layouts").
 		WithArgs(sqlmock.AnyArg(), float64(10), float64(20)).
@@ -181,13 +181,13 @@ func TestWorkspaceList_WithData(t *testing.T) {
 	columns := []string{
 		"id", "name", "role", "tier", "status", "agent_card", "url",
 		"parent_id", "active_tasks", "last_error_rate", "last_sample_error",
-		"uptime_seconds", "current_task", "runtime", "x", "y", "collapsed",
+		"uptime_seconds", "current_task", "runtime", "workspace_dir", "x", "y", "collapsed",
 	}
 	rows := sqlmock.NewRows(columns).
 		AddRow("ws-1", "Agent One", "worker", 1, "online", []byte(`{"name":"agent1"}`), "http://localhost:8001",
-			nil, 3, 0.02, "", 7200, "processing", "langgraph", 10.0, 20.0, false).
+			nil, 3, 0.02, "", 7200, "processing", "langgraph", "", 10.0, 20.0, false).
 		AddRow("ws-2", "Agent Two", "", 2, "degraded", []byte("null"), "",
-			nil, 0, 0.6, "timeout", 100, "", "claude-code", 50.0, 60.0, true)
+			nil, 0, 0.6, "timeout", 100, "", "claude-code", "", 50.0, 60.0, true)
 
 	mock.ExpectQuery("SELECT w.id, w.name").
 		WillReturnRows(rows)

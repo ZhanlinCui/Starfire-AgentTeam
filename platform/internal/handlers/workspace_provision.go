@@ -114,12 +114,26 @@ func (h *WorkspaceHandler) buildProvisionerConfig(
 	envVars map[string]string,
 	pluginsPath, awarenessNamespace string,
 ) provisioner.WorkspaceConfig {
+	// Per-workspace workspace_dir takes priority over global WORKSPACE_DIR env var.
+	// If neither is set, the provisioner creates an isolated Docker volume.
+	workspacePath := payload.WorkspaceDir
+	if workspacePath == "" {
+		// Check DB — needed for restarts where payload.WorkspaceDir isn't populated
+		var dbDir string
+		if err := db.DB.QueryRow(`SELECT COALESCE(workspace_dir, '') FROM workspaces WHERE id = $1`, workspaceID).Scan(&dbDir); err == nil && dbDir != "" {
+			workspacePath = dbDir
+		}
+	}
+	if workspacePath == "" {
+		workspacePath = os.Getenv("WORKSPACE_DIR")
+	}
+
 	return provisioner.WorkspaceConfig{
 		WorkspaceID:        workspaceID,
 		TemplatePath:       templatePath,
 		ConfigFiles:        configFiles,
 		PluginsPath:        pluginsPath,
-		WorkspacePath:      os.Getenv("WORKSPACE_DIR"), // If set, bind-mount host dir as /workspace
+		WorkspacePath:      workspacePath,
 		Tier:               payload.Tier,
 		Runtime:            payload.Runtime,
 		EnvVars:            envVars,

@@ -36,7 +36,7 @@ The platform uses the caller identity to enforce hierarchy-based access rules.
 | `POST` | `/workspaces` | Create and provision a workspace |
 | `GET` | `/workspaces` | List workspaces with inline canvas layout data |
 | `GET` | `/workspaces/:id` | Get one workspace |
-| `PATCH` | `/workspaces/:id` | Update name, role, tier, runtime, parent, and similar fields |
+| `PATCH` | `/workspaces/:id` | Update name, role, tier, runtime, workspace_dir, parent, etc. |
 | `DELETE` | `/workspaces/:id` | Remove workspace |
 | `POST` | `/workspaces/:id/restart` | Restart workspace |
 | `POST` | `/workspaces/:id/pause` | Pause workspace |

@@ -138,15 +138,29 @@ docker volume: ws-{id}-workspace
 
 The volume is named after the workspace ID, not the container name. So even when a container is destroyed and re-provisioned, the new container mounts the same volume. Tier 1 workspaces skip the workspace volume for read-only isolation.
 
-### Shared Workspace (WORKSPACE_DIR)
+### Per-Workspace Directory (`workspace_dir`)
 
-When the platform is started with `WORKSPACE_DIR=/path/to/repo`, all workspace containers bind-mount that host directory as `/workspace` instead of using isolated volumes. This gives all agents read/write access to the same codebase:
+Each workspace can optionally specify a host directory to bind-mount as `/workspace`. The priority chain is:
 
-```bash
-WORKSPACE_DIR=/Users/you/project go run ./cmd/server
+1. **Per-workspace `workspace_dir`** (DB column, set via API or org template) — highest priority
+2. **Global `WORKSPACE_DIR` env var** — fallback for all workspaces without a per-workspace value
+3. **Isolated Docker named volume** — default when neither is set
+
+```yaml
+# org-templates/starfire-dev/org.yaml
+workspaces:
+  - name: PM
+    workspace_dir: /Users/you/project  # bind-mounts repo
+  - name: Backend Engineer
+    # no workspace_dir → isolated Docker volume
 ```
 
-All 15 agents then see the same files — the PM can read `CLAUDE.md`, the Backend Engineer can edit `platform/`, the Frontend Engineer can modify `canvas/`, etc. Changes made by one agent are immediately visible to all others.
+API support:
+- `POST /workspaces {"workspace_dir": "/path"}` — set on create
+- `PATCH /workspaces/:id {"workspace_dir": "/path"}` — update (returns `needs_restart: true`)
+- `PATCH /workspaces/:id {"workspace_dir": null}` — clear (reverts to isolated volume)
+
+Path validation: must be absolute, no `..` traversal, rejects system paths (`/etc`, `/var`, `/proc`, `/sys`, `/dev`, `/boot`, `/sbin`, `/bin`, `/lib`, `/usr`).
 
 See [Memory](./memory.md) for full memory backend details.
 

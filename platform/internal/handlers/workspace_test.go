@@ -23,14 +23,14 @@ func TestWorkspaceGet_Success(t *testing.T) {
 	columns := []string{
 		"id", "name", "role", "tier", "status", "agent_card", "url",
 		"parent_id", "active_tasks", "last_error_rate", "last_sample_error",
-		"uptime_seconds", "current_task", "runtime", "x", "y", "collapsed",
+		"uptime_seconds", "current_task", "runtime", "workspace_dir", "x", "y", "collapsed",
 	}
 	mock.ExpectQuery("SELECT w.id, w.name").
 		WithArgs("ws-get-1").
 		WillReturnRows(sqlmock.NewRows(columns).
 			AddRow("ws-get-1", "My Agent", "worker", 1, "online", []byte(`{"name":"test"}`),
 				"http://localhost:8001", nil, 2, 0.05, "", 3600, "working", "langgraph",
-				10.0, 20.0, false))
+				"", 10.0, 20.0, false))
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -148,7 +148,7 @@ func TestWorkspaceCreate_DBInsertError(t *testing.T) {
 
 	// Workspace INSERT fails
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Failing Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil)).
+		WithArgs(sqlmock.AnyArg(), "Failing Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil).
 		WillReturnError(sql.ErrConnDone)
 
 	w := httptest.NewRecorder()
@@ -177,7 +177,7 @@ func TestWorkspaceCreate_DefaultsApplied(t *testing.T) {
 
 	// Expect workspace INSERT with defaulted tier=1, runtime="langgraph"
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Default Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil)).
+		WithArgs(sqlmock.AnyArg(), "Default Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect canvas_layouts INSERT (x=0, y=0 — defaults)
@@ -227,7 +227,7 @@ func TestWorkspaceList_Empty(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "role", "tier", "status", "agent_card", "url",
 			"parent_id", "active_tasks", "last_error_rate", "last_sample_error",
-			"uptime_seconds", "current_task", "runtime", "x", "y", "collapsed",
+			"uptime_seconds", "current_task", "runtime", "workspace_dir", "x", "y", "collapsed",
 		}))
 
 	w := httptest.NewRecorder()

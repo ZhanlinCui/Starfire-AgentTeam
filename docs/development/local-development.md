@@ -46,7 +46,7 @@ DATABASE_URL=postgres://dev:dev@postgres:5432/agentmolecule?sslmode=prefer
 REDIS_URL=redis://redis:6379
 PORT=8080
 SECRETS_ENCRYPTION_KEY=dev-key-change-in-production
-WORKSPACE_DIR=/path/to/Starfire-AgentTeam   # Optional: bind-mount host repo into all agent containers
+WORKSPACE_DIR=/path/to/Starfire-AgentTeam   # Optional global fallback; prefer per-workspace workspace_dir in org.yaml or API
 ```
 
 ### Canvas (Next.js)
