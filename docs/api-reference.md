@@ -270,7 +270,7 @@ If error_rate > 0.5, broadcasts `WORKSPACE_DEGRADED`. Recovery broadcasts `WORKS
 | `POST` | `/templates/import` | Import template from URL |
 | `GET` | `/workspaces/:id/shared-context` | Get shared context files |
 | `PUT` | `/workspaces/:id/files` | Replace all config files |
-| `GET` | `/workspaces/:id/files` | List config files in container |
+| `GET` | `/workspaces/:id/files` | List files (lazy: `?depth=1&path=subdir`) |
 | `GET` | `/workspaces/:id/files/*path` | Read a config file |
 | `PUT` | `/workspaces/:id/files/*path` | Write a config file |
 | `DELETE` | `/workspaces/:id/files/*path` | Delete a config file |
