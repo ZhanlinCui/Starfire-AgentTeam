@@ -161,6 +161,11 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 		return // includes paused — don't auto-restart paused workspaces
 	}
 
+	// Don't auto-restart external workspaces (no Docker container)
+	if dbRuntime == "external" {
+		return
+	}
+
 	// Don't auto-restart if any ancestor is paused
 	if paused, _ := isParentPaused(ctx, workspaceID); paused {
 		return

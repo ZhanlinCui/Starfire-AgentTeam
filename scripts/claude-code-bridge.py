@@ -159,7 +159,7 @@ def register_external_workspace() -> str:
             if resp.status_code == 200 and resp.json().get("status") not in ("removed",):
                 # Update URL in case port changed
                 httpx.patch(f"{PLATFORM_URL}/workspaces/{ws_id}",
-                    json={"url": f"http://host.docker.internal:{BRIDGE_PORT}"},
+                    json={"url": f"http://127.0.0.1:{BRIDGE_PORT}"},
                     timeout=5)
                 logger.info(f"Reusing workspace {ws_id}")
                 return ws_id
@@ -173,7 +173,7 @@ def register_external_workspace() -> str:
         "tier": 3,
         "runtime": "external",
         "external": True,
-        "url": f"http://host.docker.internal:{BRIDGE_PORT}",
+        "url": f"http://127.0.0.1:{BRIDGE_PORT}",
     }, timeout=10)
 
     data = resp.json()
@@ -191,7 +191,7 @@ def register_external_workspace() -> str:
         "agent_card": {
             "name": "Claude Code Advisor",
             "description": "CEO technical advisor — code review, architecture, debugging",
-            "url": f"http://host.docker.internal:{BRIDGE_PORT}",
+            "url": f"http://127.0.0.1:{BRIDGE_PORT}",
             "version": "1.0.0",
             "skills": ["code-review", "architecture", "debugging"],
             "capabilities": {"streaming": False, "pushNotifications": False},
