@@ -28,6 +28,7 @@ export function buildNodesAndEdges(workspaces: WorkspaceData[]): {
       url: ws.url,
       parentId: ws.parent_id,
       currentTask: ws.current_task || "",
+      runtime: ws.runtime || "",
       needsRestart: false,
     },
     // Hide child nodes from canvas — they render inside the parent WorkspaceNode

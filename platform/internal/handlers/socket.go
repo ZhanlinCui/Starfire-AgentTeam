@@ -3,6 +3,8 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/agent-molecule/platform/internal/metrics"
 	"github.com/agent-molecule/platform/internal/ws"
@@ -12,7 +14,18 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
+		// In production, validate against CORS_ORIGINS. In dev, allow all.
+		origins := os.Getenv("CORS_ORIGINS")
+		if origins == "" {
+			return true // dev mode — no restriction
+		}
+		origin := r.Header.Get("Origin")
+		for _, allowed := range strings.Split(origins, ",") {
+			if strings.EqualFold(strings.TrimSpace(allowed), origin) {
+				return true
+			}
+		}
+		return false
 	},
 }
 

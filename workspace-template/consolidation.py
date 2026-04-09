@@ -91,19 +91,20 @@ class ConsolidationLoop:
                                 break
 
                     if summary:
-                        # Store consolidated summary as a TEAM memory
-                        await client.post(
+                        # Store consolidated summary as a TEAM memory — only delete originals if POST succeeds
+                        resp = await client.post(
                             f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
                             json={"content": f"[Consolidated] {summary}", "scope": "TEAM"},
                         )
-
-                        # Delete the original local memories that were consolidated
-                        for m in memories:
-                            await client.delete(
-                                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories/{m['id']}"
-                            )
-
-                        logger.info("Consolidated %d memories into team knowledge", len(memories))
+                        if resp.status_code in (200, 201):
+                            # Safe to delete originals — consolidated version is saved
+                            for m in memories:
+                                await client.delete(
+                                    f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories/{m['id']}"
+                                )
+                            logger.info("Consolidated %d memories into team knowledge", len(memories))
+                        else:
+                            logger.warning("Consolidation POST failed (status %d) — keeping originals", resp.status_code)
                 except Exception as e:
                     logger.error(
                         "CONSOLIDATION: Agent summarization failed (rate limit? model error?): %s. "

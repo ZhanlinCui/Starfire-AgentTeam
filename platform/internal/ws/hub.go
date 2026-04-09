@@ -75,6 +75,7 @@ func (h *Hub) Broadcast(msg models.WSMessage) {
 			select {
 			case client.Send <- data:
 			default:
+				log.Printf("WS: dropped message to canvas client (buffer full)")
 			}
 			continue
 		}
@@ -84,6 +85,7 @@ func (h *Hub) Broadcast(msg models.WSMessage) {
 			select {
 			case client.Send <- data:
 			default:
+				log.Printf("WS: dropped message to workspace %s (buffer full)", client.WorkspaceID)
 			}
 		}
 	}
