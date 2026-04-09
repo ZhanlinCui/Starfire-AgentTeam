@@ -18,6 +18,27 @@ import (
 // restartMu prevents concurrent RestartByID calls for the same workspace
 var restartMu sync.Map // map[workspaceID]*sync.Mutex
 
+// isParentPaused checks if any ancestor of the workspace is paused.
+func isParentPaused(ctx context.Context, workspaceID string) (bool, string) {
+	var parentID *string
+	db.DB.QueryRowContext(ctx, `SELECT parent_id FROM workspaces WHERE id = $1`, workspaceID).Scan(&parentID)
+	if parentID == nil {
+		return false, ""
+	}
+	var parentStatus, parentName string
+	err := db.DB.QueryRowContext(ctx,
+		`SELECT status, name FROM workspaces WHERE id = $1`, *parentID,
+	).Scan(&parentStatus, &parentName)
+	if err != nil {
+		return false, ""
+	}
+	if parentStatus == "paused" {
+		return true, parentName
+	}
+	// Check grandparent recursively
+	return isParentPaused(ctx, *parentID)
+}
+
 // Restart handles POST /workspaces/:id/restart
 // Works for offline, failed, or degraded workspaces. Stops any existing container, then re-provisions.
 func (h *WorkspaceHandler) Restart(c *gin.Context) {
@@ -37,7 +58,11 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
 		return
 	}
-	// Allow restart even when online (force restart) — stops existing container first
+	// Block restart if any ancestor is paused — must resume parent first
+	if paused, parentName := isParentPaused(ctx, id); paused {
+		c.JSON(http.StatusConflict, gin.H{"error": "parent workspace \"" + parentName + "\" is paused — resume it first"})
+		return
+	}
 
 	if h.provisioner == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provisioner not available"})
@@ -134,6 +159,11 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 	).Scan(&wsName, &status, &tier, &dbRuntime)
 	if err != nil {
 		return // includes paused — don't auto-restart paused workspaces
+	}
+
+	// Don't auto-restart if any ancestor is paused
+	if paused, _ := isParentPaused(ctx, workspaceID); paused {
+		return
 	}
 
 	// If still provisioning, brief wait so container exists for Stop()
@@ -237,6 +267,12 @@ func (h *WorkspaceHandler) Resume(c *gin.Context) {
 
 	if h.provisioner == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provisioner not available"})
+		return
+	}
+
+	// Block resume if any ancestor is still paused — must resume from the top down
+	if paused, parentName := isParentPaused(ctx, id); paused {
+		c.JSON(http.StatusConflict, gin.H{"error": "parent workspace \"" + parentName + "\" is paused — resume it first"})
 		return
 	}
 
