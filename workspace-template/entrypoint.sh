@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# No set -e — individual commands handle their own errors gracefully
 
 # Ensure user-installed packages are in PATH
 export PATH="$HOME/.local/bin:$PATH"
