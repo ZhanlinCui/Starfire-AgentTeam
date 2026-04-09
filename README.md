@@ -27,14 +27,16 @@
 [Communication Protocol](./docs/api-protocol/a2a-protocol.md) • 
 [Agent Runtime](./docs/agent-runtime/workspace-runtime.md)
 
+[Quick Start](#-quick-start) •
+[Compatible Agent Architectures](#compatible-agent-architectures) •
+[Memory Architecture](#why-the-memory-architecture-is-ahead)
+
 ---
 
 **Deploy in one click:**
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/yourusername/starfire)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/yourusername/starfire)
-
-> Replace `yourusername/starfire` in the button URLs above with your actual GitHub repo path.
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/ZhanlinCui/Starfire-AgentTeam)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ZhanlinCui/Starfire-AgentTeam)
 
 <!-- 
   DEMO GIF — INSERT HERE
@@ -46,44 +48,93 @@
 
 ---
 
-> *"Build your AI Org Chart where any agent can become a team, and any team can become a company."*
+> *Build an AI organization, not a brittle prompt chain.*
 
-Starfire is a **visual AI Agent Team orchestration platform**. Unlike traditional workflow automation tools (like n8n) where nodes represent *tasks*, Starfire nodes represent **roles**. You drag and drop workspaces, nest them into teams, and let them collaborate securely using the industry-standard A2A (Agent-to-Agent) protocol. 
+Starfire is a **commercial-grade orchestration and control plane for AI agent teams**. It helps teams move from isolated single-agent demos to real operating structures with roles, delegation boundaries, runtime compatibility, memory isolation, approval flows, and full observability.
 
-The organizational hierarchy *is* the network topology. No manual wiring needed.
+Instead of treating each node as a task, Starfire treats each node as a **workspace role**. A workspace can be one agent today, a full sub-team tomorrow, and still keep the same interface, permissions, memory boundary, and position in the org chart.
 
 ---
 
-## 🔥 Core Differentiators
+## Why Starfire Exists
+
+Most agent products work well in a demo and break down in an organization. The failure modes are predictable:
+
+| Production problem | What breaks in conventional agent setups | How Starfire solves it |
+|---|---|---|
+| One giant general-purpose agent becomes the bottleneck | Context mixes planning, execution, approvals, and domain knowledge into one fragile thread | Split work into persistent workspace roles with explicit hierarchy and delegation paths |
+| Multi-agent graphs become hard to evolve | Teams hard-code topology, edges, and routing logic into the workflow itself | The org chart is the topology, so structure changes do not require rewiring the entire system |
+| Different teams prefer different agent frameworks | LangGraph, Claude Code, CrewAI, AutoGen, and CLI agents rarely share one operating model | Starfire standardizes them behind one workspace lifecycle, A2A contract, memory surface, and canvas |
+| Shared memory leaks across teams | Flat global memory stores ignore org boundaries and create governance risk | HMA aligns memory access to reporting lines, team boundaries, and explicit scopes |
+| No operational control plane | Demos lack approvals, liveness, retries, tracing, and restart behavior | Starfire adds platform registry, health detection, restart flows, HITL escalation, and event streaming |
+
+## What Makes It Commercially Useful
+
+- **Role-native orchestration:** model choice is swappable, but the role, permissions, memory, and topology stay stable.
+- **Progressive scale-up:** turn one workspace into a managed sub-team without changing how the rest of the system talks to it.
+- **Operational guardrails:** workspace lifecycle, health sweeps, approval escalation, and runtime tiering are part of the platform, not ad hoc scripts.
+- **Enterprise-friendly isolation:** access control, memory segmentation, and workspace-level config/secrets are enforced at the platform layer.
+- **Heterogeneous runtime support:** teams can standardize governance without standardizing on one agent framework.
+
+## Compatible Agent Architectures
+
+Starfire is designed to unify heterogeneous agent stacks under one operating model rather than forcing every team into one framework.
+
+| Runtime | Architecture style | Native strength | What Starfire adds |
+|---|---|---|---|
+| **LangGraph** | Graph-based Python agent runtime | Structured tool use, controllable execution graph, skills/plugins | Canvas orchestration, A2A delegation, org-aware memory, runtime tiers, platform lifecycle |
+| **DeepAgents** | Planning-heavy LangGraph variant | Deeper task decomposition and coordination patterns | Same workspace contract, hierarchy routing, observability, and restart behavior |
+| **Claude Code** | Agentic CLI runtime | Real coding workflows, native session continuity, CLAUDE.md and tool hooks | Secure workspace containerization, MCP/A2A delegation, org topology, shared control plane |
+| **CrewAI** | Role-based multi-agent framework | Lightweight crew composition and task-oriented collaboration | Persistent workspace identity, access control, shared canvas, standardized agent card and registry |
+| **AutoGen** | Assistant-agent + tool orchestration | Tool-rich conversational agents and Microsoft ecosystem fit | Same deployment model, runtime governance, memory surface, and inter-agent communication layer |
+| **OpenClaw** | CLI-native agent runtime | Alternative agent CLI workflows with native session handling | Workspace lifecycle, platform routing, monitoring, and hierarchical collaboration model |
+
+All of these runtimes plug into the same workspace abstraction, the same A2A communication rules, and the same control plane.
+
+## Why The Memory Architecture Is Ahead
+
+Starfire's **HMA (Hierarchical Memory Architecture)** is built for organizations, not just agents.
+
+| Conventional agent memory | Starfire HMA |
+|---|---|
+| Flat global memory store or loosely separated app-level namespaces | Memory scopes mirror the org chart: **L1 Local**, **L2 Team**, **L3 Global** |
+| Memory sharing is usually implicit and easy to overexpose | Sharing is deliberate and topology-aware, aligned to reporting lines and team structure |
+| Isolation is often a convention in application code | Isolation is backed by workspace awareness namespaces, platform rules, and RLS-backed access boundaries |
+| Good for recall, weak for governance | Built for recall **and** governance, so teams can segment sensitive knowledge by organizational boundary |
+| Memory and operating procedures stay disconnected | Durable patterns can be promoted from memory into reusable skills, then hot-loaded back into the runtime |
+
+This matters commercially because real teams do not want one agent accidentally reading every other team's working memory. Starfire treats memory like organizational infrastructure, not a global scratchpad.
+
+## Core Differentiators
 
 ### 👥 Role-Based Abstraction
-In other platforms, nodes are API tasks. In Starfire, a node is a **Workspace** — an organizational role (e.g., "Developer PM" or "Marketing Lead"). The AI model inside can be hot-swapped effortlessly, but its position, hierarchy, and skills remain concrete.
+In other platforms, nodes are API tasks. In Starfire, a node is a **Workspace**: an organizational role such as Developer PM, Marketing Lead, or QA. The underlying model and runtime can change without breaking the team's structure.
 
 ### 🍱 Recursive Team Expansion (Fractal Architecture)
-Any workspace node can recursively expand into an entire sub-team. From the outside, the node still exposes a single A2A interface. Inside, a Team Lead coordinates with sub-agents invisibly. Start with an individual contributor, scale them into a department — all without rewiring your main canvas.
+Any workspace can expand into an internal sub-team while continuing to expose a single A2A interface externally. Start with one specialist, then scale that specialist into a department without changing upstream integrations.
 
 ### 🌐 The Org Chart IS the Topology
-There are zero edge-drawing wires on the Starfire canvas. Edges are inferred purely from the `parent_id` hierarchy. 
+There are zero edge-drawing wires on the Starfire canvas. Communication paths are inferred from `parent_id` hierarchy, which means topology and access policy stay aligned by default.
 - Siblings can talk to siblings.
 - Parents can delegate to children.
 - Children report up to parents.
 **The organizational structure intrinsically enforces your access control policies.**
 
 ### 🧠 Hierarchical Memory Architecture (HMA)
-Current agent memory frameworks (like Mem0 or MemU) use flat global vector databases, completely breaking organizational data silos. Starfire instead introduces **Topology-Aware Memory Isolation**:
+Starfire introduces **topology-aware memory isolation**:
 - **L1 (Local Memory):** Scratchpads strictly isolated to the individual agent.
 - **L2 (Team Shared Memory):** Retrievable only by a Team Lead and its direct children. Enforced by Row-Level Security.
 - **L3 (Corporate Memory):** Top-down global knowledge bases (like employee handbooks) managed by the Root Workspace.
 
 ### 📈 Full Observability & Hierarchical Human-in-the-Loop
-Every LLM call across your entire distributed team is traced automatically via a unified **Langfuse** instance. More importantly, when an agent detects a high-risk action, it pauses and escalates *up its org chart*. If the parent doesn't have authority, it goes up until the Root Workspace prompts a human on the UI for final approval.
+Every LLM call across your distributed team can be traced through **Langfuse**. When a workspace detects a high-risk action, it can pause and escalate up the org chart until an authorized parent or human approves the action.
 
-### 🛡️ Tiered Security & Docker/EC2 Isolation
+### 🛡️ Tiered Security & Runtime Isolation
 Different roles need different privileges. Starfire natively isolates workspaces:
 - **Tier 1:** Text/Data Processing (Network Isolated, Read-only Docker)
-- **Tier 2:** Browser Access (Packaged with Playwright)
-- **Tier 3:** Desktop Operations (Xvfb Virtual Display + VNC)
-- **Tier 4:** Full Privileges (Dedicated Kernel-Isolated EC2 VMs)
+- **Tier 2:** Standard Workspace (resource-limited Docker + shared `/workspace` mount)
+- **Tier 3:** Privileged Operations (`--privileged` + host PID, Docker network)
+- **Tier 4:** Full Host Access (privileged + host PID + host network + Docker socket)
 
 ---
 
@@ -98,7 +149,7 @@ Starfire has extensive, production-ready documentation organized by layer:
 - 🔌 **[Protocols & APIs](./docs/api-protocol/)**
   - [A2A Communication Protocol](./docs/api-protocol/a2a-protocol.md) | [Hierarchy Routing Rules](./docs/api-protocol/communication-rules.md)
 - 🤖 **[Workspace Agent Runtime](./docs/agent-runtime/)**
-  - [Python Runtime](./docs/agent-runtime/workspace-runtime.md) | [Skills Ecosystem](./docs/agent-runtime/skills.md) | [Team Expansion Mechanics](./docs/agent-runtime/team-expansion.md)
+  - [Runtime Overview](./docs/agent-runtime/workspace-runtime.md) | [Skills Ecosystem](./docs/agent-runtime/skills.md) | [Team Expansion Mechanics](./docs/agent-runtime/team-expansion.md)
 - 🛠️ **[Development & Deployment](./docs/development/)**
   - [Build & Run Order](./docs/development/build-order.md) | [Observability](./docs/development/observability.md)
 - 🎨 **[Frontend Canvas](./docs/frontend/)**
@@ -143,7 +194,7 @@ Navigate to `http://localhost:3000`, open the template palette, and deploy your 
 Starfire is a thoroughly distributed system:
 1. **Canvas (Next.js 15):** The React Flow visual canvas. Communicates via HTTP + WebSockets.
 2. **Platform (Go / Gin):** The Control Plane. Handles workspace CRUD, A2A discovery, registry liveness checks (Redis), and event streaming (Postgres pub/sub).
-3. **Workspace Runtime (Python):** The execution engine for individual agents. Powered by Deep Agents + LangGraph, wrapped in a standardized A2A SDK.
+3. **Workspace Runtime (pluggable adapters):** A unified runtime layer for LangGraph, DeepAgents, Claude Code, CrewAI, AutoGen, and OpenClaw, all exposed as standardized A2A workspaces.
 
 > *Workspaces talk directly to one another via JSON-RPC 2.0. The platform is never in the data path of an agent conversation.*
 

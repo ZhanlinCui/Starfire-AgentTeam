@@ -1,6 +1,6 @@
 # OSS AI Agent Project Growth Trajectories — Technical Research Report
 
-**Author:** Technical Researcher, Agent Molecule  
+**Author:** Technical Researcher, Starfire  
 **Date:** 2026-04-07  
 **Status:** Final  
 **Scope:** AutoGen, CrewAI, LangGraph, n8n, Flowise, Langflow, Open Interpreter, SWE-agent
@@ -415,7 +415,7 @@ Langflow deployed an in-browser playground where users could build and run flows
 
 ### 4.2 The n8n Licensing Controversy — A Case Study
 
-n8n made the most interesting licensing decision in this cohort, and it has direct relevance to Agent Molecule.
+n8n made the most interesting licensing decision in this cohort, and it has direct relevance to Starfire.
 
 **Timeline:**
 1. **2019:** Launched as open-source with a custom "n8n Fair Source License" — source-available but restricted commercial hosting.
@@ -438,7 +438,7 @@ AWS/GCP/Azure could take n8n, host it as a service, and capture revenue without 
 
 This was a pragmatic compromise that kept the community largely intact.
 
-**Lesson for Agent Molecule:**
+**Lesson for Starfire:**
 MIT/Apache for the core runtime is the right call for ecosystem growth. If a hosted/cloud version is introduced, n8n's Community/Enterprise split is the validated model — not the initial custom license approach.
 
 ### 4.3 The VC-License Pattern
@@ -519,9 +519,9 @@ Based on public statements and observable behavior, the metrics these projects t
 
 ---
 
-## 6. Synthesis: What Agent Molecule Should Take From This
+## 6. Synthesis: What Starfire Should Take From This
 
-Based on this analysis, the highest-leverage actions for Agent Molecule's OSS launch:
+Based on this analysis, the highest-leverage actions for Starfire's OSS launch:
 
 ### 6.1 Pre-Launch (Preparation)
 1. **Build the 60-second demo first.** The demo is the product. Film it before writing docs. If the demo isn't viscerally impressive in 60 seconds, the architecture doesn't matter.
@@ -536,17 +536,17 @@ Based on this analysis, the highest-leverage actions for Agent Molecule's OSS la
 
 ### 6.3 License
 - **MIT for the core platform.** No ambiguity, no asterisks, no controversy.
-- **Proprietary for Agent Molecule Cloud** (if/when launched) — the n8n Community/Enterprise split model.
+- **Proprietary for Starfire Cloud** (if/when launched) — the n8n Community/Enterprise split model.
 - Do NOT launch with a custom license. It creates friction and suggests complexity.
 
 ### 6.4 Documentation
 - **Adopt Diataxis structure from day one.** Tutorial / How-to / Explanation / Reference — separate pages.
-- **Interactive playground > static docs.** A hosted demo where users can try Agent Molecule without installing anything is the single highest-ROI investment.
+- **Interactive playground > static docs.** A hosted demo where users can try Starfire without installing anything is the single highest-ROI investment.
 - **Version the docs with the releases.** Most common issue across all 8 projects.
 
 ### 6.5 Community
 - **Discord first.** Set up structured channels: `#get-started`, `#showcase`, `#bugs`, `#feature-requests`.
-- **Community examples repo from week 1.** `agent-molecule-examples/` with 5 well-documented use cases.
+- **Community examples repo from week 1.** `starfire-examples/` with 5 well-documented use cases.
 - **Discourse forum for SEO capture at 6-month mark.** Once Discord hits 5k members, start migrating searchable knowledge to Discourse.
 - **The contribution leaderboard** (CrewAI's model) is worth implementing from month 2.
 
@@ -576,5 +576,5 @@ Based on this analysis, the highest-leverage actions for Agent Molecule's OSS la
 
 ---
 
-*Report compiled by Technical Researcher, Agent Molecule — April 2026*  
+*Report compiled by Technical Researcher, Starfire — April 2026*  
 *All star counts are estimates based on observable public data and community reports at time of analysis.*

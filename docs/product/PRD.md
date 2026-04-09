@@ -113,7 +113,7 @@
 | **D2** | **递归团队展开** | 扁平节点列表，无嵌套 | 任何节点可展开为子团队，子团队可再展开，无限递归 |
 | **D3** | **组织即拓扑** | 手动连线 / 白名单 | 拖入嵌套自动建立通信关系，zero wiring |
 | **D4** | **分布式 A2A 通信** | 单进程内部调用 | 节点可分布在不同机器，通过 A2A JSON-RPC 2.0 直连 |
-| **D5** | **4 级安全隔离** | 所有节点共享同一运行时 | Tier 1-3 容器隔离，Tier 4 独立 EC2 VM 内核隔离 |
+| **D5** | **4 级安全隔离** | 所有节点共享同一运行时 | Tier 1-3 容器隔离，Tier 4 提供完整宿主机访问能力 |
 | **D6** | **层级审批链** | 扁平人工介入 | 智能体沿组织层级逐级上报，直到根节点暴露给人类 |
 | **D7** | **跨 Workspace 全链可观测** | 单节点 tracing | 统一 Langfuse 实例，跨所有 Workspace 的 LLM 调用链 |
 | **D8** | **Bundle 可分发/可交易** | 无便携格式 | `.bundle.json` 标准格式，未来支持市场化售卖 |
@@ -270,9 +270,9 @@
 | ID | 功能点 | 优先级 | 描述 |
 |----|--------|--------|------|
 | F8.1 | Tier 1 — 无特权容器 | P0 | 只读文件系统，纯文本/数据处理 |
-| F8.2 | Tier 2 — 浏览器容器 | P1 | 容器内预装 Playwright，支持网页操作 |
-| F8.3 | Tier 3 — 桌面容器 | P2 | Xvfb 虚拟桌面 + 可选 VNC，支持 Computer Use 类智能体 |
-| F8.4 | Tier 4 — 独立 VM | P2 | EC2 VM，内核级隔离，支持 sudo、任意代码执行 |
+| F8.2 | Tier 2 — 标准容器 | P0 | 资源受限 Docker + `/workspace` 挂载，适合大多数开发/协调型智能体 |
+| F8.3 | Tier 3 — 特权容器 | P1 | `--privileged` + host PID，保留 Docker 网络，适合高权限开发操作 |
+| F8.4 | Tier 4 — 完整宿主机访问 | P2 | privileged + host PID + host network + Docker socket，适合 DevOps / orchestrator 类工作区 |
 | F8.5 | 秘钥加密存储 | P0 | AES-256 应用层加密，`SECRETS_ENCRYPTION_KEY` 环境变量管理密钥 |
 | F8.6 | 代码沙箱 | P2 | Tier 3+ 的代码执行在一次性容器中运行（网络禁用、内存限制、执行后销毁） |
 
@@ -558,7 +558,7 @@ Frontend Agent 收到拒绝，采取替代方案 ✅
 | Workspace 间认证 (Post-MVP) | Platform 签发短效签名令牌 |
 | 秘钥存储 | Postgres + AES-256 应用层加密 |
 | Bundle 安全 | 不序列化任何凭据 |
-| Tier 4 隔离 | 独立 EC2 VM，内核级别隔离 |
+| Tier 4 隔离 | 完整宿主机访问级别的 Docker 配置 |
 | Docker 网络 | 所有容器在 `agent-molecule-net` 私有网络内 |
 
 ### 8.4 可扩展性
@@ -611,7 +611,7 @@ Frontend Agent 收到拒绝，采取替代方案 ✅
 | 周次 | 里程碑 | 交付物 |
 |------|--------|--------|
 | W15-16 | Tier 2-3 部署 | Playwright / Xvfb 容器配置 |
-| W17-18 | Tier 4 EC2 部署 | EC2 Provisioner + 秘钥安全传递 |
+| W17-18 | Tier 4 Full-Host 部署 | Host network / Docker socket / 特权运行时策略 |
 | W18-19 | 代码沙箱 | Tier 3+ Docker-in-Docker 沙箱 |
 | W19-20 | SaaS 准备 | Auth 抽象层 + org_id 扩展 + Stripe 集成点 |
 
@@ -704,7 +704,7 @@ Frontend Agent 收到拒绝，采取替代方案 ✅
 ---
 
 > [!NOTE]
-> 本 PRD 基于现有 Agent Molecule 架构文档编写，覆盖了从技术架构到产品体验的完整产品定义。所有功能需求均与现有代码库中的设计文档对齐，并在此基础上增加了用户旅程、验收标准和商业化路径。
+> 本 PRD 基于现有 Starfire 架构文档编写，覆盖了从技术架构到产品体验的完整产品定义。所有功能需求均与现有代码库中的设计文档对齐，并在此基础上增加了用户旅程、验收标准和商业化路径。
 
 ---
 

@@ -56,7 +56,7 @@ NEXT_PUBLIC_PLATFORM_URL=http://localhost:8080
 NEXT_PUBLIC_WS_URL=ws://localhost:8080/ws
 ```
 
-### Workspace (Python)
+### Workspace Runtime
 
 ```
 WORKSPACE_ID=           # assigned by platform on provision
@@ -81,7 +81,7 @@ Node.js         22+
 Next.js         15
 React Flow      12   (@xyflow/react)
 a2a-sdk         0.3+ (A2A server SDK, install with a2a-sdk[http-server])
-langfuse        2.x  (self-hosted Docker in current compose files)
+langfuse        3.x  (self-hosted Docker)
 Postgres        16
 Redis           7
 Docker Compose  2.x
@@ -94,7 +94,7 @@ Docker Compose  2.x
 ```bash
 cd platform && go test -race ./...               # Go tests with race detection (358 tests)
 cd canvas && npm test                            # Vitest tests (188 tests)
-cd workspace-template && python -m pytest -v     # Python runtime tests (148 tests)
+cd workspace-template && python -m pytest -v     # Workspace runtime tests (148 tests)
 ```
 
 ### Integration Tests

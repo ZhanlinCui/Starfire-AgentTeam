@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-Agent Molecule is a platform for orchestrating AI agent workspaces that form an organizational hierarchy. Workspaces register with a central platform, communicate via A2A protocol, and are visualized on a drag-and-drop canvas.
+Starfire is a platform for orchestrating AI agent workspaces that form an organizational hierarchy. Workspaces register with a central platform, communicate via A2A protocol, and are visualized on a drag-and-drop canvas.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ Agent Molecule is a platform for orchestrating AI agent workspaces that form an 
 Canvas (Next.js :3000) ←WebSocket→ Platform (Go :8080) ←HTTP→ Postgres + Redis
                                                                   ↑
                                    Workspace A ←──A2A──→ Workspace B
-                                   (Python agents)
+                                   (pluggable runtimes)
                                         ↑ register/heartbeat ↑
                                         └───── Platform ─────┘
 ```
@@ -20,7 +20,7 @@ Canvas (Next.js :3000) ←WebSocket→ Platform (Go :8080) ←HTTP→ Postgres +
 Three main components:
 - **Platform** (`platform/`): Go/Gin control plane — workspace CRUD, registry, discovery, WebSocket hub, liveness monitoring
 - **Canvas** (`canvas/`): Next.js 15 + React Flow (@xyflow/react v12) + Zustand + Tailwind — visual workspace graph
-- **Workspace Runtime** (`workspace-template/`): Python template — LangGraph agent wrapped in A2A server, registers with platform, sends heartbeats
+- **Workspace Runtime** (`workspace-template/`): A2A runtime layer with pluggable adapters — LangGraph, DeepAgents, Claude Code, CrewAI, AutoGen, OpenClaw — registers with platform and sends heartbeats
 
 ## Build & Run Commands
 
@@ -36,7 +36,7 @@ cd platform
 go build ./cmd/server       # Build
 go run ./cmd/server          # Run (requires Postgres + Redis running)
 ```
-Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT` (defaults: postgres://dev:dev@localhost:5432/agentmolecule?sslmode=disable, redis://localhost:6379, 8080).
+Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT` (defaults: postgres://dev:dev@localhost:5432/agentmolecule?sslmode=prefer, redis://localhost:6379, 8080).
 
 ### Canvas (Next.js)
 ```bash

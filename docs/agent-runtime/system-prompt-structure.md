@@ -104,7 +104,7 @@ Then when Developer PM receives "build the login feature", it naturally delegate
 
 ## Human-in-the-Loop (Hierarchical Approval)
 
-LangGraph natively supports pausing an agent to ask for human approval. Agent Molecule extends this with **hierarchical escalation** — an agent can pause and escalate approval up the workspace hierarchy.
+LangGraph natively supports pausing an agent to ask for human approval. Starfire extends this with **hierarchical escalation** — an agent can pause and escalate approval up the workspace hierarchy.
 
 ### How It Works
 

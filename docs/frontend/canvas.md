@@ -143,7 +143,7 @@ Global notification system (`showToast()` callable from any component). Context 
 
 ### Template Palette
 
-Left sidebar toggled by the grid icon (top-left). Lists all available workspace templates from `GET /templates` with name, description, tier badge, and skill list. Click a template to deploy a new workspace. Includes "Import Agent Folder" button to upload any agent framework's folder (OpenClaw, Claude Code, Codex) as a new template.
+Left sidebar toggled by the grid icon (top-left). Lists all available workspace templates from `GET /templates` with name, description, tier badge, and skill list. Click a template to deploy a new workspace. Includes "Import Agent Folder" button to upload an agent framework folder as a new template (for example OpenClaw- or Claude Code-style project layouts).
 
 ### Right-Click Context Menu
 

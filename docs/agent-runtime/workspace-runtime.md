@@ -1,12 +1,14 @@
-# Workspace Runtime (LangGraph / Python)
+# Workspace Runtime
 
-> **New:** CLI runtimes (Claude Code, Codex, Ollama) are also supported. See [CLI Runtime](./cli-runtime.md).
+> Starfire supports both LangGraph-based and adapter-based runtimes. For the runtime matrix and non-LangGraph adapters, see [CLI Runtime](./cli-runtime.md).
 
 ## workspace-template/
 
-The generic Python runtime. Every deployed workspace is a container instance of this image, injected with a config at startup via environment variables.
+The generic workspace runtime image. Every deployed workspace is a container instance of this image, injected with a config at startup via environment variables.
 
 The template contains **no business logic**. All business logic lives in `workspace-configs-templates/`. The template reads config files at startup — it does not know what kind of workspace it is until it loads config.
+
+The default runtime path is LangGraph/DeepAgents, but the same image also supports pluggable adapters such as Claude Code, CrewAI, AutoGen, and OpenClaw via the adapter registry in `workspace-template/adapters/`.
 
 ### Environment Variables
 
@@ -79,7 +81,7 @@ skills/loader.py loads workspace skills + plugin skills (deduplicated by ID)
 coordinator.py fetches parent's shared context (if PARENT_ID set)
       |
       v
-agent.py creates LangGraph ReAct agent with model + all tools
+runtime adapter initializes executor (LangGraph by default)
       |
       v
 main.py wraps agent in A2A server (a2a-sdk)
@@ -108,9 +110,10 @@ Workspace is live, discoverable, and receiving peer events
 |------|------|
 | `main.py` | Entry point — wraps agent in A2A server via `a2a-sdk` |
 | `config.py` | Loads workspace config from `WORKSPACE_CONFIG_PATH` |
-| `agent.py` | Creates the LangGraph ReAct agent with model + skills + tools |
+| `agent.py` | Creates the default LangGraph ReAct agent with model + skills + tools |
 | `coordinator.py` | Team coordination (get_children, get_parent_context, route_task) |
 | `a2a_executor.py` | Bridges deepagent (LangGraph) to A2A request/response |
+| `adapters/` | Pluggable runtime adapters for Claude Code, CrewAI, AutoGen, DeepAgents, OpenClaw, etc. |
 | `skills/loader.py` | Loads skill packages (SKILL.md + tools) from config |
 | `heartbeat.py` | Sends 30s heartbeat to platform registry |
 | `events.py` | Subscribes to platform WebSocket, handles peer events |
@@ -190,7 +193,7 @@ class LangGraphA2AExecutor(AgentExecutor):
         await event_queue.enqueue_event(new_agent_text_message(final_content or "(no response)"))
 ```
 
-**Key distinction:** ACP (Agent Client Protocol) connects agents to editors/IDEs (Zed, Claude Code). A2A (Agent-to-Agent) connects workspaces to each other. Agent Molecule uses A2A for inter-workspace communication.
+**Key distinction:** ACP (Agent Client Protocol) connects agents to editors/IDEs (Zed, Claude Code). A2A (Agent-to-Agent) connects workspaces to each other. Starfire uses A2A for inter-workspace communication.
 
 ## Delegation Failure Handling
 

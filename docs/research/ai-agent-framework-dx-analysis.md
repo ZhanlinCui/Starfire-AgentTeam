@@ -1,5 +1,5 @@
 # AI Agent Framework: Documentation & Developer Experience Analysis
-**Prepared by:** Technical Researcher, Agent Molecule  
+**Prepared by:** Technical Researcher, Starfire  
 **Date:** 2026-04-07  
 **Scope:** AutoGen (Microsoft), CrewAI, LangGraph, n8n, Flowise, Langflow, Open Interpreter, SWE-agent
 
@@ -9,7 +9,7 @@
 
 Eight leading open-source AI agent frameworks were evaluated across four dimensions: documentation platform/tooling, onboarding patterns, GitHub star growth and community tactics, and standout DX features or notable gaps. The field divides cleanly into two camps: **code-first frameworks** (AutoGen, CrewAI, LangGraph, Open Interpreter, SWE-agent) and **low-code/visual platforms** (n8n, Flowise, Langflow). Documentation quality and DX maturity vary significantly — CrewAI and LangGraph lead on onboarding polish, while SWE-agent and Open Interpreter lag on structured learning paths.
 
-**Key findings for Agent Molecule:**
+**Key findings for Starfire:**
 - Mintlify is the emerging winner for code-first agent docs (CrewAI, Langflow, Open Interpreter all use it)
 - CLI-first onboarding (`crewai create crew`) dramatically reduces time-to-first-run
 - Discord is near-universal; community differentiation now comes from structured programming (office hours, hackathons, office-hours-as-content)
@@ -463,7 +463,7 @@ Princeton NLP's SWE-agent has documentation that reflects its academic origins:
 
 ---
 
-## Cross-Cutting Patterns & Recommendations for Agent Molecule
+## Cross-Cutting Patterns & Recommendations for Starfire
 
 ### Documentation Platform Trends
 **Mintlify is winning the code-first agent space.** Three of the eight frameworks (CrewAI, Langflow, Open Interpreter) use it, and the results are consistently better than MkDocs or GitBook alternatives:
@@ -471,7 +471,7 @@ Princeton NLP's SWE-agent has documentation that reflects its academic origins:
 - Auto-generated changelogs reduce documentation debt
 - OpenAPI integration is table-stakes for cloud products
 
-**Recommendation:** Use Mintlify for Agent Molecule's docs. Avoid GitBook (limited interactivity) and raw MkDocs (high maintenance overhead without strong theming).
+**Recommendation:** Use Mintlify for Starfire's docs. Avoid GitBook (limited interactivity) and raw MkDocs (high maintenance overhead without strong theming).
 
 ### Onboarding Pattern Trends
 1. **CLI scaffolding is the highest-leverage onboarding investment** — CrewAI's `crewai create crew` is the clearest example. A 60-second scaffold that produces a working, opinionated project structure reduces abandonment more than any tutorial.
@@ -486,7 +486,7 @@ Princeton NLP's SWE-agent has documentation that reflects its academic origins:
 - **Benchmark maintenance** (SWE-bench, AgentBench) is an academic community flywheel — less relevant for commercial products but powerful for researcher mindshare
 
 ### The Universal Gap: Multi-Agent Debugging
-**Every framework in this analysis has a weak multi-agent debugging story.** This is Agent Molecule's biggest opportunity:
+**Every framework in this analysis has a weak multi-agent debugging story.** This is Starfire's biggest opportunity:
 
 - AutoGen: no native trace viewer; Studio doesn't map to production code
 - CrewAI: crew-level logs but no cross-agent trace visualization
@@ -494,10 +494,10 @@ Princeton NLP's SWE-agent has documentation that reflects its academic origins:
 - n8n: execution logs per node but no cross-agent observability
 - Flowise/Langflow: minimal
 
-**Agent Molecule's canvas-native approach** — where agent hierarchy, communication, and state are all visible on the same canvas — is a genuine differentiated answer to this problem. It should be the centerpiece of the DX narrative.
+**Starfire's canvas-native approach** — where agent hierarchy, communication, and state are all visible on the same canvas — is a genuine differentiated answer to this problem. It should be the centerpiece of the DX narrative.
 
 ### Positioning Recommendation
-Agent Molecule sits at an intersection no current framework owns:
+Starfire sits at an intersection no current framework owns:
 - **Visual canvas** (like n8n/Flowise) BUT for **code-first multi-agent** teams (like AutoGen/LangGraph)
 - **Google A2A protocol** for inter-agent communication (vs. proprietary APIs everywhere else)
 - **Org-chart-native hierarchy** with memory scoping (unique)
@@ -505,11 +505,11 @@ Agent Molecule sits at an intersection no current framework owns:
 
 The DX pitch should be: _"See your entire agent organization running in real-time. Debug across agents like you debug across microservices."_
 
-## Agent Molecule vs. CrewAI / LangGraph / AutoGen
+## Starfire vs. CrewAI / LangGraph / AutoGen
 
 After comparing the current repository against the three major frameworks, the clearest framing is:
 
-**Agent Molecule is not a competing agent framework.** It is a **multi-workspace orchestration platform** with:
+**Starfire is not a competing agent framework.** It is a **multi-workspace orchestration platform** with:
 - a Go control plane for registry, liveness, activity logs, approvals, memories, and WebSocket fanout
 - a Python workspace runtime with pluggable adapters
 - a Canvas UI for hierarchy, state, traces, terminal access, and operator intervention
@@ -519,18 +519,18 @@ That means the comparison is asymmetric:
 - **LangGraph** is the closest match for the *runtime substrate* because of stateful execution, checkpoints, and human-in-the-loop behavior
 - **AutoGen** is the closest match for the *conversational multi-agent* model
 
-The important difference is that Agent Molecule elevates those ideas into a **productized control surface**. In other words, the frameworks answer "how should agents run?", while Agent Molecule answers "how do humans operate, inspect, and govern an organization of agents?"
+The important difference is that Starfire elevates those ideas into a **productized control surface**. In other words, the frameworks answer "how should agents run?", while Starfire answers "how do humans operate, inspect, and govern an organization of agents?"
 
 ### Practical takeaway
 - If you are evaluating **execution semantics**, LangGraph is the best baseline
 - If you are evaluating **role-based delegation**, CrewAI is the best baseline
 - If you are evaluating **multi-agent dialogue**, AutoGen is the best baseline
-- If you are evaluating **operability across many workspaces**, Agent Molecule is the distinct category
+- If you are evaluating **operability across many workspaces**, Starfire is the distinct category
 
 ### Internal positioning sentence
 Use this sentence when describing the project externally:
 
-> Agent Molecule is an agent workspace operating system: LangGraph, CrewAI, and AutoGen are optional execution backends, while the platform provides control plane, observability, and human-in-the-loop governance.
+> Starfire is an agent workspace operating system: LangGraph, CrewAI, and AutoGen are optional execution backends, while the platform provides control plane, observability, and human-in-the-loop governance.
 
 ---
 

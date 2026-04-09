@@ -10,7 +10,7 @@ The Go backend is the **control plane**. It does not run agent logic — it mana
 - Hierarchy-based peer discovery and access control
 - Structure event log (append-only change history)
 - WebSocket broadcaster (push events to canvas in real time)
-- Workspace provisioner (spin up Docker containers or EC2 VMs)
+- Workspace provisioner (spin up tiered Docker-based workspaces)
 - Bundle import/export
 
 ## Caller Identification
@@ -55,7 +55,7 @@ Newly created workspaces also receive an `awareness_namespace` persisted on the 
 | `DELETE` | `/workspaces/:id/secrets/:key` | Delete a secret |
 | `GET` | `/workspaces/:id/model` | Get current model override from secrets |
 
-Secrets are stored in `workspace_secrets` table as plaintext bytes for MVP (AES-256 encryption planned for Phase 14). The provisioner reads secrets at container deploy time and injects them as environment variables. Common keys: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `MODEL_PROVIDER`, `AWARENESS_URL`, `AWARENESS_NAMESPACE`.
+Secrets are stored in `workspace_secrets` as encrypted bytes when `SECRETS_ENCRYPTION_KEY` is configured, using AES-256-GCM at the application layer. In development, if the key is not set, the platform falls back to plaintext mode for compatibility. The provisioner decrypts secrets at container deploy time and injects them as environment variables. Common keys: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `MODEL_PROVIDER`, `AWARENESS_URL`, `AWARENESS_NAMESPACE`.
 
 ### Terminal
 

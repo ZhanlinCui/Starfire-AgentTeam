@@ -4,7 +4,7 @@ The open-source project has **no auth**. This is intentional — the project fol
 
 ## How It Works
 
-When productizing as SaaS, a separate `agent-molecule-cloud` repo wraps this project and adds:
+When productizing as SaaS, a separate `starfire-cloud` repo wraps this project and adds:
 
 | Feature | Technology |
 |---------|-----------|

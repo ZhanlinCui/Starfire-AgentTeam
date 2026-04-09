@@ -26,9 +26,9 @@ The platform consists of four distinct systems:
 
        A2A HTTP (JSON-RPC 2.0) — direct workspace-to-workspace
 +-----------------------------------------------------------+
-|  workspace-template/  Python agent runtime                 |
-|  Deep Agents + LangGraph + deepagents-acp (A2A wrapper)    |
-|  One container instance per running workspace              |
+|  workspace-template/  pluggable workspace runtime          |
+|  LangGraph / DeepAgents / Claude Code / CrewAI / AutoGen   |
+|  / OpenClaw + a2a-sdk                                      |
 +-----------------------------------------------------------+
        |
 +------v----------------------------------------------------+
@@ -58,14 +58,14 @@ Plugins inject rules and skills into all agents automatically. Workspace-specifi
 - **Canvas <-> Platform:** HTTP REST + WebSocket for real-time events
 - **Platform <-> Postgres:** Source of truth for registry, hierarchy, events
 - **Platform <-> Redis:** Ephemeral state — liveness, caching, pub/sub
-- **Platform -> Workspace:** Provisioning (Docker/EC2), discovery
+- **Platform -> Workspace:** Provisioning (tiered Docker deployment), discovery
 - **Workspace <-> Workspace:** Direct A2A (JSON-RPC 2.0) — platform not in path
 - **Workspace -> Langfuse:** Automatic LLM tracing
 
 ## Folder Structure
 
 ```
-agent-molecule/
+starfire/
 |
 +-- docker-compose.yml               # full local dev stack
 +-- docker-compose.infra.yml         # postgres, redis, langfuse only
@@ -83,6 +83,6 @@ agent-molecule/
 ## Related Docs
 
 - [Platform API](../api-protocol/platform-api.md) — Go backend details
-- [Workspace Runtime](../agent-runtime/workspace-runtime.md) — Python runtime details
+- [Workspace Runtime](../agent-runtime/workspace-runtime.md) — Runtime layer details
 - [Canvas UI](../frontend/canvas.md) — Next.js frontend details
 - [Technology Choices](./technology-choices.md) — Why each piece was chosen
