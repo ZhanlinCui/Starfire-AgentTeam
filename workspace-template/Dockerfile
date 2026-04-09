@@ -2,15 +2,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install Node.js (needed for CLI runtimes like claude-code, openclaw)
-RUN apt-get update && apt-get install -y --no-install-recommends curl git && \
+# Install Node.js, git, gh CLI in a single layer to minimize image size
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl git ca-certificates && \
+    # Node.js 22
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
-    # GitHub CLI for PR creation
-    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
+    # GitHub CLI
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
     apt-get update && apt-get install -y --no-install-recommends gh && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    # Cleanup apt caches and temp files
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Create non-root user (claude --dangerously-skip-permissions refuses root)
 RUN useradd -m -s /bin/bash agent
@@ -37,7 +43,6 @@ RUN mkdir -p /workspace /plugins /home/agent/.claude /home/agent/.config /home/a
 
 VOLUME /configs
 VOLUME /workspace
-VOLUME /plugins
 
 EXPOSE 8000
 RUN chmod +x /app/entrypoint.sh

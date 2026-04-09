@@ -105,7 +105,7 @@ cd mcp-server
 npm install && npm run build   # Build MCP server
 node dist/index.js             # Run (stdio transport)
 ```
-Exposes 20 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
+Exposes 52 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Includes workspace CRUD, plugins (install/uninstall/list), global secrets, pause/resume, org import, A2A chat, approvals, memory, files, config, discovery, bundles, templates, traces, and activity logs. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
 
 ### CI Pipeline
 GitHub Actions (`.github/workflows/ci.yml`) runs on push to main and PRs:
