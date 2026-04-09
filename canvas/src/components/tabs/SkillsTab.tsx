@@ -26,6 +26,9 @@ interface PluginInfo {
   skills: string[];
 }
 
+// Delay before reloading installed plugins after install/uninstall (workspace restarts)
+const PLUGIN_RELOAD_DELAY_MS = 15_000;
+
 export function SkillsTab({ data }: Props) {
   const capability = summarizeWorkspaceCapabilities(data);
   const skills = useMemo(() => extractSkills(data.agentCard), [data.agentCard]);
@@ -70,7 +73,7 @@ export function SkillsTab({ data }: Props) {
       await api.post(`/workspaces/${workspaceId}/plugins`, { name: pluginName });
       showToast(`Installed ${pluginName} — restarting workspace`, "success");
       // Reload after restart settles
-      setTimeout(() => loadInstalled(), 15000);
+      setTimeout(() => loadInstalled(), PLUGIN_RELOAD_DELAY_MS);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Install failed", "error");
     } finally {
@@ -84,7 +87,7 @@ export function SkillsTab({ data }: Props) {
       await api.del(`/workspaces/${data.id}/plugins/${pluginName}`);
       showToast(`Removed ${pluginName} — restarting workspace`, "success");
       setInstalled((prev) => prev.filter((p) => p.name !== pluginName));
-      setTimeout(() => loadInstalled(), 15000);
+      setTimeout(() => loadInstalled(), PLUGIN_RELOAD_DELAY_MS);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Uninstall failed", "error");
     } finally {

@@ -38,14 +38,21 @@ class ClaudeCodeAdapter(BaseAdapter):
         if not plugins.rules and not plugins.skill_dirs:
             return
 
-        # Append rules to CLAUDE.md
+        # Append rules to CLAUDE.md (idempotent — skip if already injected)
         if plugins.rules:
             claude_md = os.path.join(config.config_path, "CLAUDE.md")
-            with open(claude_md, "a") as f:
-                f.write("\n\n# Plugin Rules\n")
-                for rule in plugins.rules:
-                    f.write(f"\n{rule}\n")
-            logger.info("Claude Code: injected %d plugin rules into CLAUDE.md", len(plugins.rules))
+            os.makedirs(os.path.dirname(claude_md), exist_ok=True)
+            existing = ""
+            if os.path.exists(claude_md):
+                existing = open(claude_md).read()
+            if "# Plugin Rules" not in existing:
+                with open(claude_md, "a") as f:
+                    f.write("\n\n# Plugin Rules\n")
+                    for rule in plugins.rules:
+                        f.write(f"\n{rule}\n")
+                logger.info("Claude Code: injected %d plugin rules into CLAUDE.md", len(plugins.rules))
+            else:
+                logger.info("Claude Code: plugin rules already present in CLAUDE.md, skipping")
 
         # Copy plugin skills into /configs/skills/ for hot-reload
         skills_dst = os.path.join(config.config_path, "skills")

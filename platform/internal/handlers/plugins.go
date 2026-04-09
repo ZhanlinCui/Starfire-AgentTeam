@@ -21,6 +21,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// validatePluginName ensures the name is safe (no path traversal).
+func validatePluginName(name string) error {
+	if name == "" {
+		return fmt.Errorf("plugin name is required")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid plugin name: must not contain path separators or '..'")
+	}
+	if name != filepath.Base(name) {
+		return fmt.Errorf("invalid plugin name")
+	}
+	return nil
+}
+
 // PluginsHandler manages the plugin registry and per-workspace plugin installation.
 type PluginsHandler struct {
 	pluginsDir  string         // host path to plugins/ registry
@@ -86,43 +100,19 @@ func (h *PluginsHandler) ListInstalled(c *gin.Context) {
 
 	for _, name := range strings.Split(output, "\n") {
 		name = strings.TrimSpace(name)
-		if name == "" {
+		if name == "" || validatePluginName(name) != nil {
 			continue
 		}
-		// Try to read manifest from container
+		// Try to read manifest from container (safe: name is validated)
 		manifestOutput, err := h.execInContainer(ctx, containerName, []string{
-			"cat", "/configs/plugins/" + name + "/plugin.yaml",
+			"cat", fmt.Sprintf("/configs/plugins/%s/plugin.yaml", name),
 		})
 		if err != nil || manifestOutput == "" {
 			plugins = append(plugins, pluginInfo{Name: name})
 			continue
 		}
-		var raw map[string]interface{}
-		if yaml.Unmarshal([]byte(manifestOutput), &raw) == nil {
-			info := pluginInfo{
-				Name:        name,
-				Version:     strDefault(raw, "version", ""),
-				Description: strDefault(raw, "description", ""),
-				Author:      strDefault(raw, "author", ""),
-			}
-			if tags, ok := raw["tags"].([]interface{}); ok {
-				for _, t := range tags {
-					if s, ok := t.(string); ok {
-						info.Tags = append(info.Tags, s)
-					}
-				}
-			}
-			if skills, ok := raw["skills"].([]interface{}); ok {
-				for _, s := range skills {
-					if str, ok := s.(string); ok {
-						info.Skills = append(info.Skills, str)
-					}
-				}
-			}
-			plugins = append(plugins, info)
-		} else {
-			plugins = append(plugins, pluginInfo{Name: name})
-		}
+		info := parseManifestYAML(name, []byte(manifestOutput))
+		plugins = append(plugins, info)
 	}
 
 	c.JSON(http.StatusOK, plugins)
@@ -137,6 +127,11 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := validatePluginName(body.Name); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -182,6 +177,11 @@ func (h *PluginsHandler) Uninstall(c *gin.Context) {
 	pluginName := c.Param("name")
 	ctx := c.Request.Context()
 
+	if err := validatePluginName(pluginName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	containerName := h.findRunningContainer(ctx, workspaceID)
 	if containerName == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace container not running"})
@@ -219,11 +219,16 @@ func (h *PluginsHandler) Uninstall(c *gin.Context) {
 // --- helpers ---
 
 func (h *PluginsHandler) readPluginManifest(pluginPath, fallbackName string) pluginInfo {
-	info := pluginInfo{Name: fallbackName}
 	data, err := os.ReadFile(filepath.Join(pluginPath, "plugin.yaml"))
 	if err != nil {
-		return info
+		return pluginInfo{Name: fallbackName}
 	}
+	return parseManifestYAML(fallbackName, data)
+}
+
+// parseManifestYAML parses plugin.yaml bytes into pluginInfo.
+func parseManifestYAML(fallbackName string, data []byte) pluginInfo {
+	info := pluginInfo{Name: fallbackName}
 	var raw map[string]interface{}
 	if yaml.Unmarshal(data, &raw) != nil {
 		return info
