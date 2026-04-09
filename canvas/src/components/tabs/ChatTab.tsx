@@ -36,7 +36,7 @@ async function loadMessagesFromDB(workspaceId: string): Promise<ChatMessage[]> {
       const reqMsg = reqParams?.message as Record<string, unknown> | undefined;
       const reqParts = reqMsg?.parts as Array<Record<string, unknown>> | undefined;
       const userText = reqParts?.[0]?.text as string || reqParts?.[0]?.kind === "text" && reqParts?.[0]?.text as string;
-      if (userText && typeof userText === "string" && !userText.startsWith("CRITICAL") && !userText.startsWith("[")) {
+      if (userText && typeof userText === "string") {
         messages.push(createMessage("user", userText));
       }
 
