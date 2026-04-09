@@ -56,19 +56,62 @@ export function FilesTab({ workspaceId }: Props) {
     return () => clearTimeout(successTimerRef.current);
   }, []);
 
-  const loadFiles = useCallback(async () => {
-    setLoading(true);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [loadingDir, setLoadingDir] = useState<string | null>(null);
+  const expandedDirsRef = useRef(expandedDirs);
+  expandedDirsRef.current = expandedDirs;
+
+  const loadFiles = useCallback(async (subPath = "", depth = 1) => {
+    if (!subPath) setLoading(true);
+    else setLoadingDir(subPath);
     try {
-      const data = await api.get<FileEntry[]>(`/workspaces/${workspaceId}/files?root=${encodeURIComponent(root)}`);
-      setFiles(data);
+      const params = new URLSearchParams({ root, depth: String(depth) });
+      if (subPath) params.set("path", subPath);
+      const data = await api.get<FileEntry[]>(`/workspaces/${workspaceId}/files?${params}`);
+      if (!subPath) {
+        // Root load — replace all
+        setFiles(data);
+      } else {
+        // Subfolder load — merge direct children only (preserve expanded grandchildren)
+        setFiles((prev) => {
+          const prefix = subPath + "/";
+          // Remove only direct children of this subPath (not deeper descendants)
+          const filtered = prev.filter((f) => {
+            if (!f.path.startsWith(prefix)) return true;
+            const remainder = f.path.slice(prefix.length);
+            // Keep entries that are nested deeper (grandchildren of other expanded dirs)
+            return remainder.includes("/");
+          });
+          const newFiles = data.map((f) => ({ ...f, path: subPath + "/" + f.path }));
+          return [...filtered, ...newFiles];
+        });
+      }
     } catch {
-      setFiles([]);
+      if (!subPath) setFiles([]);
     } finally {
       setLoading(false);
+      setLoadingDir(null);
     }
   }, [workspaceId, root]);
 
+  const toggleDir = useCallback((dirPath: string) => {
+    const wasExpanded = expandedDirsRef.current.has(dirPath);
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) {
+        next.delete(dirPath);
+      } else {
+        next.add(dirPath);
+      }
+      return next;
+    });
+    if (!wasExpanded) {
+      loadFiles(dirPath, 1);
+    }
+  }, [loadFiles]);
+
   useEffect(() => {
+    setExpandedDirs(new Set());
     loadFiles();
   }, [loadFiles]);
 
@@ -275,7 +318,7 @@ export function FilesTab({ workspaceId }: Props) {
               Clear
             </button>
           )}
-          <button onClick={loadFiles} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Refresh">
+          <button onClick={() => loadFiles()} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Refresh">
             ↻
           </button>
         </div>
@@ -343,6 +386,9 @@ export function FilesTab({ workspaceId }: Props) {
               selectedPath={selectedFile}
               onSelect={openFile}
               onDelete={root === "/configs" ? requestDeleteFile : () => {}}
+              expandedDirs={expandedDirs}
+              onToggleDir={toggleDir}
+              loadingDir={loadingDir}
             />
           )}
         </div>
@@ -429,8 +475,8 @@ export function FilesTab({ workspaceId }: Props) {
   );
 }
 
-// Tree building utilities
-interface TreeNode {
+// Tree building utilities — exported for testing
+export interface TreeNode {
   name: string;
   path: string;
   isDir: boolean;
@@ -438,7 +484,7 @@ interface TreeNode {
   size: number;
 }
 
-function buildTree(files: FileEntry[]): TreeNode[] {
+export function buildTree(files: FileEntry[]): TreeNode[] {
   const root: TreeNode[] = [];
   const dirMap = new Map<string, TreeNode>();
 
@@ -451,7 +497,11 @@ function buildTree(files: FileEntry[]): TreeNode[] {
   for (const file of sorted) {
     const parts = file.path.split("/");
     if (parts.length === 1) {
-      root.push({ name: parts[0], path: file.path, isDir: file.dir, children: [], size: file.size });
+      // Check if already exists in dirMap (e.g. created by a nested child earlier)
+      if (file.dir && dirMap.has(file.path)) continue;
+      const node: TreeNode = { name: parts[0], path: file.path, isDir: file.dir, children: [], size: file.size };
+      root.push(node);
+      if (file.dir) dirMap.set(file.path, node);
     } else {
       // Find or create parent dirs
       let parentChildren = root;
@@ -465,7 +515,14 @@ function buildTree(files: FileEntry[]): TreeNode[] {
         }
         parentChildren = dirNode.children;
       }
-      if (!file.dir) {
+      if (file.dir) {
+        const dirPath = file.path;
+        if (!dirMap.has(dirPath)) {
+          const dirNode: TreeNode = { name: parts[parts.length - 1], path: dirPath, isDir: true, children: [], size: 0 };
+          parentChildren.push(dirNode);
+          dirMap.set(dirPath, dirNode);
+        }
+      } else {
         parentChildren.push({
           name: parts[parts.length - 1],
           path: file.path,
@@ -480,19 +537,25 @@ function buildTree(files: FileEntry[]): TreeNode[] {
   return root;
 }
 
+interface TreeCallbacks {
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+  onDelete: (path: string) => void;
+  expandedDirs: Set<string>;
+  onToggleDir: (path: string) => void;
+  loadingDir: string | null;
+}
+
 function TreeView({
   nodes,
   selectedPath,
   onSelect,
   onDelete,
+  expandedDirs,
+  onToggleDir,
+  loadingDir,
   depth = 0,
-}: {
-  nodes: TreeNode[];
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onDelete: (path: string) => void;
-  depth?: number;
-}) {
+}: TreeCallbacks & { nodes: TreeNode[]; depth?: number }) {
   return (
     <div>
       {nodes.map((node) => (
@@ -502,6 +565,9 @@ function TreeView({
           selectedPath={selectedPath}
           onSelect={onSelect}
           onDelete={onDelete}
+          expandedDirs={expandedDirs}
+          onToggleDir={onToggleDir}
+          loadingDir={loadingDir}
           depth={depth}
         />
       ))}
@@ -514,16 +580,14 @@ function TreeItem({
   selectedPath,
   onSelect,
   onDelete,
+  expandedDirs,
+  onToggleDir,
+  loadingDir,
   depth,
-}: {
-  node: TreeNode;
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onDelete: (path: string) => void;
-  depth: number;
-}) {
-  const [expanded, setExpanded] = useState(depth < 2);
+}: TreeCallbacks & { node: TreeNode; depth: number }) {
   const isSelected = selectedPath === node.path;
+  const expanded = expandedDirs.has(node.path);
+  const isLoading = loadingDir === node.path;
 
   if (node.isDir) {
     return (
@@ -531,9 +595,9 @@ function TreeItem({
         <div
           className="group w-full flex items-center gap-1 px-2 py-0.5 text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => onToggleDir(node.path)}
         >
-          <span className="text-[9px] text-zinc-500 w-3">{expanded ? "▼" : "▶"}</span>
+          <span className="text-[9px] text-zinc-500 w-3">{isLoading ? "…" : expanded ? "▼" : "▶"}</span>
           <span className="text-[10px]">📁</span>
           <span className="text-[10px] text-zinc-400 flex-1">{node.name}</span>
           <button
@@ -552,6 +616,9 @@ function TreeItem({
             selectedPath={selectedPath}
             onSelect={onSelect}
             onDelete={onDelete}
+            expandedDirs={expandedDirs}
+            onToggleDir={onToggleDir}
+            loadingDir={loadingDir}
             depth={depth + 1}
           />
         )}

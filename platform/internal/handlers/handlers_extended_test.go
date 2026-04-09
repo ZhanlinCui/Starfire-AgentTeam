@@ -284,10 +284,10 @@ func TestExtended_DiscoverWithCallerID(t *testing.T) {
 		WithArgs("ws-target").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow("ws-target", nil))
 
-	// Discover handler looks up workspace name
-	mock.ExpectQuery("SELECT name FROM workspaces WHERE id =").
+	// Discover handler looks up workspace name + runtime
+	mock.ExpectQuery("SELECT COALESCE").
 		WithArgs("ws-target").
-		WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("Target Agent"))
+		WillReturnRows(sqlmock.NewRows([]string{"name", "runtime"}).AddRow("Target Agent", "langgraph"))
 
 	// No cached internal URL (Redis empty), so falls through to DB status check
 	mock.ExpectQuery("SELECT status FROM workspaces WHERE id =").

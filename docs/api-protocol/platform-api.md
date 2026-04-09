@@ -140,7 +140,15 @@ Backward-compatible admin aliases also exist under `/admin/secrets`.
 | `PUT` | `/workspaces/:id/files` | Replace workspace file set |
 | `DELETE` | `/workspaces/:id/files/*path` | Delete a file |
 
-Allowed roots include `/configs`, `/workspace`, `/home`, and `/plugins`.
+Query parameters for `GET /workspaces/:id/files`:
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `root` | `/configs` | Base path — one of `/configs`, `/workspace`, `/home`, `/plugins` |
+| `path` | `""` | Subdirectory relative to root (validated against path traversal) |
+| `depth` | `1` | Max recursion depth (1–5). Use with `path` for lazy-loading subdirectories |
+
+Invalid `depth` or traversal paths return 400.
 
 ### Terminal
 

@@ -122,11 +122,34 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
-	// Query param ?root= to explore different container paths (default: /configs)
+	// Query params:
+	//   ?root=  — base path in container (default: /configs)
+	//   ?path=  — subdirectory to list (relative to root, default: "")
+	//   ?depth= — max depth to recurse (default: 1, max: 5)
 	rootPath := c.DefaultQuery("root", "/configs")
 	if !allowedRoots[rootPath] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "root must be one of: /configs, /workspace, /home, /plugins"})
 		return
+	}
+	subPath := c.DefaultQuery("path", "")
+	if subPath != "" {
+		if err := validateRelPath(subPath); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	depth := 1
+	if d := c.Query("depth"); d != "" {
+		n, err := strconv.Atoi(d)
+		if err != nil || n < 1 || n > 5 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "depth must be 1-5"})
+			return
+		}
+		depth = n
+	}
+	listPath := rootPath
+	if subPath != "" {
+		listPath = rootPath + "/" + subPath
 	}
 
 	var wsName string
@@ -147,10 +170,10 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		// Uses find + sh -c stat to output TYPE|SIZE|PATH per line.
 		output, err := h.execInContainer(ctx, containerName, []string{
 			"sh", "-c",
-			fmt.Sprintf(`find %s -maxdepth 5 -not -path '*/.git/*' -not -name .DS_Store | while IFS= read -r f; do
-				rel="${f#%s/}"; [ "$rel" = "%s" ] && continue; [ -z "$rel" ] && continue
+			fmt.Sprintf(`find '%s' -maxdepth %d -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -not -name .DS_Store | while IFS= read -r f; do
+				rel="${f#'%s'/}"; [ "$rel" = '%s' ] && continue; [ -z "$rel" ] && continue
 				if [ -d "$f" ]; then echo "d|0|$rel"; else s=$(stat -c %%s "$f" 2>/dev/null || stat -f %%z "$f" 2>/dev/null || echo 0); echo "f|$s|$rel"; fi
-			done`, rootPath, rootPath, rootPath),
+			done`, listPath, depth, listPath, listPath),
 		})
 		if err != nil {
 			log.Printf("Container file list failed, falling back to host: %v", err)
@@ -183,19 +206,30 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		return
 	}
 
-	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+	walkRoot := configDir
+	if subPath != "" {
+		walkRoot = filepath.Join(configDir, subPath)
+	}
+	if _, err := os.Stat(walkRoot); os.IsNotExist(err) {
 		c.JSON(http.StatusOK, []fileEntry{})
 		return
 	}
 
 	var files []fileEntry
-	filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || path == configDir {
+	filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || path == walkRoot {
 			return nil
 		}
-		rel, _ := filepath.Rel(configDir, path)
+		rel, _ := filepath.Rel(walkRoot, path)
+		// Enforce depth limit
+		if strings.Count(rel, string(filepath.Separator))+1 > depth {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		base := filepath.Base(rel)
-		if base == ".git" || base == ".DS_Store" {
+		if base == ".git" || base == ".DS_Store" || base == "__pycache__" || base == "node_modules" {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

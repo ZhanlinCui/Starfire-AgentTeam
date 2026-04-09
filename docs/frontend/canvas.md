@@ -139,14 +139,25 @@ This is one of the most important recent UX shifts: global provider keys are no 
 
 ## Files UX
 
-The `Files` tab supports multiple roots:
-
-- `/configs`
-- `/workspace`
-- `/home`
-- `/plugins`
+The `Files` tab supports multiple roots: `/configs`, `/workspace`, `/home`, `/plugins`.
 
 `/configs` is the main editable path. When the container is offline, the platform falls back to the host-side template/config directory when possible.
+
+### Lazy Loading
+
+The file tree uses **lazy loading** to avoid fetching the entire filesystem at once:
+
+- Initial load: `GET /workspaces/:id/files?root=/workspace&depth=1` — returns only top-level entries
+- Expanding a folder: `GET ...&path=.claude&depth=1` — fetches that folder's immediate children on demand
+- A loading indicator ("…") shows on the folder arrow while fetching
+- Expanded grandchildren are preserved when re-loading a parent directory
+- The `buildTree()` utility deduplicates directory nodes when both a dir entry and its nested children exist in the flat file list
+
+### Input Validation
+
+- `path` parameter is validated against path traversal (`../` blocked)
+- `depth` must be 1–5 (invalid values return 400)
+- Shell arguments are quoted to handle paths with spaces or special characters
 
 ## Team Visualization
 
