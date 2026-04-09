@@ -24,7 +24,7 @@ prompt_files:
 #   prompt_files: [SOUL.md, BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md, TOOLS.md, USER.md, MEMORY.md]
 # Claude Code example:
 #   prompt_files: [CLAUDE.md]
-# OpenAI Codex example:
+# AGENTS.md-style example:
 #   prompt_files: [AGENTS.md]
 
 # Files to share with direct children (1-level inheritance)
@@ -144,7 +144,7 @@ The file watcher monitors the entire config directory. When `config.yaml` change
 | `skills` | Yes | Load/unload skill files, rebuild Agent Card |
 | `tools` | Yes | Reload tool registrations |
 | `memory.backend` | Yes (with caveat) | Switch backend going forward; existing memory in old backend stays and is not migrated automatically |
-| `tier` | **No** | Tier affects how the container was provisioned (Docker flags, VM vs container). Requires re-provision. Change is logged as a warning and ignored at runtime. |
+| `tier` | **No** | Tier affects how the workspace was provisioned (Docker flags, host access level, resource limits). Requires re-provision. Change is logged as a warning and ignored at runtime. |
 | `name`, `description`, `version` | Yes | Rebuild Agent Card with new metadata |
 | `a2a` | **No** | Port and protocol changes require container restart |
 | `delegation` | Yes | Retry/timeout defaults take effect on next delegation call |

@@ -258,11 +258,11 @@ For observability, the workspace writes a `skill_promotion` activity when a prom
 npx clawhub@latest install <skill-name>
 ```
 
-ClawHub skills are context-only (no `tools/` folder). They work in Agent Molecule as pure context skills — the `SKILL.md` instructions get appended to the agent's system prompt.
+ClawHub skills are context-only (no `tools/` folder). They work in Starfire as pure context skills — the `SKILL.md` instructions get appended to the agent's system prompt.
 
 ### Reusing ClawHub-Style Skills
 
-ClawHub-style skills can be reused here as pure context skills. The `tools/` folder and its MCP tools are included as supporting files when present. Note that `tools/` only execute inside the Agent Molecule runtime — outside this runtime, the same `SKILL.md` instructions are still useful, but execution remains local.
+ClawHub-style skills can be reused here as pure context skills. The `tools/` folder and its MCP tools are included as supporting files when present. Note that `tools/` only execute inside the Starfire runtime — outside this runtime, the same `SKILL.md` instructions are still useful, but execution remains local.
 
 **Constraints for ClawHub-style bundles:**
 - Only text-based files are allowed (no binaries)

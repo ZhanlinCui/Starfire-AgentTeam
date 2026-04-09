@@ -183,7 +183,7 @@ CMD ["python", "main.py"]
 
 CLI-based workspaces can communicate with other workspaces via two mechanisms:
 
-### MCP Tools (Claude Code, Codex)
+### MCP Tools (Claude Code and other MCP-compatible runtimes)
 
 For MCP-compatible runtimes, an A2A MCP server (`a2a_mcp_server.py`) is automatically injected via `--mcp-config`. This gives the agent three MCP tools:
 
@@ -203,7 +203,7 @@ Example flow: Marketing uses `delegate_task(seo_id, "What is your status?")` →
 
 When `delegate_task` receives an error from a child (auth failure, timeout, offline), the MCP server wraps it as a `DELEGATION FAILED` message with instructions for the calling agent to: (1) try a different peer, (2) handle the task itself, or (3) inform the user which peer is unavailable and provide its own best answer. Errors are tagged with a `[A2A_ERROR]` sentinel prefix so they can be reliably distinguished from normal response text. Coordinator prompts and A2A instructions reinforce that agents must never forward raw error messages to the user.
 
-### CLI Commands (Ollama, Custom)
+### CLI Commands (Custom runtimes)
 
 For non-MCP runtimes, A2A instructions are injected into the system prompt. The agent uses bash commands:
 

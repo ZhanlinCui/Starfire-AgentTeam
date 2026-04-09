@@ -1,6 +1,6 @@
 # Technology Choices
 
-This document explains why each technology was chosen for Agent Molecule.
+This document explains why each technology was chosen for Starfire.
 
 ## Next.js 15 (Canvas Frontend)
 
@@ -12,9 +12,9 @@ The platform API handles high-concurrency concerns: hundreds of workspace heartb
 
 Go is **not** used for agent logic — just infrastructure coordination.
 
-## Python (Workspace Runtime)
+## Workspace Runtime Adapters
 
-Deep Agents (`deepagents` package) and LangGraph are Python-native. There is no benefit to fighting this. Each workspace is a Python process. The Go platform communicates with it only via HTTP (A2A protocol) — Go never needs to understand Python internals.
+The workspace runtime is adapter-based. LangGraph and DeepAgents are Python-native, while Claude Code and OpenClaw are CLI-driven runtimes. The platform standardizes them behind the same A2A surface, heartbeat lifecycle, memory tools, and workspace contract instead of forcing one execution backend for every team.
 
 ## Deep Agents + LangGraph
 
@@ -29,9 +29,9 @@ LangGraph is the underlying runtime — it manages the agent loop, state persist
 
 Neither Deep Agents nor LangGraph provide AI models — they call whatever provider you configure.
 
-## deepagents-acp (A2A Wrapper)
+## a2a-sdk (A2A Wrapper)
 
-`deepagents-acp` is the package that wraps a Deep Agent as an A2A server. It takes the agent created by `agent.py` and exposes it over HTTP with a standard A2A interface — handling JSON-RPC 2.0 message parsing, Agent Card serving at `/.well-known/agent-card.json`, SSE streaming, and task management. Without it, the agent would have no network-accessible endpoint.
+`a2a-sdk` is the server package that exposes a workspace over HTTP with a standard A2A interface. It handles JSON-RPC 2.0 request parsing, Agent Card serving at `/.well-known/agent-card.json`, SSE streaming, and task management. LangGraph-based runtimes and CLI-based adapters both terminate into the same A2A contract.
 
 ## A2A Protocol
 
@@ -48,7 +48,7 @@ The platform only handles discovery (resolving workspace URLs) and registry (kno
 
 Workspace instances are Docker containers. The generic `workspace-template` image is built once. Each instance gets different environment variables injecting the workspace ID, config path, model provider, and tier.
 
-Docker gives: process isolation, easy cleanup, portability. Tier 4 (privileged) workspaces use EC2 VMs instead for stronger isolation.
+Docker gives process isolation, easy cleanup, portability, and a clear way to express tiered privilege. Tier 4 uses a full-host Docker configuration (privileged + host PID + host network + Docker socket) rather than a separate VM provisioner.
 
 ## Postgres
 

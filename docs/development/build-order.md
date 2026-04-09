@@ -31,9 +31,9 @@ Implement `POST /registry/register`, `POST /registry/heartbeat`, and `POST /regi
 
 See [Registry & Heartbeat](../api-protocol/registry-and-heartbeat.md) for the full flow.
 
-## Step 5: Workspace-Template Python Runtime
+## Step 5: Workspace Runtime Layer
 
-Write `main.py`, `config.py`, `heartbeat.py`, `a2a_executor.py`. Create a minimal deepagent that just echoes responses. Wrap it with `a2a-sdk` (`A2AStarletteApplication`) to create the A2A server. Verify:
+Write `main.py`, `config.py`, `heartbeat.py`, `a2a_executor.py`. Create a minimal LangGraph-based workspace that just echoes responses. Wrap it with `a2a-sdk` (`A2AStarletteApplication`) to create the A2A server. Verify:
 
 - Agent Card is served at `/.well-known/agent-card.json`
 - Heartbeat POSTs reach the platform
@@ -72,6 +72,6 @@ Test round-trip: export -> delete workspace -> import -> workspace reappears.
 
 - [Architecture](../architecture/architecture.md) — System overview
 - [Platform API](../api-protocol/platform-api.md) — Endpoints to build
-- [Workspace Runtime](../agent-runtime/workspace-runtime.md) — Python runtime to build
+- [Workspace Runtime](../agent-runtime/workspace-runtime.md) — Runtime layer to build
 - [Canvas UI](../frontend/canvas.md) — Frontend to build
 - [Communication Rules](../api-protocol/communication-rules.md) — Hierarchy-based access

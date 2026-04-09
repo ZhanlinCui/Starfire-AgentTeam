@@ -1,6 +1,6 @@
 # Code Sandbox
 
-The code sandbox isolates agent-generated code execution — specifically the `run_code` tool that executes dynamically generated scripts. Not user-submitted code (there is no user code submission in Agent Molecule) — the agent's own generated code is what needs sandboxing.
+The code sandbox isolates agent-generated code execution — specifically the `run_code` tool that executes dynamically generated scripts. Not user-submitted code (there is no user code submission in Starfire) — the agent's own generated code is what needs sandboxing.
 
 ## What Gets Sandboxed
 
@@ -35,9 +35,9 @@ sandbox:
 |------|--------------------|--------|
 | 1, 2 | `none` | No `run_code` tool available — tools are just API calls |
 | 3 | `docker` (MVP), `firecracker` or `e2b` (production) | Agent can generate and run code |
-| 4 | `none` | Already a dedicated VM — no extra sandbox needed |
+| 4 | `none` | Full-host access tier — no extra sandbox boundary is added by default |
 
-Tier 4 doesn't need a sandbox because the workspace IS an isolated EC2 VM. Running Docker-in-Docker inside an EC2 VM would be pointless nesting.
+Tier 4 doesn't add a second sandbox by default because the workspace already runs with host-level privileges. If you need isolated code execution at that tier, treat it as an explicit defense-in-depth decision rather than an assumption baked into the current provisioner.
 
 ## How It Works (Tier 3)
 
@@ -74,7 +74,7 @@ Docker-in-Docker. The workspace container runs Docker and spawns child container
 
 ### firecracker
 
-MicroVM-based isolation. Faster cold starts than Docker, stronger isolation boundary (VM vs container). Better for production workloads with many concurrent code executions.
+MicroVM-based isolation. Faster cold starts than Docker, with a stronger boundary than standard containers. Better for production workloads with many concurrent code executions.
 
 ### e2b
 

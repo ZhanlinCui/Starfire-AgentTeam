@@ -26,7 +26,7 @@ API keys, passwords, and credentials are **never** serialized into bundle JSON. 
 
 ## 6. No Auth for MVP
 
-The platform API has no authentication. All endpoints are open. This is intentional — the project follows the n8n Community Edition model. Auth is added in a separate SaaS wrapper (`agent-molecule-cloud`).
+The platform API has no authentication. All endpoints are open. This is intentional — the project follows the n8n Community Edition model. Auth is added in a separate SaaS wrapper (`starfire-cloud`).
 
 ## 7. org_id Is Omitted from MVP Schema
 
@@ -34,9 +34,9 @@ Removed entirely for MVP simplicity. Added in the SaaS migration for multi-tenan
 
 ## 8. Tier Determines Provisioner, Not Behavior
 
-The workspace code is the same regardless of tier. The tier only affects how the container is deployed:
+The workspace code is the same regardless of tier. The tier only affects how the workspace is deployed:
 - Docker flags
-- VM vs container
+- host access level and isolation boundary
 - Resource allocation
 
 See [Workspace Tiers](../architecture/workspace-tiers.md).
