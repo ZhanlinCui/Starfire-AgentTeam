@@ -101,24 +101,26 @@ export function ContextMenu() {
 
   const handlePause = useCallback(async () => {
     if (!contextMenu) return;
+    const nodeId = contextMenu.nodeId;
+    closeContextMenu();
     try {
-      await api.post(`/workspaces/${contextMenu.nodeId}/pause`, {});
-      updateNodeData(contextMenu.nodeId, { status: "paused" });
+      await api.post(`/workspaces/${nodeId}/pause`, {});
+      updateNodeData(nodeId, { status: "paused" });
     } catch (e) {
       showToast("Pause failed", "error");
     }
-    closeContextMenu();
   }, [contextMenu, updateNodeData, closeContextMenu]);
 
   const handleResume = useCallback(async () => {
     if (!contextMenu) return;
+    const nodeId = contextMenu.nodeId;
+    closeContextMenu();
     try {
-      await api.post(`/workspaces/${contextMenu.nodeId}/resume`, {});
-      updateNodeData(contextMenu.nodeId, { status: "provisioning" });
+      await api.post(`/workspaces/${nodeId}/resume`, {});
+      updateNodeData(nodeId, { status: "provisioning" });
     } catch (e) {
       showToast("Resume failed", "error");
     }
-    closeContextMenu();
   }, [contextMenu, updateNodeData, closeContextMenu]);
 
   const handleDelete = useCallback(() => {
