@@ -1,284 +1,96 @@
 #!/usr/bin/env python3
-"""Claude Code A2A Bridge — native external workspace with instant delivery.
+"""External Workspace Bridge — plug any AI agent into Starfire via A2A.
 
-Registers as an external workspace (no Docker container) and receives
-A2A messages from agents in real-time. Sends macOS notifications for
-instant awareness.
+Registers as an external workspace (no Docker container) and processes
+incoming A2A messages using a configurable backend processor.
 
 Usage:
-  python3 scripts/claude-code-bridge.py          # Start
-  python3 scripts/claude-code-bridge.py --stop   # Stop
-  python3 scripts/claude-code-bridge.py --inbox  # Show unread messages
-  python3 scripts/claude-code-bridge.py --clear  # Clear inbox
+  # Claude Code backend (default)
+  python3 scripts/claude-code-bridge.py
+
+  # OpenAI API backend
+  python3 scripts/claude-code-bridge.py --processor openai --model gpt-4.1-mini
+
+  # Anthropic API backend
+  python3 scripts/claude-code-bridge.py --processor anthropic --model claude-sonnet-4-6
+
+  # Forward to any HTTP endpoint
+  python3 scripts/claude-code-bridge.py --processor http --url http://my-agent:8000/chat
+
+  # Echo (testing)
+  python3 scripts/claude-code-bridge.py --processor echo
+
+  # Management
+  python3 scripts/claude-code-bridge.py --inbox   # Show messages
+  python3 scripts/claude-code-bridge.py --clear   # Clear inbox
+  python3 scripts/claude-code-bridge.py --stop    # Stop bridge
+
+Environment variables:
+  PLATFORM_URL        Platform API (default: http://localhost:8080)
+  BRIDGE_PORT         Listen port (default: 9999)
+  BRIDGE_NAME         Workspace name (default: Claude Code Advisor)
+  BRIDGE_PARENT_ID    Parent workspace ID for hierarchy
+  OPENAI_API_KEY      For --processor openai
+  ANTHROPIC_API_KEY   For --processor anthropic
+  BRIDGE_FORWARD_URL  For --processor http
 """
 
+import argparse
 import json
 import logging
 import os
-import platform
 import signal
-import subprocess
 import sys
-import time
-import uuid
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-import threading
-
-try:
-    import httpx
-except ImportError:
-    print("pip install httpx")
-    sys.exit(1)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [bridge] %(message)s")
-logger = logging.getLogger("claude-bridge")
+logger = logging.getLogger("bridge")
 
-PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://localhost:8080")
-BRIDGE_PORT = int(os.environ.get("BRIDGE_PORT", "9999"))
 BRIDGE_DIR = Path(__file__).parent.parent / ".claude-bridge"
 INBOX = BRIDGE_DIR / "inbox.jsonl"
 PID_FILE = BRIDGE_DIR / "bridge.pid"
-WS_ID_FILE = BRIDGE_DIR / "workspace_id"
 
 BRIDGE_DIR.mkdir(exist_ok=True)
 
 
-REPO_ROOT = Path(__file__).parent.parent
-
-
-def process_with_claude(message: str, sender: str) -> str:
-    """Run Claude Code CLI to process the message and return a response.
-
-    This invokes `claude --print` with the workspace as cwd, giving it
-    full access to the codebase. The system prompt tells it to act as
-    a technical advisor responding to agent messages.
-    """
-    system_prompt = (
-        f"You are Claude Code Advisor, the CEO's technical advisor for the Starfire Agent Molecule platform. "
-        f"An agent named '{sender}' is asking you a question via A2A protocol. "
-        f"You have access to the full codebase at the current directory. "
-        f"Respond concisely and helpfully. If they ask about code, read the relevant files. "
-        f"If they report a bug, investigate. If they need a code review, do it. "
-        f"Keep responses under 500 words unless a detailed analysis is needed."
-    )
-
-    try:
-        result = subprocess.run(
-            [
-                "claude", "--print",
-                "--dangerously-skip-permissions",
-                "--system-prompt", system_prompt,
-                "-p", message,
-            ],
-            capture_output=True, text=True,
-            timeout=300,  # 5 min max
-            cwd=str(REPO_ROOT),
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            # Parse JSON output if claude returns it
-            try:
-                out = json.loads(result.stdout)
-                if isinstance(out, dict) and "result" in out:
-                    return out["result"]
-            except json.JSONDecodeError:
-                pass
-            return result.stdout.strip()
-        else:
-            error = result.stderr.strip() or f"Exit code {result.returncode}"
-            logger.error(f"Claude CLI error: {error[:200]}")
-            return f"Claude Code processing error: {error[:200]}"
-    except subprocess.TimeoutExpired:
-        return "Request timed out (5 min limit). Try a more specific question."
-    except FileNotFoundError:
-        return "Claude CLI not installed. Install with: npm install -g @anthropic-ai/claude-code"
-    except Exception as e:
-        logger.error(f"Claude processing error: {e}")
-        return f"Processing error: {str(e)[:200]}"
-
-
-def resolve_workspace_name(workspace_id: str) -> str:
-    """Look up workspace name from platform."""
-    try:
-        resp = httpx.get(f"{PLATFORM_URL}/workspaces/{workspace_id}", timeout=3)
-        if resp.status_code == 200:
-            return resp.json().get("name", workspace_id[:8])
-    except Exception:
-        pass
-    return workspace_id[:8]
-
-
-class A2AHandler(BaseHTTPRequestHandler):
-    """Handles incoming A2A JSON-RPC requests."""
-
-    def log_message(self, format, *args):
-        pass  # Suppress default HTTP logging
-
-    def do_POST(self):
-        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        try:
-            request = json.loads(body)
-        except json.JSONDecodeError:
-            self.send_error(400)
-            return
-
-        method = request.get("method", "")
-        req_id = request.get("id", str(uuid.uuid4()))
-
-        if method == "message/send":
-            params = request.get("params", {})
-            message = params.get("message", {})
-            parts = message.get("parts", [])
-            text = parts[0].get("text", "") if parts else ""
-            sender_id = self.headers.get("X-Workspace-ID", "")
-            sender_name = resolve_workspace_name(sender_id) if sender_id else "canvas"
-
-            logger.info(f"📨 {sender_name}: {text[:80]}")
-
-            # Write to inbox log
-            entry = {
-                "id": req_id,
-                "sender_id": sender_id,
-                "sender_name": sender_name,
-                "text": text,
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-            with open(INBOX, "a") as f:
-                f.write(json.dumps(entry) + "\n")
-
-            # Process with Claude Code CLI and respond immediately
-            response_text = process_with_claude(text, sender_name)
-            self._send_a2a_response(req_id, response_text)
-
-        elif method == "agent/card":
-            self._send_json(200, {
-                "jsonrpc": "2.0", "id": req_id,
-                "result": {
-                    "name": "Claude Code Advisor",
-                    "description": "CEO technical advisor — code review, architecture, debugging",
-                    "version": "1.0.0",
-                    "skills": ["code-review", "architecture", "debugging", "optimization"],
-                },
-            })
-        else:
-            self._send_json(200, {
-                "jsonrpc": "2.0", "id": req_id,
-                "error": {"code": -32601, "message": f"Unsupported: {method}"},
-            })
-
-    def _send_a2a_response(self, req_id, text):
-        self._send_json(200, {
-            "jsonrpc": "2.0", "id": req_id,
-            "result": {
-                "kind": "message",
-                "messageId": str(uuid.uuid4()),
-                "role": "agent",
-                "parts": [{"kind": "text", "text": text}],
-            },
-        })
-
-    def _send_json(self, status, data):
-        body = json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-def register_external_workspace() -> str:
-    """Register as a native external workspace (no Docker container)."""
-    # Reuse existing workspace if still alive
-    if WS_ID_FILE.exists():
-        ws_id = WS_ID_FILE.read_text().strip()
-        try:
-            resp = httpx.get(f"{PLATFORM_URL}/workspaces/{ws_id}", timeout=5)
-            if resp.status_code == 200 and resp.json().get("status") not in ("removed",):
-                # Update URL in case port changed
-                httpx.patch(f"{PLATFORM_URL}/workspaces/{ws_id}",
-                    json={"url": f"http://127.0.0.1:{BRIDGE_PORT}"},
-                    timeout=5)
-                logger.info(f"Reusing workspace {ws_id}")
-                return ws_id
-        except Exception:
-            pass
-
-    # Create new external workspace
-    resp = httpx.post(f"{PLATFORM_URL}/workspaces", json={
-        "name": "Claude Code Advisor",
-        "role": "CEO technical advisor — code review, architecture, debugging, optimization",
-        "tier": 3,
-        "runtime": "external",
-        "external": True,
-        "url": f"http://127.0.0.1:{BRIDGE_PORT}",
-    }, timeout=10)
-
-    data = resp.json()
-    ws_id = data.get("id", "")
-    if not ws_id:
-        logger.error(f"Failed to create workspace: {data}")
-        sys.exit(1)
-
-    WS_ID_FILE.write_text(ws_id)
-    logger.info(f"Created external workspace: {ws_id}")
-
-    # Register agent card
-    httpx.post(f"{PLATFORM_URL}/registry/register", json={
-        "workspace_id": ws_id,
-        "agent_card": {
-            "name": "Claude Code Advisor",
-            "description": "CEO technical advisor — code review, architecture, debugging",
-            "url": f"http://127.0.0.1:{BRIDGE_PORT}",
-            "version": "1.0.0",
-            "skills": ["code-review", "architecture", "debugging"],
-            "capabilities": {"streaming": False, "pushNotifications": False},
-        },
-    }, timeout=10)
-
-    return ws_id
-
-
-def heartbeat_loop(ws_id: str):
-    """Keep the workspace online with periodic heartbeats."""
-    start = time.time()
-    while True:
-        try:
-            httpx.post(f"{PLATFORM_URL}/registry/heartbeat", json={
-                "workspace_id": ws_id,
-                "error_rate": 0, "sample_error": "",
-                "uptime_seconds": int(time.time() - start),
-                "active_tasks": 0, "current_task": "",
-            }, timeout=5)
-        except Exception:
-            pass
-        time.sleep(30)
-
-
 def show_inbox():
-    """Print unread messages."""
     if not INBOX.exists():
         print("No messages.")
         return
     unread = 0
     for line in INBOX.read_text().splitlines():
         try:
-            entry = json.loads(line)
-            if not entry.get("read"):
-                unread += 1
-                ts = entry.get("timestamp", "")
-                sender = entry.get("sender_name", "unknown")
-                text = entry.get("text", "")[:120]
-                print(f"  [{ts}] {sender}: {text}")
+            e = json.loads(line)
+            unread += 1
+            print(f"  [{e.get('sender_name','?')}] {e.get('text','')[:120]}")
         except json.JSONDecodeError:
             continue
-    if unread == 0:
-        print("No unread messages.")
-    else:
-        print(f"\n{unread} unread message(s)")
+    print(f"\n{unread} message(s)" if unread else "No messages.")
 
 
 def main():
-    if "--stop" in sys.argv:
+    parser = argparse.ArgumentParser(description="External Workspace Bridge")
+    parser.add_argument("--processor", default="claude-code",
+        help="Backend processor: claude-code, openai, anthropic, http, echo")
+    parser.add_argument("--model", default="", help="Model name for the processor")
+    parser.add_argument("--url", default="", help="URL for http processor")
+    parser.add_argument("--name", default=os.environ.get("BRIDGE_NAME", "Claude Code Advisor"))
+    parser.add_argument("--role", default="CEO technical advisor — code review, architecture, debugging")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("BRIDGE_PORT", "9999")))
+    parser.add_argument("--parent-id", default=os.environ.get("BRIDGE_PARENT_ID", ""))
+    parser.add_argument("--inbox", action="store_true", help="Show inbox")
+    parser.add_argument("--clear", action="store_true", help="Clear inbox")
+    parser.add_argument("--stop", action="store_true", help="Stop bridge")
+    args = parser.parse_args()
+
+    if args.inbox:
+        show_inbox()
+        return
+    if args.clear:
+        INBOX.unlink(missing_ok=True)
+        print("Inbox cleared")
+        return
+    if args.stop:
         if PID_FILE.exists():
             try:
                 os.kill(int(PID_FILE.read_text().strip()), signal.SIGTERM)
@@ -288,24 +100,32 @@ def main():
             PID_FILE.unlink(missing_ok=True)
         return
 
-    if "--inbox" in sys.argv:
-        show_inbox()
-        return
-
-    if "--clear" in sys.argv:
-        INBOX.unlink(missing_ok=True)
-        print("Inbox cleared")
-        return
+    # Import here to keep --inbox/--stop fast
+    from bridge.processor import create_processor
+    from bridge.platform import PlatformClient
+    from bridge.server import create_server
 
     PID_FILE.write_text(str(os.getpid()))
 
-    ws_id = register_external_workspace()
-    threading.Thread(target=heartbeat_loop, args=(ws_id,), daemon=True).start()
+    # Create processor
+    kwargs = {}
+    if args.model:
+        kwargs["model"] = args.model
+    if args.url:
+        kwargs["url"] = args.url
+    processor = create_processor(args.processor, **kwargs)
+    logger.info(f"Processor: {args.processor} ({type(processor).__name__})")
 
-    server = HTTPServer(("0.0.0.0", BRIDGE_PORT), A2AHandler)
-    logger.info(f"Bridge listening on :{BRIDGE_PORT}")
-    logger.info(f"Workspace: {ws_id} (external)")
-    logger.info(f"Agents see me as 'Claude Code Advisor' in list_peers")
+    # Register with platform
+    platform_url = os.environ.get("PLATFORM_URL", "http://localhost:8080")
+    client = PlatformClient(platform_url, args.port, BRIDGE_DIR)
+    ws_id = client.register(args.name, args.role, parent_id=args.parent_id)
+    client.start_heartbeat()
+
+    # Start A2A server
+    server = create_server(args.port, processor, INBOX, client.resolve_name)
+    logger.info(f"Listening on :{args.port} | Workspace: {ws_id}")
+    logger.info(f"Agents see '{args.name}' in list_peers → delegate_task to interact")
 
     try:
         server.serve_forever()
