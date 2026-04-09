@@ -11,6 +11,7 @@ workspaces:
   - name: PM
     role: Project Manager — coordinates Research and Dev teams
     tier: 3
+    model: opus
     files_dir: pm
     canvas: { x: 400, y: 50 }
     children:
@@ -32,26 +33,32 @@ workspaces:
       - name: Dev Lead
         role: Engineering planning and team coordination
         tier: 3
+        model: opus
         files_dir: dev-lead
         canvas: { x: 650, y: 250 }
         children:
           - name: Frontend Engineer
             role: Next.js canvas, React Flow, Zustand
             tier: 3
+            model: opus
             files_dir: frontend-engineer
           - name: Backend Engineer
             role: Go platform, Postgres, Redis, A2A
             tier: 3
+            model: opus
             files_dir: backend-engineer
           - name: DevOps Engineer
             role: CI/CD, Docker, infrastructure
             tier: 3
+            model: opus
             files_dir: devops-engineer
           - name: Security Auditor
             role: Security auditing and vulnerability assessment
             tier: 3
+            model: opus
             files_dir: security-auditor
           - name: QA Engineer
             role: Testing, quality assurance, test automation
             tier: 3
+            model: opus
             files_dir: qa-engineer
