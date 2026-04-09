@@ -71,6 +71,11 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces/:id/resume", wh.Resume)
 	r.POST("/workspaces/:id/a2a", wh.ProxyA2A)
 
+	// Async Delegation
+	delh := handlers.NewDelegationHandler(wh, broadcaster)
+	r.POST("/workspaces/:id/delegate", delh.Delegate)
+	r.GET("/workspaces/:id/delegations", delh.ListDelegations)
+
 	// Traces (Langfuse proxy)
 	trh := handlers.NewTracesHandler()
 	r.GET("/workspaces/:id/traces", trh.List)
