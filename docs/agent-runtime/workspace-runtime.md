@@ -1,299 +1,149 @@
 # Workspace Runtime
 
-> Starfire supports both LangGraph-based and adapter-based runtimes. For the runtime matrix and non-LangGraph adapters, see [CLI Runtime](./cli-runtime.md).
+The `workspace-template/` directory is Starfire's unified runtime image. Every provisioned workspace starts from this image, loads its own config, selects a runtime adapter, registers an Agent Card, exposes A2A, and joins the platform heartbeat/activity loop.
 
-## workspace-template/
+## Runtime Matrix In Current `main`
 
-The generic workspace runtime image. Every deployed workspace is a container instance of this image, injected with a config at startup via environment variables.
+Current `main` ships six adapters:
 
-The template contains **no business logic**. All business logic lives in `workspace-configs-templates/`. The template reads config files at startup — it does not know what kind of workspace it is until it loads config.
+- `langgraph`
+- `deepagents`
+- `claude-code`
+- `crewai`
+- `autogen`
+- `openclaw`
 
-The default runtime path is LangGraph/DeepAgents, but the same image also supports pluggable adapters such as Claude Code, CrewAI, AutoGen, and OpenClaw via the adapter registry in `workspace-template/adapters/`.
+This is the merged runtime surface today. Branch-level experiments such as NemoClaw are separate and should be treated as roadmap/WIP, not merged support.
 
-### Environment Variables
+Adapter-specific behavior is documented in [Agent Runtime Adapters](./cli-runtime.md).
 
-```
-WORKSPACE_ID=ws-reno-stars-seo-001
-WORKSPACE_CONFIG_PATH=/configs/seo-agent
-MODEL_PROVIDER=anthropic:claude-sonnet-4-6
-TIER=1
+## What The Runtime Is Responsible For
+
+- loading `config.yaml`
+- running preflight checks before the workspace goes live
+- selecting an adapter based on `runtime`
+- loading local skills plus plugin-mounted shared rules/skills
+- constructing an Agent Card
+- serving A2A over HTTP
+- registering with the platform and sending heartbeats
+- reporting activity and task state
+- integrating with awareness-backed memory when configured
+- hot-reloading skills while the workspace is running
+
+## Environment Model
+
+Common runtime environment variables:
+
+```bash
+WORKSPACE_ID=ws-123
+WORKSPACE_CONFIG_PATH=/configs
 PLATFORM_URL=http://platform:8080
-PARENT_ID=                   # set by platform during team expansion (empty for top-level)
-ANTHROPIC_API_KEY=sk-...
-LANGFUSE_HOST=http://langfuse-web:3000
-LANGFUSE_PUBLIC_KEY=pk-...
-LANGFUSE_SECRET_KEY=sk-...
+PARENT_ID=
 AWARENESS_URL=http://awareness:37800
-AWARENESS_NAMESPACE=workspace:ws-reno-stars-seo-001
+AWARENESS_NAMESPACE=workspace:ws-123
+LANGFUSE_HOST=http://langfuse-web:3000
+LANGFUSE_PUBLIC_KEY=...
+LANGFUSE_SECRET_KEY=...
 ```
 
-When awareness is configured, the workspace keeps using the same `commit_memory` / `search_memory` tools, but the backend routes those calls into the workspace's own awareness namespace. If the two awareness env vars are absent, the runtime falls back to the platform memory API for compatibility.
+Important behavior:
 
-`awareness` is the workspace's durable memory backend. It stores facts that should survive across turns, while `session-search` provides the thin recall surface over recent activity and memory rows. The division of labor stays narrow:
-
-- `memory-curation` decides what is durable and compresses it into a packet
-- `awareness` persists that packet inside the workspace's isolated namespace
-- `session-search` recovers recent decisions, notes, and activity traces
-- `skill-authoring` only runs when a repeated workflow is stable enough to become a reusable skill
-- `skills runtime` loads the resulting skill package and hot-reloads it into the agent
-
-This keeps the runtime source-faithful to Hermes-style behavior: memory is for persistence and recall, skills are for repeatable procedure, and promotion is only a signal until the normal skill lifecycle creates the actual package.
-
-## workspace-configs-templates/
-
-One folder per workspace type. Contains the "personality" of the workspace — the specific skills, prompts, and config for that role.
-
-```
-workspace-configs-templates/
-+-- seo-agent/
-    +-- config.yaml              # skills list, tools, tier, model
-    +-- system-prompt.md         # the agent's core instructions
-    +-- skills/
-    |   +-- generate-seo-page/
-    |   |   +-- SKILL.md         # instructions for the agent
-    |   |   +-- tools/
-    |   |       +-- write_page.py
-    |   |       +-- check_gsc.py
-    |   +-- audit-seo-page/
-    |   |   +-- SKILL.md
-    |   +-- keyword-research/
-    |       +-- SKILL.md
-    |       +-- links.yaml
-    |       +-- examples/
-    +-- workspace.bundle.json    # compiled bundle (auto-generated)
-```
+- `WORKSPACE_CONFIG_PATH` points at the mounted config directory for that workspace.
+- `AWARENESS_URL` + `AWARENESS_NAMESPACE` enable workspace-scoped awareness-backed memory.
+- If awareness is absent, runtime memory tools fall back to the platform memory endpoints for compatibility.
 
 ## Startup Sequence
 
-```
-Container starts
-      |
-      v
-config.py loads WORKSPACE_CONFIG_PATH
-      |
-      v
-plugins.py scans /plugins/ for shared skills, rules, prompt fragments
-      |
-      v
-skills/loader.py loads workspace skills + plugin skills (deduplicated by ID)
-      |
-      v
-coordinator.py fetches parent's shared context (if PARENT_ID set)
-      |
-      v
-runtime adapter initializes executor (LangGraph by default)
-      |
-      v
-main.py wraps agent in A2A server (a2a-sdk)
-      |
-      v
-A2AStarletteApplication auto-registers all A2A routes:
-  /.well-known/agent-card.json, message/send,
-  message/sendSubscribe, tasks/cancel
-      |
-      v
-POST /registry/register sends id, url, and agent_card to platform
-      |
-      v
-heartbeat.py starts 30s POST loop to platform /registry/heartbeat
-      |
-      v
-WebSocket subscribes to platform /ws with X-Workspace-ID header
-      |
-      v
-Workspace is live, discoverable, and receiving peer events
-```
+At a high level, `workspace-template/main.py` does this:
 
-### Key Files
+1. Initialize telemetry.
+2. Load `config.yaml`.
+3. Run preflight validation.
+4. Build the heartbeat loop.
+5. Resolve the adapter from `config.runtime`.
+6. Let the adapter run `setup()` and build an executor.
+7. Build the Agent Card from loaded skills and runtime config.
+8. Register the workspace with `POST /registry/register`.
+9. Start heartbeats.
+10. Start the skill watcher when skills are configured.
+11. Serve the A2A app through Uvicorn.
 
-| File | Role |
-|------|------|
-| `main.py` | Entry point — wraps agent in A2A server via `a2a-sdk` |
-| `config.py` | Loads workspace config from `WORKSPACE_CONFIG_PATH` |
-| `agent.py` | Creates the default LangGraph ReAct agent with model + skills + tools |
-| `coordinator.py` | Team coordination (get_children, get_parent_context, route_task) |
-| `a2a_executor.py` | Bridges deepagent (LangGraph) to A2A request/response |
-| `adapters/` | Pluggable runtime adapters for Claude Code, CrewAI, AutoGen, DeepAgents, OpenClaw, etc. |
-| `skills/loader.py` | Loads skill packages (SKILL.md + tools) from config |
-| `heartbeat.py` | Sends 30s heartbeat to platform registry |
-| `events.py` | Subscribes to platform WebSocket, handles peer events |
+## Core Runtime Pieces
 
-## A2A Server Wrapping
+| File | Responsibility |
+|---|---|
+| `main.py` | Entry point, adapter bootstrap, Agent Card registration, heartbeat startup |
+| `config.py` | Parses `config.yaml` into the runtime config dataclasses |
+| `adapters/` | Adapter registry and adapter implementations |
+| `a2a_executor.py` | Shared LangGraph execution bridge and current-task reporting |
+| `cli_executor.py` | CLI-oriented executor behavior and delegation instructions |
+| `skills/loader.py` | Parses `SKILL.md`, loads tool modules, returns loaded skill metadata |
+| `skills/watcher.py` | Hot reload path for skill changes |
+| `plugins.py` | Scans mounted plugins for shared rules, prompt fragments, and extra skills |
+| `tools/memory.py` | Agent memory tools |
+| `tools/awareness_client.py` | Awareness-backed persistence wrapper |
+| `coordinator.py` | Coordinator-only delegation path for team leads |
 
-The workspace uses the `a2a-sdk` package (PyPI: `a2a-sdk[http-server]`). `A2AStarletteApplication` auto-registers all A2A routes at the root URL.
+## Skills, Plugins, And Hot Reload
 
-```python
-# workspace-template/main.py (simplified)
+The runtime combines three sources of capability:
 
-from a2a.server.apps import A2AStarletteApplication
-from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentCard, AgentCapabilities, AgentSkill
-import uvicorn
+1. **workspace-local skills** from `skills/<skill>/SKILL.md`
+2. **plugin-mounted rules and shared skills** from `/plugins`
+3. **built-in tools** like delegation, approval, memory, sandbox, and telemetry helpers
 
-async def main():
-    # 1. create LangGraph ReAct agent with provider-specific LLM
-    #    agent.py parses "provider:model" and loads ChatAnthropic/ChatOpenAI/etc.
-    agent = create_agent(config.model, all_tools, system_prompt)
+Hot reload matters because the runtime is designed to keep a workspace alive while its capability surface evolves:
 
-    # 2. build Agent Card from loaded skill metadata
-    agent_card = AgentCard(
-        name=config.name,
-        url=f"http://{MACHINE_IP}:{PORT}",
-        capabilities=AgentCapabilities(streaming=True, pushNotifications=True),
-        skills=[AgentSkill(id=s.metadata.id, name=s.metadata.name, ...)
-                for s in loaded_skills],
-        ...
-    )
+- edit `SKILL.md`
+- add/remove skill files
+- update tool modules
+- modify config prompt references
 
-    # 3. wrap in A2A executor + handler
-    executor = LangGraphA2AExecutor(agent)
-    handler = DefaultRequestHandler(
-        agent_executor=executor,
-        task_store=InMemoryTaskStore(),
-    )
+The watcher rescans the skill package, rebuilds the agent tool surface, and updates the Agent Card so peers and the canvas reflect the new capabilities.
 
-    # 4. create A2A app — routes auto-registered at root URL:
-    #    /.well-known/agent-card.json, message/send, message/sendSubscribe
-    app = A2AStarletteApplication(agent_card=agent_card, http_handler=handler)
+## Awareness And Memory Integration
 
-    # 5. register with platform, start heartbeat, run server
-    await register_with_platform(workspace_id, workspace_url, agent_card_dict)
-    heartbeat.start()
-    await uvicorn.Server(uvicorn.Config(app.build(), host="0.0.0.0", port=port)).serve()
-```
+The runtime keeps the agent-facing contract stable:
 
-The executor bridges LangGraph's streaming to A2A's event model:
+- `commit_memory(content, scope)`
+- `search_memory(query, scope)`
 
-```python
-# workspace-template/a2a_executor.py
+When awareness is configured:
 
-class LangGraphA2AExecutor(AgentExecutor):
-    async def execute(self, context: RequestContext, event_queue: EventQueue):
-        # Extract text from A2A message parts
-        text_parts = [p.text for p in context.message.parts if hasattr(p, "text") and p.text]
-        user_input = " ".join(text_parts).strip()
-        if not user_input:
-            await event_queue.enqueue_event(
-                new_agent_text_message("Error: message contained no text content.")
-            )
-            return
+- the tools route durable facts to the workspace's own awareness namespace
+- the namespace defaults to `workspace:<workspace_id>` unless explicitly overridden
 
-        # Stream through LangGraph, collect final response
-        final_content = ""
-        async for chunk in self.agent.astream(
-            {"messages": [("user", user_input)]},
-            config={"configurable": {"thread_id": context.context_id}},
-        ):
-            if "messages" in chunk:
-                content = getattr(chunk["messages"][-1], "content", "")
-                if isinstance(content, str) and content.strip():
-                    final_content = content
+When awareness is not configured:
 
-        await event_queue.enqueue_event(new_agent_text_message(final_content or "(no response)"))
-```
+- the same tools fall back to the platform memory endpoints
 
-**Key distinction:** ACP (Agent Client Protocol) connects agents to editors/IDEs (Zed, Claude Code). A2A (Agent-to-Agent) connects workspaces to each other. Starfire uses A2A for inter-workspace communication.
+That design lets the platform improve the backend memory boundary without forcing every agent prompt or tool signature to change.
 
-## Delegation Failure Handling
+## Coordinator Enforcement
 
-When a workspace delegates to a peer and the peer fails, the behavior depends on the failure type:
+`coordinator.py` is not a generic “smart agent” mode. It is intentionally strict:
 
-| Scenario | Detection | Response |
-|----------|-----------|----------|
-| Peer offline before task starts | Discovery returns offline status | A never sends the message — reports to LLM immediately |
-| Peer crashes mid-task | SSE stream drops / connection reset | Retry with backoff |
-| Peer returns `failed` status | SSE terminal event | No retry — report to LLM |
-| Peer stuck in `input-required` | Timeout | Retry with backoff, then report to LLM |
+- coordinators delegate
+- coordinators synthesize
+- coordinators do not quietly do the child work themselves
 
-### Default: Three Attempts Then Escalate
+This matters because Starfire wants hierarchy to remain operationally real, not cosmetic.
 
-The built-in `delegate_to_workspace` tool implements configurable retry with backoff:
+## A2A And Registration
 
-```python
-# workspace-template/tools/delegation.py
+Each workspace exposes an A2A server, builds an Agent Card, and registers with the platform. The platform is used for:
 
-PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
-WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "")
-DELEGATION_RETRY_ATTEMPTS = int(os.environ.get("DELEGATION_RETRY_ATTEMPTS", "3"))
-DELEGATION_RETRY_DELAY = float(os.environ.get("DELEGATION_RETRY_DELAY", "5.0"))
-DELEGATION_TIMEOUT = float(os.environ.get("DELEGATION_TIMEOUT", "120.0"))
+- discovery
+- liveness
+- event fanout
+- proxying browser-initiated A2A calls
 
-@tool
-async def delegate_to_workspace(workspace_id: str, task: str) -> dict:
-    """Delegate a task to a peer workspace via A2A protocol."""
-    # 1. Discover target URL via platform (enforces CanCommunicate)
-    discover_resp = await client.get(
-        f"{PLATFORM_URL}/registry/discover/{workspace_id}",
-        headers={"X-Workspace-ID": WORKSPACE_ID},
-    )
-    target_url = discover_resp.json()["url"]
-
-    # 2. Send A2A message/send with retry
-    for attempt in range(DELEGATION_RETRY_ATTEMPTS):
-        a2a_resp = await client.post(target_url, json={...})  # JSON-RPC 2.0
-        if a2a_resp.status_code == 200:
-            return {"success": True, "response": extract_text(a2a_resp)}
-        await asyncio.sleep(DELEGATION_RETRY_DELAY * (attempt + 1))
-
-    return {"success": False, "error": last_error, "workspace_id": workspace_id}
-```
-
-Note: The delegation tool sends A2A requests to the **root URL** of the target workspace (not `/a2a`), as the `a2a-sdk` serves all routes at root.
-
-### Why the LLM Decides
-
-The agent receives the failure return value in its context and decides the next step. Hardcoding "always retry" or "always fail up" is wrong for all cases. The LLM can reason contextually:
-
-- "QA Agent failed — I'll note it in my report and ask if they want to proceed without QA"
-- "Backend Agent crashed — likely transient, I'll retry in 60 seconds"
-- "Frontend Agent is offline — I'll attempt the task myself using my own skills"
-
-The system prompt tells the agent how to handle failures:
-
-```markdown
-## Handling delegation failures
-If a delegation fails:
-1. Check if the task is blocking — if not, continue other work
-2. Retry transient failures (connection errors) after 30 seconds
-3. For persistent failures, report to the caller with context
-4. Never silently drop a failed task
-```
-
-### Configuration
-
-Delegation defaults are configurable in `config.yaml`:
-
-```yaml
-delegation:
-  retry_attempts: 3
-  retry_delay: 5       # seconds, multiplied per attempt (backoff)
-  timeout: 120         # seconds before treating as crashed
-  escalate: true       # return failure to LLM on exhaustion
-```
-
-### Canvas Visibility
-
-When a delegation fails, the platform receives failure stats from the workspace heartbeat. The canvas shows a warning indicator on the edge between the two workspaces — a signal that delegation is struggling, not a blocking error.
-
-## Task Concurrency
-
-When a workspace has sub-workspaces, the agent delegates tasks to them and can run multiple delegated tasks concurrently.
-
-When a workspace has **no** sub-workspaces (a leaf agent), it handles concurrency as follows:
-
-- **Major features:** One at a time, sequentially. The agent completes one before starting the next.
-- **Side questions and small updates:** Can be handled in parallel alongside the current major feature.
-
-This means a leaf agent won't try to build two big features simultaneously, but it can answer a quick question or make a small fix while working on a larger task.
+But the long-term collaboration model remains direct workspace-to-workspace communication via A2A.
 
 ## Related Docs
 
-- [Skills](./skills.md) — Skill package structure and interface
-- [Config Format](./config-format.md) — Full `config.yaml` reference
-- [Provisioner](../architecture/provisioner.md) — How containers are deployed
-- [Workspace Tiers](../architecture/workspace-tiers.md) — How tier affects deployment
-- [Agent Card](./agent-card.md) — The identity document published at startup
-- [Bundle System](./bundle-system.md) — How configs compile to portable bundles
-- [A2A Protocol](../api-protocol/a2a-protocol.md) — How A2A wrapping works
-- [Registry & Heartbeat](../api-protocol/registry-and-heartbeat.md) — The heartbeat loop
+- [Agent Runtime Adapters](./cli-runtime.md)
+- [Skills](./skills.md)
+- [Config Format](./config-format.md)
+- [System Prompt Structure](./system-prompt-structure.md)
+- [Memory Architecture](../architecture/memory.md)

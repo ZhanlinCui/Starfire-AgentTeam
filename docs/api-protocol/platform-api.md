@@ -1,223 +1,208 @@
 # Platform API (Go Backend)
 
-The Go backend is the **control plane**. It does not run agent logic — it manages the infrastructure around agents.
+The Go backend is Starfire's control plane. It does not execute agent reasoning itself. It manages the infrastructure and coordination around workspaces.
 
 ## Responsibilities
 
-- Workspace CRUD (create, read, update, delete)
-- Agent Card registry (store and serve cards)
-- Heartbeat management (Redis TTL liveness detection)
-- Hierarchy-based peer discovery and access control
-- Structure event log (append-only change history)
-- WebSocket broadcaster (push events to canvas in real time)
-- Workspace provisioner (spin up tiered Docker-based workspaces)
-- Bundle import/export
+- workspace lifecycle
+- registry and heartbeats
+- hierarchy-aware discovery
+- A2A proxying for browser-initiated calls
+- approvals and activity logs
+- memory APIs
+- secrets and global secrets
+- files, templates, bundles, terminal, and viewport state
+- WebSocket fanout to canvas clients and workspaces
 
 ## Caller Identification
 
-All scoped endpoints use the `X-Workspace-ID` header to identify the calling workspace. The platform uses this to enforce access control via `CanCommunicate()`. Canvas clients do not send this header — they are not workspaces and have unrestricted read access (auth is handled in the SaaS layer).
+Workspace-scoped calls use the `X-Workspace-ID` header when the caller is another workspace. Browser/canvas calls do not send that header.
 
-## API Endpoints
+The platform uses the caller identity to enforce hierarchy-based access rules.
+
+## Core Endpoints
+
+### Health and metrics
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/metrics` | Prometheus metrics |
 
 ### Workspaces
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/workspaces` | Create workspace from template (body: `{ template, name, model, tier, parent_id, canvas }`) |
-| `GET` | `/workspaces` | List all workspaces (JOINs `canvas_layouts` — returns x, y, collapsed inline) |
-| `GET` | `/workspaces/:id` | Get workspace + agent card |
-| `PATCH` | `/workspaces/:id` | Update workspace fields (name, role, tier, model, parent_id) |
+|---|---|---|
+| `POST` | `/workspaces` | Create and provision a workspace |
+| `GET` | `/workspaces` | List workspaces with inline canvas layout data |
+| `GET` | `/workspaces/:id` | Get one workspace |
+| `PATCH` | `/workspaces/:id` | Update name, role, tier, runtime, parent, and similar fields |
 | `DELETE` | `/workspaces/:id` | Remove workspace |
-| `POST` | `/workspaces/:id/expand` | Expand workspace into a team (provisions sub-workspaces from config) |
-| `POST` | `/workspaces/:id/collapse` | Collapse team back to single workspace (stops sub-workspaces) |
-| `POST` | `/workspaces/:id/restart` | Restart offline/failed workspace (stops old container, re-provisions) |
-| `POST` | `/workspaces/:id/a2a` | Proxy A2A JSON-RPC to workspace agent (injects `messageId`, wraps envelope) |
+| `POST` | `/workspaces/:id/restart` | Restart workspace |
+| `POST` | `/workspaces/:id/pause` | Pause workspace |
+| `POST` | `/workspaces/:id/resume` | Resume workspace |
+| `POST` | `/workspaces/:id/a2a` | Proxy A2A request to the target workspace |
 
-Newly created workspaces also receive an `awareness_namespace` persisted on the workspace row and injected into the provisioned container as `AWARENESS_NAMESPACE` alongside `AWARENESS_URL`.
-
-### Config & Memory
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/workspaces/:id/config` | Get workspace config as JSON |
-| `PATCH` | `/workspaces/:id/config` | Update workspace config |
-| `GET` | `/workspaces/:id/memory` | List all memory entries |
-| `GET` | `/workspaces/:id/memory/:key` | Get a specific memory entry |
-| `POST` | `/workspaces/:id/memory` | Set a memory entry (body: `{ key, value, ttl_seconds? }`) |
-| `DELETE` | `/workspaces/:id/memory/:key` | Delete a memory entry |
-
-### Secrets (API Keys & Env Vars)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/workspaces/:id/secrets` | List secret keys only (values never exposed to browser) |
-| `POST` | `/workspaces/:id/secrets` | Set a secret (body: `{ key, value }`) — upsert |
-| `DELETE` | `/workspaces/:id/secrets/:key` | Delete a secret |
-| `GET` | `/workspaces/:id/model` | Get current model override from secrets |
-
-Secrets are stored in `workspace_secrets` as encrypted bytes when `SECRETS_ENCRYPTION_KEY` is configured, using AES-256-GCM at the application layer. In development, if the key is not set, the platform falls back to plaintext mode for compatibility. The provisioner decrypts secrets at container deploy time and injects them as environment variables. Common keys: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `MODEL_PROVIDER`, `AWARENESS_URL`, `AWARENESS_NAMESPACE`.
-
-### Terminal
-
-| Protocol | Path | Description |
-|----------|------|-------------|
-| `WS` | `/workspaces/:id/terminal` | WebSocket shell session into workspace container |
-
-Upgrades to WebSocket, creates a Docker exec `/bin/sh` session, bridges stdin/stdout. Sessions auto-close after 30 minutes of inactivity. WebSocket origins restricted to localhost.
-
-### Approvals (Human-in-the-Loop)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/approvals/pending` | List all pending approvals across workspaces (single query) |
-| `POST` | `/workspaces/:id/approvals` | Create approval request (body: `{ action, reason }`) |
-| `GET` | `/workspaces/:id/approvals` | List approvals for a workspace |
-| `POST` | `/workspaces/:id/approvals/:approvalId/decide` | Approve or deny (body: `{ decision, decided_by }`) |
-
-Pending approvals auto-expire after 10 minutes. Events: `APPROVAL_REQUESTED`, `APPROVAL_ESCALATED`, `APPROVAL_APPROVED`, `APPROVAL_DENIED`.
-
-### Agent Memories (HMA)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/workspaces/:id/memories` | Commit a memory fact (body: `{ content, scope }`) |
-| `GET` | `/workspaces/:id/memories` | Search memories (params: `q`, `scope`) |
-| `DELETE` | `/workspaces/:id/memories/:memoryId` | Delete a memory |
-
-Scopes: `LOCAL` (workspace only), `TEAM` (parent + siblings), `GLOBAL` (all read, root write only). Access enforced via `CanCommunicate()`.
-
-### Session Search
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/workspaces/:id/session-search` | Search the workspace's recent activity logs and local memories (params: `q`, `limit`) |
-
-This is the Hermes-style recall surface for the workspace: it reuses existing activity logs and memory rows instead of adding a new store. It is meant for looking back at recent decisions, tasks, and notes without reconstructing context from scratch.
-
-### Agents
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/workspaces/:id/agent` | Assign an agent to a workspace |
-| `PATCH` | `/workspaces/:id/agent` | Replace agent model (triggers `AGENT_REPLACED`) |
-| `DELETE` | `/workspaces/:id/agent` | Remove agent from workspace |
-| `POST` | `/workspaces/:id/agent/move` | Move agent to a different workspace (body: `{ target_workspace_id }`) |
+Workspace creation also assigns an `awareness_namespace` on the workspace row. That namespace is later injected into the provisioned runtime.
 
 ### Registry
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/registry/register` | Workspace announces itself on startup |
-| `POST` | `/registry/heartbeat` | Workspace sends liveness ping + health stats every 30s |
-| `POST` | `/registry/update-card` | Workspace pushes updated Agent Card after skill reload |
-| `GET` | `/registry/discover/:id` | Resolve workspace URL by ID (scoped — 403 for private sub-workspaces). Returns `{id, url, name}` for agent-to-agent calls (`X-Workspace-ID` header) |
+|---|---|---|
+| `POST` | `/registry/register` | Workspace registration on startup |
+| `POST` | `/registry/heartbeat` | Liveness and task updates |
+| `POST` | `/registry/update-card` | Push Agent Card updates after runtime/skill changes |
+| `GET` | `/registry/discover/:id` | Resolve workspace URL for A2A calls |
+| `GET` | `/registry/:id/peers` | List reachable peers |
+| `POST` | `/registry/check-access` | Validate reachability/access |
 
-See [Registry & Heartbeat](./registry-and-heartbeat.md) for the full flow.
-
-### Webhooks
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/webhooks/github` | GitHub webhook ingress for workspace-triggering events |
-| `POST` | `/webhooks/github/:id` | Same ingress, scoped to a specific workspace ID in the URL |
-
-GitHub webhook requests must include `X-Hub-Signature-256` and are verified with `GITHUB_WEBHOOK_SECRET`. The v1 handler accepts `issue_comment` and `pull_request_review_comment` events when `action == "created"`, translates them into an A2A `message/send` task, and forwards them through the existing workspace proxy path.
-
-### Hierarchy & Peers
+### Activity and recall
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/registry/:id/peers` | Get reachable workspaces (siblings + children + parent) |
-| `POST` | `/registry/check-access` | Validate if caller can communicate with target |
+|---|---|---|
+| `GET` | `/workspaces/:id/activity` | List activity rows |
+| `POST` | `/workspaces/:id/activity` | Report activity from a workspace |
+| `POST` | `/workspaces/:id/notify` | Emit user-facing notifications/activity |
+| `GET` | `/workspaces/:id/session-search` | Search recent activity + memory for recall |
 
-Communication topology is derived from the `parent_id` hierarchy — there is no manual connection wiring. See [Communication Rules](./communication-rules.md).
+### Memory
 
-### Activity Logs
+There are two distinct memory surfaces:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/workspaces/:id/activity` | List activity logs (params: `type`, `limit`) |
-| `POST` | `/workspaces/:id/activity` | Agent self-reports activity (body: `{ activity_type, method?, summary?, target_id?, status?, error_detail?, duration_ms?, metadata? }`) |
-
-Activity types: `a2a_send`, `a2a_receive`, `task_update`, `agent_log`, `skill_promotion`, `error`. Invalid types return 400. Limit defaults to 100, max 500. A2A proxy calls are logged automatically.
-
-### Traces (Langfuse)
+#### Scoped agent memory
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/workspaces/:id/traces` | List recent LLM traces from Langfuse (proxied) |
+|---|---|---|
+| `POST` | `/workspaces/:id/memories` | Commit a `LOCAL` / `TEAM` / `GLOBAL` memory |
+| `GET` | `/workspaces/:id/memories` | Search scoped memories |
+| `DELETE` | `/workspaces/:id/memories/:memoryId` | Delete an owned memory |
 
-### Events
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/events` | Get structure change log |
-| `GET` | `/events/:workspaceId` | Get events for one workspace |
-
-See [Event Log](../architecture/event-log.md) for details.
-
-### Templates & Files
+#### Key/value workspace memory
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/templates` | List available workspace templates (from `workspace-configs-templates/`) |
-| `POST` | `/templates/import` | Import agent folder as a new template (body: `{ name, files }`) |
-| `GET` | `/workspaces/:id/files` | List workspace config file tree |
-| `GET` | `/workspaces/:id/files/*path` | Read a workspace config file |
-| `PUT` | `/workspaces/:id/files/*path` | Write/create a workspace config file |
-| `PUT` | `/workspaces/:id/files` | Replace all workspace config files (body: `{ files }`) |
-| `DELETE` | `/workspaces/:id/files/*path` | Delete a workspace config file |
+|---|---|---|
+| `GET` | `/workspaces/:id/memory` | List key/value memory entries |
+| `GET` | `/workspaces/:id/memory/:key` | Get one key/value entry |
+| `POST` | `/workspaces/:id/memory` | Upsert a key/value entry with optional TTL |
+| `DELETE` | `/workspaces/:id/memory/:key` | Delete a key/value entry |
 
-All file paths are validated against path traversal (`../` and absolute paths blocked).
+### Secrets
 
-### Canvas Viewport
+#### Workspace secrets
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/canvas/viewport` | Get saved canvas pan/zoom state |
-| `PUT` | `/canvas/viewport` | Save canvas pan/zoom state (body: `{ x, y, zoom }`) |
+|---|---|---|
+| `GET` | `/workspaces/:id/secrets` | Return merged workspace + inherited global secret metadata |
+| `POST` | `/workspaces/:id/secrets` | Upsert workspace secret |
+| `PUT` | `/workspaces/:id/secrets` | Upsert workspace secret |
+| `DELETE` | `/workspaces/:id/secrets/:key` | Delete workspace secret |
+| `GET` | `/workspaces/:id/model` | Get workspace model override |
 
-### Team Expansion
+Important detail: `GET /workspaces/:id/secrets` does **not** return values. It returns key metadata plus a `scope` field so the frontend can distinguish inherited globals from workspace overrides.
+
+#### Global secrets
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/workspaces/:id/expand` | Expand workspace into team (creates sub-workspaces from config) |
-| `POST` | `/workspaces/:id/collapse` | Collapse team (stops and removes sub-workspaces) |
+|---|---|---|
+| `GET` | `/settings/secrets` | List global secret metadata |
+| `POST` | `/settings/secrets` | Upsert global secret |
+| `PUT` | `/settings/secrets` | Upsert global secret |
+| `DELETE` | `/settings/secrets/:key` | Delete global secret |
+
+Backward-compatible admin aliases also exist under `/admin/secrets`.
+
+### Approvals
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/approvals/pending` | List pending approvals |
+| `POST` | `/workspaces/:id/approvals` | Create approval request |
+| `GET` | `/workspaces/:id/approvals` | List approvals for a workspace |
+| `POST` | `/workspaces/:id/approvals/:approvalId/decide` | Approve or deny |
+
+### Team operations
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/workspaces/:id/expand` | Expand workspace into a team |
+| `POST` | `/workspaces/:id/collapse` | Collapse team back down |
+
+### Files and templates
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/templates` | List available templates |
+| `POST` | `/templates/import` | Import an agent folder as a new template |
+| `GET` | `/workspaces/:id/shared-context` | Read parent shared-context files |
+| `GET` | `/workspaces/:id/files` | List files under an allowed root |
+| `GET` | `/workspaces/:id/files/*path` | Read a file |
+| `PUT` | `/workspaces/:id/files/*path` | Write a file |
+| `PUT` | `/workspaces/:id/files` | Replace workspace file set |
+| `DELETE` | `/workspaces/:id/files/*path` | Delete a file |
+
+Allowed roots include `/configs`, `/workspace`, `/home`, and `/plugins`.
+
+### Terminal
+
+| Protocol | Path | Description |
+|---|---|---|
+| `WS` | `/workspaces/:id/terminal` | Terminal session into the running container |
 
 ### Bundles
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/bundles/import` | Provision workspace tree from bundle |
-| `GET` | `/bundles/export/:id` | Export running workspace as bundle |
+|---|---|---|
+| `GET` | `/bundles/export/:id` | Export workspace tree as a bundle |
+| `POST` | `/bundles/import` | Import a bundle |
 
-See [Bundle System](../agent-runtime/bundle-system.md) for the format specification.
+### Canvas viewport and events
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/canvas/viewport` | Get saved canvas pan/zoom |
+| `PUT` | `/canvas/viewport` | Save canvas pan/zoom |
+| `GET` | `/events` | List structure events |
+| `GET` | `/events/:workspaceId` | List workspace-scoped events |
 
 ### WebSocket
 
 | Protocol | Path | Description |
-|----------|------|-------------|
-| `WS` | `/ws` | Real-time structure events — canvas clients and workspace agents both subscribe |
+|---|---|---|
+| `WS` | `/ws` | Live events for canvas clients and workspaces |
 
-Both canvas clients and workspace agents connect to the same WebSocket endpoint. Workspaces send `X-Workspace-ID` header on connect — the platform filters events server-side so each workspace only receives events about workspaces it can communicate with (via `CanCommunicate()`). Canvas clients connect without the header and receive all events.
+Canvas clients receive the global event stream. Workspaces connect with `X-Workspace-ID` and receive filtered events based on communication rules.
+
+## A2A Proxy Behavior
+
+`POST /workspaces/:id/a2a` is more than a naive forwarder.
+
+It currently:
+
+- normalizes incoming JSON into JSON-RPC 2.0
+- injects `messageId` when missing
+- applies different timeout rules for browser-initiated vs workspace-initiated calls
+- logs the resulting A2A activity
+- broadcasts successful browser-initiated responses back to the canvas as `A2A_RESPONSE`
+- triggers restart flow when the target container is confirmed dead
+
+That is why the chat UX no longer depends on polling as the primary response path.
 
 ## Environment Variables
 
-```
-DATABASE_URL=postgres://dev:dev@postgres:5432/agentmolecule
+```bash
+DATABASE_URL=postgres://dev:dev@postgres:5432/agentmolecule?sslmode=prefer
 REDIS_URL=redis://redis:6379
 PORT=8080
-SECRETS_ENCRYPTION_KEY=...                # AES-256 key for workspace_secrets table
-ACTIVITY_RETENTION_DAYS=7                 # How long to keep activity logs (default: 7)
-ACTIVITY_CLEANUP_INTERVAL_HOURS=6         # How often to purge old logs (default: 6)
-CORS_ORIGINS=http://localhost:3000,http://localhost:3001  # Comma-separated allowed origins
-RATE_LIMIT=100                            # Requests per minute per IP (default: 100)
+SECRETS_ENCRYPTION_KEY=...
+ACTIVITY_RETENTION_DAYS=7
+ACTIVITY_CLEANUP_INTERVAL_HOURS=6
+CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+RATE_LIMIT=600
 ```
 
 ## Related Docs
 
 - [Registry & Heartbeat](./registry-and-heartbeat.md)
 - [Communication Rules](./communication-rules.md)
-- [Event Log](../architecture/event-log.md)
-- [Database Schema](../architecture/database-schema.md)
-- [Bundle System](../agent-runtime/bundle-system.md)
+- [Workspace Runtime](../agent-runtime/workspace-runtime.md)
+- [Canvas UI](../frontend/canvas.md)

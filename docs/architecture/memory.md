@@ -1,94 +1,131 @@
-# 🧠 Memory Architecture (HMA)
+# Memory Architecture (HMA)
 
-Starfire uses a completely novel approach to agent memory called **HMA (Hierarchical Memory Architecture)**. 
+Starfire's memory model is built around one principle:
 
-Unlike traditional multi-agent systems (like Mem0 or MemU) that utilize primitive global "Shared Memory" (where all agents query a massive, flat vector database), Starfire treats memory like **corporate data silos**. 
+> memory boundaries should follow organizational boundaries.
 
-If a company's HR department shouldn't expose employee salaries to the Engineering department, why should their respective AI Agents store facts in the same vector database? 
+That is the purpose of **HMA: Hierarchical Memory Architecture**.
 
-## Core Philosophy: Org-Chart Driven Isolation
+## The Three Scopes
 
-HMA enforces that **memory isolation perfectly mirrors the org chart topology**. We define three distinct tiers of memory scopes, strictly controlled by Postgres Row-Level Security (RLS) and the platform's `CanCommunicate` rules.
+| Scope | Meaning | Intended use |
+|---|---|---|
+| `LOCAL` | visible only to the current workspace | private scratch facts and local recall |
+| `TEAM` | visible to the local team boundary | handoffs between a parent and its direct children, or siblings under the same parent |
+| `GLOBAL` | readable across the tree; writable only from the root side | org-wide guidance, standards, shared institutional knowledge |
 
-In the current implementation, each workspace also receives its own awareness namespace. That namespace is the concrete runtime boundary behind these logical scopes: the agent still uses the same memory tools, but the backend routes requests into the workspace's isolated awareness space.
+These are the scopes exposed through the runtime memory tools:
 
----
+- `commit_memory(content, scope)`
+- `search_memory(query, scope)`
 
-### 1. L1: Local Memory (Personal Scratchpad)
-- **Scope**: Entirely isolated to the current independent Workspace node.
-- **Analogy**: A worker's personal notepad or clipboard.
-- **Usage**: Automatically managed by the agent's internal LangGraph `StateGraph`. Used for storing intermediate execution state, short-term task tracking, and specialized prompt iterations.
-- **Access Control**: **Invisible** to any other agent on the canvas, including direct parents or children.
+## What Exists In The Current Implementation
 
-### 2. L2: Team Shared Memory (Department Drive)
-- **Scope**: Accessible exclusively by a "Team" (defined as a parent node and its direct children).
-- **Analogy**: A departmental Google Drive folder or a team Slack channel.
-- **Usage**: When a child agent synthesizes valuable information (e.g., Frontend Agent learns a new API schema), it purposefully calls the `commit_memory(fact, scope='TEAM')` A2A tool. This fact is written to L2 memory.
-- **Access Control**: Any sibling agent (e.g., Backend Agent) or the Team Lead (parent) can use the `search_memory(scope='TEAM')` tool to retrieve it. Requests originating from outside this immediate team structure are hard-rejected with a HTTP 403 Forbidden.
+There are **multiple memory surfaces**, and the distinction matters.
 
-### 3. L3: Global Corporate Memory (Company Wiki)
-- **Scope**: Available to the entire organizational tree.
-- **Analogy**: The company Wiki, All-Hands announcements, or Employee Handbooks.
-- **Usage**: Top-down knowledge distribution. For instance, the company's brand voice guidelines, specific coding standards, or global APIs.
-- **Access Control**: Usually mounted physically at the Root Workspace. Readable by all nodes globally down the tree. Writable **only** by explicitly authorized Admin nodes or human users.
+### 1. Scoped agent memory (`agent_memories`)
 
----
+This is the HMA-facing storage used by:
 
-## Technical Implementation
+- `POST /workspaces/:id/memories`
+- `GET /workspaces/:id/memories`
+- runtime tools `commit_memory` / `search_memory`
 
-### 1. PostgreSQL + pgvector
-We leverage the platform's existing PostgreSQL instance equipped with the `pgvector` extension. 
-By persisting memory centrally rather than locally in each container, we drastically reduce memory fragmentation while letting the Platform gracefully enforce access control.
+It stores durable facts with a `LOCAL`, `TEAM`, or `GLOBAL` scope.
 
-**Schema Concept:**
+### 2. Workspace key/value memory (`workspace_memory`)
+
+This is the simpler key/value surface used by the canvas `Memory` tab:
+
+- `GET /workspaces/:id/memory`
+- `POST /workspaces/:id/memory`
+- `DELETE /workspaces/:id/memory/:key`
+
+It is useful for structured per-workspace state and optional TTL entries. It is not the same thing as scoped HMA memories.
+
+### 3. Activity recall (`session-search`)
+
+`GET /workspaces/:id/session-search` provides a thin recall surface over recent activity rows and memory rows. It is for “what just happened in this workspace?” rather than long-term semantic storage.
+
+### 4. Awareness-backed persistence
+
+When the runtime receives:
+
+```bash
+AWARENESS_URL=...
+AWARENESS_NAMESPACE=workspace:<id>
+```
+
+the same memory tools keep the same interface, but durable memory writes/reads are routed through the workspace's awareness namespace.
+
+This is the current production direction of the memory boundary: stable tool surface, stronger backend isolation.
+
+## Access Model
+
+Starfire's memory rules follow the same hierarchy logic as communication rules:
+
+- `LOCAL` belongs to one workspace
+- `TEAM` follows the immediate team boundary
+- `GLOBAL` is readable widely but writable only from the root side
+
+The platform-side memory handlers still apply reachability checks for shared/team reads instead of trusting callers blindly.
+
+## Current Schema Reality
+
+The current `agent_memories` migration is intentionally simple:
+
 ```sql
-CREATE TABLE agent_memories (
-    id UUID PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS agent_memories (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID REFERENCES workspaces(id),
-    content TEXT NOT NULL,
-    embedding vector(1536),
-    scope VARCHAR(10) CHECK (scope IN ('LOCAL', 'TEAM', 'GLOBAL')),
-    created_at TIMESTAMP DEFAULT NOW()
+    content      TEXT NOT NULL,
+    scope        VARCHAR(10) NOT NULL CHECK (scope IN ('LOCAL', 'TEAM', 'GLOBAL')),
+    created_at   TIMESTAMPTZ DEFAULT now(),
+    updated_at   TIMESTAMPTZ DEFAULT now()
 );
 ```
 
-### 2. A2A Memory Operations
-Memory interactions happen via standardized tool definitions exposed to the language model:
-- `search_memory("what is the database password", scope="TEAM")`
-- `commit_memory("the staging API URL is api.stage.com", scope="TEAM")`
+`pgvector` is **not enabled by default in the shipped migration**. The repo keeps vector support as an optional future extension, not as a current hard dependency. The docs should reflect that explicitly.
 
-### 3. Parent Context Inheritance (L2 complement)
+## Why This Architecture Matters
 
-L2 Team Memory stores facts explicitly committed at runtime. **Shared context** complements this by giving children access to the parent's static project knowledge (architecture docs, conventions, API schemas) without requiring the parent to commit each document as a memory entry.
+| Flat shared memory model | Starfire HMA |
+|---|---|
+| easy to over-share | scopes align to hierarchy |
+| unclear ownership | each memory belongs to a workspace and a scope |
+| recall and procedure blur together | memory stores facts, skills store repeatable procedure |
+| hard to govern | org structure and memory rules reinforce each other |
 
-The parent declares `shared_context: [architecture.md, conventions.md]` in its `config.yaml`. Children fetch these files at startup via `GET /workspaces/{parent_id}/shared-context` and inject them into their system prompt as a `## Parent Context` section. This is 1-level only — grandchildren see their direct parent's shared context, not the grandparent's.
+## Memory To Skill Promotion
 
-See [Config Format — shared_context](../agent-runtime/config-format.md) and [System Prompt Structure — Parent Context](../agent-runtime/system-prompt-structure.md).
+Starfire intentionally separates:
 
-### 4. Asynchronous Cognitive Consolidation
-Since Local Memory degrades as the context window fills, agents feature an independent Consolidation Loop. Similar to human sleep, when an agent reaches a configurable TTL of heartbeat-idleness, it can wake up a background goroutine/LangGraph thread to summarize noisy local scratchpad entries into dense, high-value knowledge facts, committing them back to L1 or L2 memory.
+- **durable fact storage**
+- **repeatable operational procedure**
 
-### 5. Memory-to-Skill Promotion
-When consolidation keeps surfacing the same stable workflow, the agent should stop treating it as a one-off memory entry and mark it as a reusable skill candidate. The promotion signal is intentionally simple:
+The documented promotion path is:
 
-- `memory-curation` compresses the durable result into a packet
-- repeated success evidence is recorded as `repetition_signal`
-- once the workflow has succeeded at least twice, `promote_to_skill = true`
-- `skill-authoring` turns the packet into a narrow `SKILL.md`
+1. a durable workflow is captured in memory
+2. repeated success becomes a signal
+3. the workflow is promoted into a skill package
+4. the runtime hot-reloads that skill
 
-This keeps the boundary clear: `awareness` stores durable memory, while skills store repeatable procedure. The hot-reload path then makes the new skill available without a restart.
+This is why memory and skills are presented as adjacent systems, not one merged blob.
 
-When a promotion packet is committed, the workspace emits a best-effort `skill_promotion` activity to the platform and follows it with a lightweight heartbeat update (`current_task = "Skill promotion: ..."`) so the promotion is visible in runtime telemetry and in the canvas task strip. The runtime does not auto-generate a separate skill registry or hidden lifecycle manager; it only surfaces the signal so the existing skill tools and hot-reload path can act on it.
+## Practical Summary
 
-### 6. Awareness, Recall, and Skill Promotion
-`awareness` is the durable memory backend for a workspace. It stores facts that should survive across turns, while `session-search` gives the workspace a thin recall surface over recent activity and memory rows. Together, they let the agent remember what mattered without introducing a second storage layer.
+If you need:
 
-The division of labor is intentionally narrow:
+- **private agent recall**: use `LOCAL`
+- **shared team handoff knowledge**: use `TEAM`
+- **org-wide guidance**: use `GLOBAL`
+- **simple UI-visible structured state**: use `workspace_memory`
+- **recent decision/task recall**: use `session-search`
+- **stronger durable isolation**: enable awareness namespaces
 
-- `memory-curation` decides what is durable and compresses it into a packet
-- `awareness` persists that packet inside the workspace's isolated namespace
-- `session-search` recovers recent decisions, notes, and activity traces
-- `skill-authoring` only runs when a repeated workflow is stable enough to become a reusable skill
-- `skills runtime` loads the resulting skill package and hot-reloads it into the agent
+## Related Docs
 
-This keeps the memory stack source-faithful to Hermes-style behavior: memory is for recall and persistence, skills are for repeatable procedure, and promotion is just a signal unless the normal skill lifecycle creates the actual package.
+- [Workspace Runtime](../agent-runtime/workspace-runtime.md)
+- [Skills](../agent-runtime/skills.md)
+- [Communication Rules](../api-protocol/communication-rules.md)
+- [Platform API](../api-protocol/platform-api.md)

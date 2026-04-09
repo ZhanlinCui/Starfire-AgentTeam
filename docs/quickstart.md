@@ -1,37 +1,51 @@
 # Quickstart Guide
 
-Get Starfire running locally in under 5 minutes. By the end, you'll have a working AI agent team on a visual canvas.
+This path is aligned to the current repository and current UI. It gets you from clone to a live workspace on the canvas without assuming any extra platform wrapper.
 
 ## Prerequisites
 
-- **Docker** (v24+) with Docker Compose v2
-- **Node.js** (v20+) — for the Canvas frontend
-- **Go** (v1.25+) — for the Platform backend
-- An **Anthropic API key** (get one at [console.anthropic.com](https://console.anthropic.com))
+- Docker + Docker Compose v2
+- Node.js 20+
+- Go 1.25+
+- One model/API key for the runtime you want to use
+  - `ANTHROPIC_API_KEY`
+  - `OPENAI_API_KEY`
+  - `GOOGLE_API_KEY`
+  - or another provider routed through LiteLLM
 
-## Step 1: Start Infrastructure
+## Step 1: Clone the repository
 
 ```bash
-# Clone the repo
-git clone https://github.com/yourusername/starfire.git
-cd starfire
+git clone https://github.com/ZhanlinCui/Starfire-AgentTeam.git
+cd Starfire-AgentTeam
+```
 
-# Start Postgres, Redis, and Langfuse
+## Step 2: Start the shared infrastructure
+
+Recommended:
+
+```bash
+./infra/scripts/setup.sh
+```
+
+That brings up Postgres, Redis, and Langfuse.
+
+If you only want the raw compose flow:
+
+```bash
 docker compose -f docker-compose.infra.yml up -d
 ```
 
-Wait ~30 seconds for Postgres to initialize.
-
-## Step 2: Start the Platform
+## Step 3: Start the platform
 
 ```bash
 cd platform
 go run ./cmd/server
 ```
 
-The platform API starts on `http://localhost:8080`. It manages workspaces, proxies A2A requests, and provisions agent containers.
+The control plane listens on `http://localhost:8080`.
 
-## Step 3: Start the Canvas
+## Step 4: Start the canvas
 
 In a new terminal:
 
@@ -41,81 +55,75 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` in your browser.
+Open `http://localhost:3000`.
 
-## Step 4: Create Your First Agent
+## Step 5: Deploy your first workspace
 
-1. The canvas shows a **Welcome** screen with templates
-2. Click any template (e.g., "General Assistant") or **Create blank workspace**
-3. The agent container starts provisioning automatically
+On a fresh canvas, the center empty state shows template cards plus a blank-workspace option.
 
-## Step 5: Set Your API Key
+You can either:
 
-1. Select the new workspace node on the canvas
-2. Open the **Config** tab in the side panel
-3. Expand **Secrets & API Keys**
-4. Set your `ANTHROPIC_API_KEY`
-5. The workspace auto-restarts with the new key
+1. Click a template to provision a ready-made workspace.
+2. Click `+ Create blank workspace`.
 
-## Step 6: Chat with Your Agent
+At the same time, the bottom-left onboarding wizard appears and guides the first-run flow.
 
-1. Switch to the **Chat** tab
-2. Type a message and press Enter
-3. The agent responds in real-time via WebSocket
+## Step 6: Add an API key
 
-You're up and running!
+1. Select the workspace.
+2. Open the `Config` tab.
+3. Expand `Secrets & API Keys`.
+4. Add the API key in either:
+   - `This Workspace`
+   - `Global (All Workspaces)`
 
----
+Global keys are inherited by all workspaces. Workspace keys override globals with the same name.
 
-## What's Next?
+## Step 7: Send the first message
 
-### Deploy a Team
-Right-click any workspace and select **Expand to Team**. The agent splits into a Team Lead + specialized sub-agents — all coordinating automatically via A2A protocol.
+1. Open the `Chat` tab.
+2. Send a prompt such as:
 
-### Nest Workspaces
-Drag one workspace onto another to create a hierarchy. Children report to parents, siblings collaborate, and the org chart enforces access control.
-
-### Add Skills
-Open the **Skills** tab to attach capabilities to your agent — web search, file management, code execution, and more.
-
-### Multi-Provider Models
-Start with LiteLLM for unified model routing:
-```bash
-docker compose --profile multi-provider up
+```text
+What can you help me with in this workspace?
 ```
-Then set `MODEL_PROVIDER` to any supported model (Claude, GPT-4, Deepseek, Ollama).
 
-### Cloud Deployment
-Use the one-click deploy buttons in the README for Railway or Render, or self-host on any Docker-capable VM.
+Responses are delivered through the platform A2A proxy and pushed back to the canvas through WebSocket events, with polling kept only as recovery fallback.
 
----
+## What To Try Next
+
+- **Expand to a team:** right-click a workspace and choose `Expand to Team`.
+- **Switch runtime:** use `Config -> Runtime` to move between LangGraph, DeepAgents, Claude Code, CrewAI, AutoGen, and OpenClaw.
+- **Inspect operations:** check `Activity`, `Traces`, `Events`, and `Terminal`.
+- **Use global keys:** configure one provider once in `Secrets & API Keys -> Global`.
+- **Import a template:** use the template palette or `POST /templates/import`.
+- **Import/export bundles:** duplicate or move workspace trees as `.bundle.json`.
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| Agent shows "offline" | Check Docker is running. Try right-click > Restart. |
-| "Agent not responding" | Verify your API key is set in Config > Secrets. |
-| No templates shown | Ensure the platform is running on `:8080`. |
-| WebSocket disconnects | Check browser console. The canvas auto-reconnects. |
+| Problem | What to check |
+|---|---|
+| Workspace stays offline | Platform is running, Docker is available, and the runtime has valid credentials |
+| Template palette is empty | `workspace-configs-templates/` exists and the platform can read it |
+| Chat says agent unavailable | Workspace status is not yet `online` or `degraded` |
+| No responses from model | Add the correct API key in `Secrets & API Keys` and restart the workspace |
+| Want direct DB access | Postgres and Redis are internal-only; use `docker compose exec postgres psql` or `docker compose exec redis redis-cli` |
 
-## Architecture at a Glance
+## Architecture At A Glance
 
+```text
+Browser  -->  Canvas (Next.js :3000)
+                |
+                v
+           Platform (Go :8080)
+             |       |       |
+             |       |       +--> WebSocket events / A2A proxy / templates / bundles
+             |       +----------> Redis
+             +------------------> Postgres
+                                |
+                                v
+                       Provisioned workspaces
+                     (LangGraph / Claude Code / CrewAI / AutoGen / etc.)
 ```
-Browser  ──HTTP/WS──>  Canvas (Next.js :3000)
-                           │
-                       HTTP/WS
-                           │
-                       Platform (Go :8080)
-                        ┌──┴──┐
-                    Postgres  Redis
-                        │
-                    Docker API
-                        │
-              ┌─────────┼─────────┐
-          Agent-1    Agent-2    Agent-N
-         (Python)   (Python)   (Python)
-              └─────A2A JSON-RPC──┘
-```
 
-For full architecture details, see [Architecture](./architecture/architecture.md).
+For the full system model, see [Architecture](./architecture/architecture.md).

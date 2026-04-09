@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: Starfire
-  text: The Organizational OS for AI Agents
-  tagline: Deploy, orchestrate, and scale AI agent teams on a visual canvas with built-in hierarchy, communication, and memory.
+  text: The Org-Native OS For AI Agent Teams
+  tagline: Visual canvas, Go control plane, pluggable runtimes, scoped memory, and operational guardrails for heterogeneous agent organizations.
   image:
     src: /assets/branding/starfire-icon.png
     alt: Starfire
@@ -16,39 +16,50 @@ hero:
       text: Architecture
       link: /architecture/architecture
     - theme: alt
-      text: API Reference
+      text: Platform API
       link: /api-protocol/platform-api
 
 features:
-  - title: Visual Agent Canvas
-    details: Drag-and-drop org chart for AI agents. Nest workspaces to create teams with automatic hierarchy-based access control.
-    icon: "🖼️"
-  - title: A2A Protocol
-    details: JSON-RPC 2.0 agent-to-agent communication. Agents discover peers, delegate tasks, and collaborate — platform stays out of the data path.
-    icon: "🔗"
-  - title: Runtime Agnostic
-    details: 9 runtime adapters — LangGraph, Claude Code, CrewAI, AutoGen, Ollama, and more. Bring any agent framework.
-    icon: "⚡"
-  - title: Fractal Team Expansion
-    details: One click to decompose any agent into a full team. The Team Lead + specialists self-organize via A2A.
-    icon: "🌳"
+  - title: Visual Org Canvas
+    details: Build agent organizations as nested workspaces on a live React Flow canvas with drag-to-nest hierarchy, template deployment, bundles, and real-time updates.
+    icon: "🗺️"
+  - title: Runtime Compatibility
+    details: Current main ships adapters for LangGraph, DeepAgents, Claude Code, CrewAI, AutoGen, and OpenClaw under one workspace contract and A2A surface.
+    icon: "⚙️"
   - title: Hierarchical Memory
-    details: L1 local, L2 team-shared, L3 global memory scopes. Agents build institutional knowledge that persists across sessions.
+    details: HMA-style LOCAL, TEAM, and GLOBAL scopes plus workspace-scoped awareness namespaces when awareness is configured.
     icon: "🧠"
-  - title: Global Secrets & Config
-    details: Platform-wide API keys inherited by all workspaces, with per-workspace overrides. AES-256-GCM encrypted at rest.
+  - title: Skill Evolution
+    details: Local SKILL.md packages, tool loading, plugin-mounted shared capabilities, hot reload, and a documented memory-to-skill promotion path.
+    icon: "🧩"
+  - title: Operational Control Plane
+    details: Registry, heartbeats, pause/resume/restart, approvals, activity logs, traces, terminal access, and runtime tiered provisioning.
+    icon: "🛡️"
+  - title: Global Secrets
+    details: Platform-wide API keys can be inherited by every workspace, with workspace-level overrides when a role needs custom credentials.
     icon: "🔐"
 ---
 
-## Quick Reference
+## What Current `main` Includes
 
-| Concept | Description |
-|---------|-------------|
-| **Workspace** | A containerized agent with a role, config, and position on the canvas |
-| **Team** | A parent workspace with child workspaces (fractal expansion) |
-| **A2A** | Agent-to-Agent protocol (JSON-RPC 2.0) for inter-workspace communication |
-| **Canvas** | Visual React Flow interface for managing the agent org chart |
-| **Platform** | Go control plane managing workspaces, routing, and provisioning |
-| **Tier** | Security isolation level (T1=sandboxed, T2=browser, T3=desktop, T4=full VM) |
-| **Skill** | A pluggable capability attached to an agent (search, code execution, etc.) |
-| **Memory** | L1 (local), L2 (team shared), L3 (global) hierarchical knowledge store |
+| Area | Current capability |
+|---|---|
+| **Canvas** | Empty-state deployment, onboarding guide, 10-tab side panel, template palette, bundle import/export, drag-to-nest teams, search, activity and trace views |
+| **Platform** | Workspace CRUD, registry, A2A proxy, team expansion, approvals, secrets, global secrets, memory APIs, files API, terminal, viewport persistence, WebSocket fanout |
+| **Runtime** | One workspace image with six shipping adapters on `main`: LangGraph, DeepAgents, Claude Code, CrewAI, AutoGen, OpenClaw |
+| **Memory** | Scoped agent memories, key/value workspace memory, session-search recall, awareness namespace injection |
+| **Skills** | Local skill packages, plugin-mounted shared skills/rules, audit/install/publish CLI helpers, hot reload |
+
+## Compatibility Note
+
+`main` currently ships six runtime adapters. `NemoClaw` appears in branch-level work (`feat/nemoclaw-t4-docker`) and is not documented here as merged `main` functionality.
+
+## Recommended Reading
+
+- [Quickstart](/quickstart)
+- [Product Overview](/product/overview)
+- [System Architecture](/architecture/architecture)
+- [Memory Architecture](/architecture/memory)
+- [Workspace Runtime](/agent-runtime/workspace-runtime)
+- [Canvas UI](/frontend/canvas)
+- [Platform API](/api-protocol/platform-api)
