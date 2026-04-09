@@ -34,6 +34,7 @@ export function ChatTab({ workspaceId, data }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const mountedRef = useRef(false);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) || null,
@@ -41,17 +42,17 @@ export function ChatTab({ workspaceId, data }: Props) {
   );
   const messages = activeSession?.messages || [];
 
-  // Persist sessions to localStorage on every change
+  // Persist sessions to localStorage on every change.
+  // Skip the initial mount save — we just loaded this data from storage.
+  // The parent renders ChatTab with key={workspaceId}, so this component
+  // remounts fresh for each workspace, preventing cross-workspace contamination.
   useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
     saveSessions(workspaceId, sessions);
   }, [workspaceId, sessions]);
-
-  // Reload sessions when workspace changes
-  useEffect(() => {
-    const loaded = loadSessions(workspaceId);
-    setSessions(loaded);
-    setActiveSessionId(loaded.length > 0 ? loaded[loaded.length - 1].id : "");
-  }, [workspaceId]);
 
   const checkAgent = useCallback(() => {
     // Agent reachability is derived from workspace status.
