@@ -364,6 +364,13 @@ func validateWorkspaceDir(dir string) error {
 	if strings.Contains(dir, "..") {
 		return fmt.Errorf("workspace_dir must not contain '..'")
 	}
+	// Reject system-critical paths
+	clean := filepath.Clean(dir)
+	for _, blocked := range []string{"/etc", "/var", "/proc", "/sys", "/dev", "/boot", "/sbin", "/bin", "/lib", "/usr"} {
+		if clean == blocked || strings.HasPrefix(clean, blocked+"/") {
+			return fmt.Errorf("workspace_dir must not be a system path (%s)", blocked)
+		}
+	}
 	return nil
 }
 

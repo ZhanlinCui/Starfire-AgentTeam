@@ -198,9 +198,12 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		role = ws.Role
 	}
 
-	// Convert empty workspace_dir to NULL
+	// Validate and convert workspace_dir to NULL if empty
 	var workspaceDir interface{}
 	if ws.WorkspaceDir != "" {
+		if err := validateWorkspaceDir(ws.WorkspaceDir); err != nil {
+			return fmt.Errorf("workspace %s: %w", ws.Name, err)
+		}
 		workspaceDir = ws.WorkspaceDir
 	}
 
