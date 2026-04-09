@@ -84,4 +84,5 @@ logs/
 backups/
 docs/.vitepress/dist/
 .claude-bridge/
+org-templates/**/.env
 org-templates/**/.auth-token

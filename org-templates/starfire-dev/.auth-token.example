@@ -1,6 +1,0 @@
-# Place your Claude OAuth token here.
-# Copy this file to .auth-token (gitignored) in each workspace folder,
-# or place one .auth-token at the org template root to share across all workspaces.
-#
-# To get your token:
-#   security find-generic-password -s "Claude Code-credentials" -w | python3 -c "import sys,json; print(json.load(sys.stdin).get('claudeAiOauth',{}).get('accessToken',''))"

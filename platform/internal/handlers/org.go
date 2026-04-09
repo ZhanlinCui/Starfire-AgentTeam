@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"strings"
+
+	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/models"
@@ -258,31 +261,30 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 			configFiles["system-prompt.md"] = []byte(ws.SystemPrompt)
 		}
 
-		// Auth token: check workspace folder → org root → claude-code-default template
-		if configFiles == nil {
-			configFiles = map[string][]byte{}
-		}
-		authToken := ""
-		if orgBaseDir != "" && ws.FilesDir != "" {
-			// 1. Workspace-specific .auth-token
-			if data, err := os.ReadFile(filepath.Join(orgBaseDir, ws.FilesDir, ".auth-token")); err == nil {
-				authToken = string(data)
+		// Inject secrets from .env files as workspace secrets.
+		// Resolution: workspace .env → org root .env (workspace overrides org root).
+		// Each line: KEY=VALUE → stored as encrypted workspace secret.
+		envVars := map[string]string{}
+		if orgBaseDir != "" {
+			// 1. Org root .env (shared defaults)
+			parseEnvFile(filepath.Join(orgBaseDir, ".env"), envVars)
+			// 2. Workspace-specific .env (overrides)
+			if ws.FilesDir != "" {
+				parseEnvFile(filepath.Join(orgBaseDir, ws.FilesDir, ".env"), envVars)
 			}
 		}
-		if authToken == "" && orgBaseDir != "" {
-			// 2. Org root .auth-token (shared across all workspaces)
-			if data, err := os.ReadFile(filepath.Join(orgBaseDir, ".auth-token")); err == nil {
-				authToken = string(data)
+		// Store as workspace secrets via DB
+		for key, value := range envVars {
+			encrypted, err := crypto.Encrypt([]byte(value))
+			if err != nil {
+				log.Printf("Org import: failed to encrypt secret %s for %s: %v", key, ws.Name, err)
+				continue
 			}
-		}
-		if authToken == "" {
-			// 3. Fall back to claude-code-default template
-			if data, err := os.ReadFile(filepath.Join(h.configsDir, "claude-code-default", ".auth-token")); err == nil {
-				authToken = string(data)
-			}
-		}
-		if authToken != "" {
-			configFiles[".auth-token"] = []byte(authToken)
+			db.DB.Exec(`
+				INSERT INTO workspace_secrets (workspace_id, key, encrypted_value)
+				VALUES ($1, $2, $3)
+				ON CONFLICT (workspace_id, key) DO UPDATE SET encrypted_value = $3, updated_at = now()
+			`, id, key, encrypted)
 		}
 
 		go h.workspace.provisionWorkspace(id, templatePath, configFiles, payload)
@@ -311,4 +313,32 @@ func countWorkspaces(workspaces []OrgWorkspace) int {
 		count += countWorkspaces(ws.Children)
 	}
 	return count
+}
+
+// parseEnvFile reads a .env file and adds KEY=VALUE pairs to the map.
+// Skips comments (#) and empty lines. Values can be quoted.
+func parseEnvFile(path string, out map[string]string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		// Strip surrounding quotes
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+			value = value[1 : len(value)-1]
+		}
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
 }
