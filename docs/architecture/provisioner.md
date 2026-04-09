@@ -9,8 +9,9 @@ The provisioner is the platform component that deploys workspace containers and 
 3. Provisioner reads the workspace config (tier, model, env requirements)
 4. Provisioner reads secrets from `workspace_secrets` table, decrypts them, prepares as env vars
 5. Provisioner deploys based on tier:
-   - **Tier 1-3:** Docker container on `agent-molecule-net`
-   - **Tier 4:** EC2 VM with dedicated isolation
+   - **T1 (Sandboxed):** Docker container, no `/workspace` mount
+   - **T2 (Standard):** Docker container + `/workspace` mount
+   - **T3 (Full Access):** Docker container, privileged + host PID
 5. Provisioner waits for first heartbeat (workspace is live)
 6. On first heartbeat: status transitions to `online`
 7. On timeout (3 minutes) or immediate error: status transitions to `failed`
@@ -40,14 +41,13 @@ This URL is pre-stored in both Postgres and Redis before the agent registers. Wh
 
 For external HTTPS access (multi-host mode), Nginx on the host handles TLS termination and proxies to the container.
 
-## EC2 Deployment (Tier 4)
+## Tier-Based Container Flags
 
-Tier 4 workspaces run on dedicated EC2 VMs for kernel-level isolation.
-
-**Environment variable delivery:**
-- Non-secret config is passed via EC2 **user data**
-- Secrets are fetched from the platform via a **one-time token** over HTTPS at startup
-- In production: swap to **SSM Parameter Store** — same interface, different backend
+| Tier | Flags |
+|------|-------|
+| T1 (Sandboxed) | Config volume only, no `/workspace` mount |
+| T2 (Standard) | Config + workspace volume, normal Docker |
+| T3 (Full Access) | Config + workspace + `--privileged` + `--pid=host` |
 
 ## Workspace Lifecycle States
 
@@ -69,7 +69,7 @@ provisioning -> online <-----> degraded
 - `degraded -> online`: error_rate < 10% (recovered)
 - `online/degraded -> offline`: heartbeat TTL expired OR proactive health sweep detects dead container
 - `offline -> provisioning`: auto-restart triggered by liveness monitor or health sweep
-- `provisioning -> failed`: 3min timeout or immediate Docker/EC2 error
+- `provisioning -> failed`: 3min timeout or immediate Docker error
 - `failed -> provisioning`: user clicks Retry on canvas
 - `offline -> online`: workspace re-registers (after auto-restart or manual restart)
 - `any -> removed`: user deletes workspace
@@ -147,22 +147,11 @@ See [Memory](./memory.md) for full memory backend details.
 
 When a workspace is deleted:
 1. Docker container is stopped and removed
-2. For EC2 (tier 4): VM is terminated
-3. Memory cleaned up based on backend (volume removed, DB rows deleted, or S3 prefix deleted)
-4. Workspace status set to `removed` in Postgres
-5. `WORKSPACE_REMOVED` event written
-6. Redis keys cleaned up
+2. Memory cleaned up (DB rows deleted, Redis keys cleared)
+3. Workspace status set to `removed` in Postgres
+4. `WORKSPACE_REMOVED` event written
 
 Structure events and agent card history are **never** deleted — only the conversational memory is cleaned.
-
-## Docker Flags by Tier
-
-| Tier | Flags |
-|------|-------|
-| 1 | `--network agent-molecule-net` no writable `/workspace` volume (config mount is read-only) |
-| 2 | `--network agent-molecule-net` + Playwright pre-installed |
-| 3 | `--network agent-molecule-net` + Xvfb + optional VNC |
-| 4 | N/A — EC2 VM, not Docker |
 
 ## Related Docs
 

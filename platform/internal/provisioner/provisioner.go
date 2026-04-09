@@ -180,17 +180,28 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		},
 	}
 
-	// Tier-based flags
-	// Note: ReadonlyRootfs is disabled because CLI runtimes (Claude Code, Codex)
-	// need writable filesystem for their runtime data (.claude/, .npm/, tmp files).
-	// Tier 1 still restricts the workspace volume (no writable /workspace).
-	if cfg.Tier == 1 {
+	// Tier-based access:
+	//   T1 (Sandboxed)    — no /workspace mount, config only
+	//   T2 (Standard)     — /workspace mount, normal container (default)
+	//   T3 (Full Access)  — privileged, host network, host PID
+	switch cfg.Tier {
+	case 1:
+		// Sandboxed: strip /workspace mount, keep only config + plugins
 		tier1Binds := []string{configMount}
 		if cfg.PluginsPath != "" {
 			tier1Binds = append(tier1Binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
 		}
 		hostCfg.Binds = tier1Binds
+	case 3:
+		// Full machine access: privileged mode + host PID.
+		// Keep the Docker network (not host network) so containers can still reach
+		// each other by name. Host networking conflicts with Docker networks and
+		// causes port collisions when multiple T3 containers run simultaneously.
+		hostCfg.Privileged = true
+		hostCfg.PidMode = "host"
+		log.Printf("Provisioner: T3 full-access mode for %s (privileged, host PID)", name)
 	}
+	// T2 is the default — no extra flags needed
 
 	// Network config — join agent-molecule-net with container name as alias
 	networkCfg := &network.NetworkingConfig{

@@ -1,54 +1,41 @@
 # Workspace Tiers
 
-The tier system solves the security boundary problem. Different workspace types need different levels of system access, and you cannot run a sudo-capable agent the same way as a text processor.
+Three tiers control the security boundary for each workspace. Higher tiers get more system access but less isolation.
 
 ## Tier Overview
 
-| Tier | Runtime | Capabilities | Use Case |
-|------|---------|-------------|----------|
-| 1 | Docker (no privileges) | Text/data processing only | SEO, marketing, analysis |
-| 2 | Docker + Playwright | Browser access | Web scraping, UI testing |
-| 3 | Docker + Xvfb | Full desktop/screen | Computer use agents |
-| 4 | EC2 VM | Sudo, filesystem, system | DevOps, Claude Code style |
+| Tier | Name | Container Flags | Use Case |
+|------|------|----------------|----------|
+| 1 | Sandboxed | No `/workspace` mount, config-only | SEO, marketing, analysis — text processing only |
+| 2 | Standard | Normal Docker + `/workspace` mount | Most agents — can read/write the codebase |
+| 3 | Full Access | Privileged + host network + host PID | Dev team, DevOps — full machine access |
 
-## Tier 1 — Headless (Most Workspaces)
+## T1 — Sandboxed
 
-Pure text/data processing. Docker container with no privileged flags, read-only filesystem, network-isolated. Used for SEO agents, marketing agents, analysis agents. Cheapest to run.
+Pure text/data processing. Docker container with no workspace mount — the agent can only see its own `/configs` directory. Used for agents that don't need codebase access (content writers, analysts, researchers).
 
-## Tier 2 — Browser
+## T2 — Standard (Default)
 
-Needs web browser access. Docker container with Playwright installed. Used for web scraping, form filling, UI testing, research agents. Still containerized — no host access.
+Normal Docker container with `/workspace` mounted (read-write). The agent can read and modify the codebase. Used for most development and coordination agents. Still containerized — no host access beyond the bind-mounted directories.
 
-## Tier 3 — Computer Use
+## T3 — Full Access
 
-Full desktop access. Docker container with Xvfb (virtual display) and optional VNC. Used for Claude Computer Use-style agents that control GUI applications. Still containerized — the "desktop" is virtual, not the host machine.
+Privileged Docker container with:
+- `--privileged` — full device access, can run Docker-in-Docker
+- `--network=host` — shares host network stack (can bind ports, access localhost services)
+- `--pid=host` — can see host processes
 
-## Tier 4 — Privileged / Sudo
-
-Full system access — can install packages, run arbitrary code, manage files, deploy infrastructure. Uses a real **EC2 VM** (not a container) for strong kernel-level isolation. Equivalent to running Claude Code. Never shared — dedicated instance per workspace.
-
-## Code Sandbox by Tier
-
-| Tier | Sandbox |
-|------|---------|
-| 1, 2 | No sandbox — tools are just API calls |
-| 3 | Docker-in-Docker (MVP), Firecracker or E2B (production) |
-| 4 | Already a dedicated VM — no extra sandbox needed |
-
-Tier 3 agents can run arbitrary code. Each execution spawns a throwaway container — network disabled, memory capped, read-only filesystem, destroyed after run. See [Code Sandbox](../development/code-sandbox.md) for details.
+Used for DevOps agents, system administration, and agents that need to interact with the host machine directly. The container has near-VM-level access to the host.
 
 ## How Tiers Work
 
-- The tier is stored in the workspace config (`config.yaml`)
-- The tier determines how the **provisioner** deploys the workspace (Docker flags, VM vs container, resource allocation)
-- The tier determines the **sandbox backend** for code execution
-- The workspace code is the **same** regardless of tier
-- The canvas shows a tier badge on each node
+- The tier is stored in both the database (`workspaces.tier`) and `config.yaml`
+- The provisioner reads the tier and sets Docker flags accordingly
+- The canvas shows a tier badge on each node (T1/T2/T3)
 - From A2A's perspective, **all tiers look identical** — same protocol, same Agent Card, same message format
+- Tier changes take effect on next restart
 
 ## Related Docs
 
-- [Code Sandbox](../development/code-sandbox.md) — Sandbox backends and configuration
-- [Workspace Runtime](../agent-runtime/workspace-runtime.md) — The generic runtime that runs at all tiers
 - [Provisioner](./provisioner.md) — How tiers affect deployment
 - [Architecture](./architecture.md) — Where tiers fit in the system

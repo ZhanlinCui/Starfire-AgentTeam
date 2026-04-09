@@ -57,7 +57,8 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 
 	// Read template from request body or try to find matching config
 	var body struct {
-		Template string `json:"template"`
+		Template       string `json:"template"`
+		ApplyTemplate  bool   `json:"apply_template"`  // force re-apply runtime-default template (e.g. after runtime change)
 	}
 	c.ShouldBindJSON(&body)
 
@@ -92,14 +93,15 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: dbRuntime}
 	log.Printf("Restart: workspace %s (%s) runtime=%q", wsName, id, dbRuntime)
 
-	// If runtime has a default template and no template was found yet, apply it
-	// (ensures CLAUDE.md, .claude/settings.json etc. get copied)
-	if templatePath == "" && payload.Runtime != "" {
-		runtimeTemplate := filepath.Join(h.configsDir, payload.Runtime+"-default")
+	// Apply runtime-default template ONLY when explicitly requested via "apply_template": true.
+	// Use case: runtime was changed via Config tab — need new runtime's base files.
+	// Normal restarts preserve existing config volume (user's model, skills, prompts).
+	if templatePath == "" && body.ApplyTemplate && dbRuntime != "" {
+		runtimeTemplate := filepath.Join(h.configsDir, dbRuntime+"-default")
 		if _, err := os.Stat(runtimeTemplate); err == nil {
 			templatePath = runtimeTemplate
-			configLabel = payload.Runtime + "-default"
-			log.Printf("Restart: applying runtime template %s for %s (%s)", configLabel, wsName, id)
+			configLabel = dbRuntime + "-default"
+			log.Printf("Restart: applying template %s (runtime change)", configLabel)
 		}
 	}
 
@@ -153,21 +155,6 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 	// Runtime from DB — no more config file parsing
 	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: dbRuntime}
 
-	var templatePath string
-	var configFiles map[string][]byte
-	// Apply runtime-default template if available
-	runtimeTemplate := filepath.Join(h.configsDir, dbRuntime+"-default")
-	if _, err := os.Stat(runtimeTemplate); err == nil {
-		templatePath = runtimeTemplate
-	} else {
-		template := findTemplateByName(h.configsDir, wsName)
-		if template != "" {
-			candidatePath := filepath.Join(h.configsDir, template)
-			if _, err := os.Stat(candidatePath); err == nil {
-				templatePath = candidatePath
-			}
-		}
-	}
-
-	go h.provisionWorkspace(workspaceID, templatePath, configFiles, payload)
+	// On auto-restart, do NOT re-apply templates — preserve existing config volume.
+	go h.provisionWorkspace(workspaceID, "", nil, payload)
 }

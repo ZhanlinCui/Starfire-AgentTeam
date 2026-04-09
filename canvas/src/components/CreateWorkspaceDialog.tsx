@@ -71,12 +71,11 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
 
           <div>
             <label className="text-[11px] text-zinc-400 block mb-1">Tier</label>
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {[
-                { value: 1, label: "T1", desc: "Basic" },
-                { value: 2, label: "T2", desc: "Browser" },
-                { value: 3, label: "T3", desc: "Desktop" },
-                { value: 4, label: "T4", desc: "VM" },
+                { value: 1, label: "T1", desc: "Sandboxed" },
+                { value: 2, label: "T2", desc: "Standard" },
+                { value: 3, label: "T3", desc: "Full Access" },
               ].map((t) => (
                 <button
                   key={t.value}
