@@ -180,28 +180,8 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		},
 	}
 
-	// Tier-based access:
-	//   T1 (Sandboxed)    — no /workspace mount, config only
-	//   T2 (Standard)     — /workspace mount, normal container (default)
-	//   T3 (Full Access)  — privileged, host network, host PID
-	switch cfg.Tier {
-	case 1:
-		// Sandboxed: strip /workspace mount, keep only config + plugins
-		tier1Binds := []string{configMount}
-		if cfg.PluginsPath != "" {
-			tier1Binds = append(tier1Binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
-		}
-		hostCfg.Binds = tier1Binds
-	case 3:
-		// Full machine access: privileged mode + host PID.
-		// Keep the Docker network (not host network) so containers can still reach
-		// each other by name. Host networking conflicts with Docker networks and
-		// causes port collisions when multiple T3 containers run simultaneously.
-		hostCfg.Privileged = true
-		hostCfg.PidMode = "host"
-		log.Printf("Provisioner: T3 full-access mode for %s (privileged, host PID)", name)
-	}
-	// T2 is the default — no extra flags needed
+	// Apply tier-based container configuration
+	ApplyTierConfig(hostCfg, cfg, configMount, name)
 
 	// Network config — join agent-molecule-net with container name as alias
 	networkCfg := &network.NetworkingConfig{
@@ -257,6 +237,59 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 
 	log.Printf("Provisioner: started container %s for workspace %s at %s (internal: %s)", name, cfg.WorkspaceID, hostURL, InternalURL(cfg.WorkspaceID))
 	return hostURL, nil
+}
+
+// ApplyTierConfig configures a HostConfig based on the workspace tier.
+// Extracted from Start() so it can be tested independently.
+//
+//   - Tier 1 (Sandboxed):  readonly rootfs, tmpfs /tmp, strip /workspace mount
+//   - Tier 2 (Standard):   resource limits (512 MiB memory, 1 CPU), no special flags (default)
+//   - Tier 3 (Privileged):  privileged mode, host PID, Docker network (not host)
+//   - Tier 4 (Full access): privileged, host PID, host network, Docker socket mount, all capabilities
+//
+// Unknown/zero tiers default to Tier 2 behavior (safe resource-limited container).
+func ApplyTierConfig(hostCfg *container.HostConfig, cfg WorkspaceConfig, configMount, name string) {
+	switch cfg.Tier {
+	case 1:
+		// Sandboxed: strip /workspace mount, keep only config + plugins
+		tier1Binds := []string{configMount}
+		if cfg.PluginsPath != "" {
+			tier1Binds = append(tier1Binds, fmt.Sprintf("%s:/plugins:ro", cfg.PluginsPath))
+		}
+		hostCfg.Binds = tier1Binds
+		// Readonly root filesystem with tmpfs for /tmp (agent needs scratch space)
+		hostCfg.ReadonlyRootfs = true
+		hostCfg.Tmpfs = map[string]string{
+			"/tmp": "rw,noexec,nosuid,size=64m",
+		}
+		log.Printf("Provisioner: T1 sandboxed mode for %s (readonly, no /workspace)", name)
+
+	case 3:
+		// Privileged access: privileged mode + host PID.
+		// Keep the Docker network (not host network) so containers can still reach
+		// each other by name. Host networking conflicts with Docker networks and
+		// causes port collisions when multiple T3 containers run simultaneously.
+		hostCfg.Privileged = true
+		hostCfg.PidMode = "host"
+		log.Printf("Provisioner: T3 privileged mode for %s (privileged, host PID)", name)
+
+	case 4:
+		// Full host access: everything from T3 + host network + Docker socket + all capabilities.
+		// Use for workspaces that need to manage other containers or access host services directly.
+		hostCfg.Privileged = true
+		hostCfg.PidMode = "host"
+		hostCfg.NetworkMode = "host"
+		// Mount Docker socket so workspace can manage containers
+		hostCfg.Binds = append(hostCfg.Binds, "/var/run/docker.sock:/var/run/docker.sock")
+		log.Printf("Provisioner: T4 full-host mode for %s (privileged, host PID, host network, docker socket)", name)
+
+	default:
+		// Tier 2 (Standard) and unknown tiers: normal container with resource limits.
+		// This is the safe default — no privileged access, reasonable resource caps.
+		hostCfg.Resources.Memory = 512 * 1024 * 1024    // 512 MiB
+		hostCfg.Resources.NanoCPUs = 1_000_000_000       // 1.0 CPU
+		log.Printf("Provisioner: T2 standard mode for %s (512m memory, 1 CPU)", name)
+	}
 }
 
 // CopyTemplateToContainer copies files from a host directory into /configs in the container.
