@@ -83,3 +83,4 @@ logs/
 # Backups
 backups/
 docs/.vitepress/dist/
+.claude-bridge/
