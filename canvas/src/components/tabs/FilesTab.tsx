@@ -58,6 +58,8 @@ export function FilesTab({ workspaceId }: Props) {
 
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [loadingDir, setLoadingDir] = useState<string | null>(null);
+  const expandedDirsRef = useRef(expandedDirs);
+  expandedDirsRef.current = expandedDirs;
 
   const loadFiles = useCallback(async (subPath = "", depth = 1) => {
     if (!subPath) setLoading(true);
@@ -93,7 +95,7 @@ export function FilesTab({ workspaceId }: Props) {
   }, [workspaceId, root]);
 
   const toggleDir = useCallback((dirPath: string) => {
-    const wasExpanded = expandedDirs.has(dirPath);
+    const wasExpanded = expandedDirsRef.current.has(dirPath);
     setExpandedDirs((prev) => {
       const next = new Set(prev);
       if (next.has(dirPath)) {
@@ -106,7 +108,7 @@ export function FilesTab({ workspaceId }: Props) {
     if (!wasExpanded) {
       loadFiles(dirPath, 1);
     }
-  }, [loadFiles, expandedDirs]);
+  }, [loadFiles]);
 
   useEffect(() => {
     setExpandedDirs(new Set());
@@ -535,6 +537,15 @@ function buildTree(files: FileEntry[]): TreeNode[] {
   return root;
 }
 
+interface TreeCallbacks {
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+  onDelete: (path: string) => void;
+  expandedDirs: Set<string>;
+  onToggleDir: (path: string) => void;
+  loadingDir: string | null;
+}
+
 function TreeView({
   nodes,
   selectedPath,
@@ -544,16 +555,7 @@ function TreeView({
   onToggleDir,
   loadingDir,
   depth = 0,
-}: {
-  nodes: TreeNode[];
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onDelete: (path: string) => void;
-  expandedDirs: Set<string>;
-  onToggleDir: (path: string) => void;
-  loadingDir: string | null;
-  depth?: number;
-}) {
+}: TreeCallbacks & { nodes: TreeNode[]; depth?: number }) {
   return (
     <div>
       {nodes.map((node) => (
@@ -582,16 +584,7 @@ function TreeItem({
   onToggleDir,
   loadingDir,
   depth,
-}: {
-  node: TreeNode;
-  selectedPath: string | null;
-  onSelect: (path: string) => void;
-  onDelete: (path: string) => void;
-  expandedDirs: Set<string>;
-  onToggleDir: (path: string) => void;
-  loadingDir: string | null;
-  depth: number;
-}) {
+}: TreeCallbacks & { node: TreeNode; depth: number }) {
   const isSelected = selectedPath === node.path;
   const expanded = expandedDirs.has(node.path);
   const isLoading = loadingDir === node.path;

@@ -170,7 +170,7 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		// Uses find + sh -c stat to output TYPE|SIZE|PATH per line.
 		output, err := h.execInContainer(ctx, containerName, []string{
 			"sh", "-c",
-			fmt.Sprintf(`find %s -maxdepth %d -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -not -name .DS_Store | while IFS= read -r f; do
+			fmt.Sprintf(`find '%s' -maxdepth %d -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -not -name .DS_Store | while IFS= read -r f; do
 				rel="${f#%s/}"; [ "$rel" = "%s" ] && continue; [ -z "$rel" ] && continue
 				if [ -d "$f" ]; then echo "d|0|$rel"; else s=$(stat -c %%s "$f" 2>/dev/null || stat -f %%z "$f" 2>/dev/null || echo 0); echo "f|$s|$rel"; fi
 			done`, listPath, depth, listPath, listPath),
