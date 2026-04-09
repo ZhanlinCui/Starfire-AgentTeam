@@ -149,6 +149,39 @@ Task execution
 
 This is one of Starfire's strongest long-term advantages: the system can get more operationally capable without turning into one giant hidden prompt.
 
+## Self-Improving Agent Teams, Built Into Starfire
+
+Most agent systems stop at "a smart runtime." Starfire pushes further: it gives teams a way to **capture what worked, promote repeatable procedure into skills, reload those improvements into live workspaces, and keep the whole loop visible at the platform level**.
+
+| Positioning lens | Conventional self-improving agent pattern | Starfire |
+|---|---|---|
+| **Unit of improvement** | A single agent session or runtime | A workspace, a team, and eventually the whole org graph |
+| **Operational surface** | Mostly hidden inside the agent loop | Visible in the platform, Canvas, activity stream, memory surfaces, and runtime controls |
+| **Strategic outcome** | A smarter agent | A compounding organization with durable knowledge and governed reusable skills |
+
+### Where that shows up in Starfire
+
+| Core mechanism | Starfire module(s) | Why it matters |
+|---|---|---|
+| **Durable memory that survives sessions** | `workspace-template/tools/memory.py`, `workspace-template/tools/awareness_client.py`, `platform/internal/handlers/memories.go` | Memory is not just durable, it is **workspace-scoped** and can route into awareness namespaces tied to the org structure |
+| **Cross-session recall** | `platform/internal/handlers/activity.go` (`/workspaces/:id/session-search`) | Recall spans both activity history and memory rows, so the system can search what happened and what was learned without inventing a separate hidden store |
+| **Skills built from experience** | `workspace-template/tools/memory.py` (`_maybe_log_skill_promotion`) | Promotion from memory into a skill candidate is surfaced as an explicit platform activity, not a silent internal side effect |
+| **Skill improvement during use** | `workspace-template/skills/watcher.py`, `workspace-template/skills/loader.py`, `workspace-template/main.py` | Skills hot-reload into the live runtime, so improvements become available on the next A2A task without restarting the workspace |
+| **Persistent skill lifecycle** | `platform/cmd/cli/cmd_agent_skill.go`, `workspace-template/plugins.py` | Skills are not just generated once; they can be audited, installed, published, shared, mounted by plugins, and governed as reusable operational assets |
+
+### Why this matters in Starfire
+
+1. **The learning loop is org-aware, not just session-aware.**
+   Memory can live at `LOCAL`, `TEAM`, or `GLOBAL` scope, and awareness namespaces give each workspace a durable identity boundary.
+
+2. **The learning loop is visible to operators.**
+   Promotion events, activity logs, current-task updates, traces, and WebSocket fanout mean self-improvement is part of the control plane, not a hidden black box.
+
+3. **The learning loop compounds across teams, not just one agent.**
+   A workflow learned by one workspace can become a governed skill, reload into the runtime, appear in the Agent Card, and become usable inside a larger organizational hierarchy.
+
+The result is not just “an agent that learns.” It is **an organization that gets more capable as its workspaces accumulate durable memory and reusable procedure**.
+
 ## What Ships In `main`
 
 ### Canvas
