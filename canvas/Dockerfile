@@ -3,6 +3,10 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
+ARG NEXT_PUBLIC_PLATFORM_URL=http://localhost:8080
+ARG NEXT_PUBLIC_WS_URL=ws://localhost:8080/ws
+ENV NEXT_PUBLIC_PLATFORM_URL=$NEXT_PUBLIC_PLATFORM_URL
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 RUN npm run build
 
 FROM node:20-alpine
