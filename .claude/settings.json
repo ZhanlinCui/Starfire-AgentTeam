@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/hongming/Documents/GitHub/Starfire-AgentTeam/.claude/hooks/check-inbox.sh"
+          }
+        ]
+      }
     ]
   },
   "mcpServers": {
