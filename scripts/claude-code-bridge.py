@@ -44,9 +44,57 @@ WS_ID_FILE = BRIDGE_DIR / "workspace_id"
 BRIDGE_DIR.mkdir(exist_ok=True)
 
 
-def notify(title: str, body: str):
-    """Log the message — Claude Code checks inbox via PreToolUse hook."""
-    logger.info(f"📬 {title}: {body[:100]}")
+REPO_ROOT = Path(__file__).parent.parent
+
+
+def process_with_claude(message: str, sender: str) -> str:
+    """Run Claude Code CLI to process the message and return a response.
+
+    This invokes `claude --print` with the workspace as cwd, giving it
+    full access to the codebase. The system prompt tells it to act as
+    a technical advisor responding to agent messages.
+    """
+    system_prompt = (
+        f"You are Claude Code Advisor, the CEO's technical advisor for the Starfire Agent Molecule platform. "
+        f"An agent named '{sender}' is asking you a question via A2A protocol. "
+        f"You have access to the full codebase at the current directory. "
+        f"Respond concisely and helpfully. If they ask about code, read the relevant files. "
+        f"If they report a bug, investigate. If they need a code review, do it. "
+        f"Keep responses under 500 words unless a detailed analysis is needed."
+    )
+
+    try:
+        result = subprocess.run(
+            [
+                "claude", "--print",
+                "--dangerously-skip-permissions",
+                "--system-prompt", system_prompt,
+                "-p", message,
+            ],
+            capture_output=True, text=True,
+            timeout=300,  # 5 min max
+            cwd=str(REPO_ROOT),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Parse JSON output if claude returns it
+            try:
+                out = json.loads(result.stdout)
+                if isinstance(out, dict) and "result" in out:
+                    return out["result"]
+            except json.JSONDecodeError:
+                pass
+            return result.stdout.strip()
+        else:
+            error = result.stderr.strip() or f"Exit code {result.returncode}"
+            logger.error(f"Claude CLI error: {error[:200]}")
+            return f"Claude Code processing error: {error[:200]}"
+    except subprocess.TimeoutExpired:
+        return "Request timed out (5 min limit). Try a more specific question."
+    except FileNotFoundError:
+        return "Claude CLI not installed. Install with: npm install -g @anthropic-ai/claude-code"
+    except Exception as e:
+        logger.error(f"Claude processing error: {e}")
+        return f"Processing error: {str(e)[:200]}"
 
 
 def resolve_workspace_name(workspace_id: str) -> str:
@@ -87,23 +135,19 @@ class A2AHandler(BaseHTTPRequestHandler):
 
             logger.info(f"📨 {sender_name}: {text[:80]}")
 
-            # Write to inbox
+            # Write to inbox log
             entry = {
                 "id": req_id,
                 "sender_id": sender_id,
                 "sender_name": sender_name,
                 "text": text,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "read": False,
             }
             with open(INBOX, "a") as f:
                 f.write(json.dumps(entry) + "\n")
 
-            # macOS notification for instant awareness
-            notify(f"Message from {sender_name}", text[:100])
-
-            # Acknowledge
-            response_text = f"Received by Claude Code. Will review shortly."
+            # Process with Claude Code CLI and respond immediately
+            response_text = process_with_claude(text, sender_name)
             self._send_a2a_response(req_id, response_text)
 
         elif method == "agent/card":
