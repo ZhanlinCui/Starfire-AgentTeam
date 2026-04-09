@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# E2E test: All 6 adapters — create one agent per runtime, test A2A between all
+# E2E test: All 7 adapters — create one agent per runtime, test A2A between all
 set -euo pipefail
 
 PLATFORM="${1:-http://localhost:8080}"
@@ -52,7 +52,7 @@ a2a_send() {
 }
 
 echo "============================================"
-echo "  All-Adapters E2E Test (6 runtimes)"
+echo "  All-Adapters E2E Test (7 runtimes)"
 echo "============================================"
 echo ""
 
@@ -75,6 +75,11 @@ CAROL=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'
 check "Create Carol (openclaw)" "provisioning" "$R"
 
 R=$(curl -s -X POST "$PLATFORM/workspaces" -H 'Content-Type: application/json' \
+  -d '{"name":"Cora-NemoClaw","role":"nemoclaw test","tier":2,"template":"nemoclaw"}')
+NEMO=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+check "Create Cora (nemoclaw)" "provisioning" "$R"
+
+R=$(curl -s -X POST "$PLATFORM/workspaces" -H 'Content-Type: application/json' \
   -d '{"name":"Dave-DeepAgents","role":"deepagents test","tier":2,"template":"deepagents"}')
 DAVE=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 check "Create Dave (deepagents)" "provisioning" "$R"
@@ -92,12 +97,12 @@ check "Create Frank (autogen)" "provisioning" "$R"
 # --- Set API keys (skip Claude which uses OAuth) ---
 echo ""
 echo "--- Step 2: Set API keys ---"
-for ID in $BOB $CAROL $DAVE $EVE $FRANK; do
+for ID in $BOB $CAROL $NEMO $DAVE $EVE $FRANK; do
   curl -s -X POST "$PLATFORM/workspaces/$ID/secrets" \
     -H 'Content-Type: application/json' \
     -d "{\"key\":\"OPENAI_API_KEY\",\"value\":\"$OPENAI_KEY\"}" > /dev/null
 done
-echo "Set OPENAI_API_KEY on 5 agents"
+echo "Set OPENAI_API_KEY on 6 agents"
 
 # Auto-restart happens automatically when secrets are set
 echo "Secrets trigger auto-restart — waiting for agents to come back..."
@@ -105,10 +110,11 @@ sleep 15
 
 # --- Wait for all online ---
 echo ""
-echo "--- Step 3: Wait for agents (OpenClaw ~3min, CrewAI/AutoGen/DeepAgents ~2min) ---"
+echo "--- Step 3: Wait for agents (OpenClaw/NemoClaw ~3min, CrewAI/AutoGen/DeepAgents ~2min) ---"
 
 wait_online "$ALICE" "Alice-Claude" 20 && check "Alice online" "ok" "ok" || check "Alice online" "online" "timeout"
 wait_online "$BOB" "Bob-LangGraph" 60 && check "Bob online" "ok" "ok" || check "Bob online" "online" "timeout"
+wait_online "$NEMO" "Cora-NemoClaw" 360 && check "Cora online" "ok" "ok" || check "Cora online" "online" "timeout"
 wait_online "$DAVE" "Dave-DeepAgents" 120 && check "Dave online" "ok" "ok" || check "Dave online" "online" "timeout"
 wait_online "$EVE" "Eve-CrewAI" 120 && check "Eve online" "ok" "ok" || check "Eve online" "online" "timeout"
 wait_online "$FRANK" "Frank-AutoGen" 120 && check "Frank online" "ok" "ok" || check "Frank online" "online" "timeout"
@@ -132,6 +138,11 @@ echo "  Talking to Carol (OpenClaw)..."
 RESP=$(a2a_send "$CAROL" "say hello in one word")
 echo "    -> $RESP"
 check "Carol responds" "hello" "$RESP"
+
+echo "  Talking to Cora (NemoClaw)..."
+RESP=$(a2a_send "$NEMO" "say hello in one word")
+echo "    -> $RESP"
+check "Cora responds" "hello" "$RESP"
 
 echo "  Talking to Dave (DeepAgents)..."
 RESP=$(a2a_send "$DAVE" "say hello in one word")
@@ -168,7 +179,7 @@ check "No ws-* dirs on host" "0" "$HOST_WS"
 # --- Cleanup ---
 echo ""
 echo "--- Step 7: Cleanup ---"
-for ID in $ALICE $BOB $CAROL $DAVE $EVE $FRANK; do
+for ID in $ALICE $BOB $CAROL $NEMO $DAVE $EVE $FRANK; do
   curl -s -X DELETE "$PLATFORM/workspaces/$ID" > /dev/null 2>&1
 done
 check "Cleanup" "ok" "ok"

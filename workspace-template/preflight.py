@@ -15,6 +15,7 @@ SUPPORTED_RUNTIMES = {
     "autogen",
     "deepagents",
     "openclaw",
+    "nemoclaw",
 }
 
 

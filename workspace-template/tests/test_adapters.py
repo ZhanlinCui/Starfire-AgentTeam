@@ -519,11 +519,46 @@ class TestOpenClawAdapter:
 
 
 # ============================================================================
+# 7. NemoClaw Adapter
+# ============================================================================
+
+class TestNemoClawAdapter:
+
+    def test_static_identity(self):
+        from adapters.nemoclaw.adapter import NemoClawAdapter
+        assert NemoClawAdapter.name() == "nemoclaw"
+        assert NemoClawAdapter.display_name() == "NemoClaw"
+        assert isinstance(NemoClawAdapter.description(), str)
+
+    def test_config_schema(self):
+        from adapters.nemoclaw.adapter import NemoClawAdapter
+        schema = NemoClawAdapter.get_config_schema()
+        assert isinstance(schema, dict)
+        assert "model" in schema
+        assert "gateway_port" in schema
+
+    def test_has_setup_and_create_executor(self):
+        from adapters.nemoclaw.adapter import NemoClawAdapter
+        import inspect
+        adapter = NemoClawAdapter()
+        assert inspect.iscoroutinefunction(adapter.setup)
+        assert inspect.iscoroutinefunction(adapter.create_executor)
+
+    @pytest.mark.asyncio
+    async def test_create_executor_returns_openclaw_executor(self):
+        from adapters.nemoclaw.adapter import NemoClawAdapter
+        from adapters.openclaw.adapter import OpenClawA2AExecutor
+
+        adapter = NemoClawAdapter()
+        result = await adapter.create_executor(_make_config())
+
+        assert isinstance(result, OpenClawA2AExecutor)
+
 # Cross-adapter: Adapter registry
 # ============================================================================
 
 class TestAdapterRegistry:
-    """Verify the adapter __init__.py discovers all 6 adapters."""
+    """Verify the adapter __init__.py discovers all 7 adapters."""
 
     @pytest.fixture(autouse=True)
     def clear_adapter_cache(self):
@@ -537,7 +572,7 @@ class TestAdapterRegistry:
         from adapters import discover_adapters
         adapters = discover_adapters()
         names = set(adapters.keys())
-        expected = {"langgraph", "crewai", "claude-code", "autogen", "deepagents", "openclaw"}
+        expected = {"langgraph", "crewai", "claude-code", "autogen", "deepagents", "openclaw", "nemoclaw"}
         assert expected == names, f"Missing: {expected - names}, Extra: {names - expected}"
 
     def test_no_duplicate_names(self):

@@ -9,7 +9,7 @@ Adapters live in `workspace-template/adapters/<runtime>/` and are auto-discovere
 The runtime is selected via `config.yaml`:
 
 ```yaml
-runtime: claude-code    # or: langgraph, openclaw, deepagents, crewai, autogen
+runtime: claude-code    # or: langgraph, openclaw, nemoclaw, deepagents, crewai, autogen
 runtime_config:
   model: sonnet
   auth_token_file: .auth-token
@@ -108,6 +108,16 @@ runtime: openclaw
 ```
 
 **Auth:** Uses OpenClaw's own authentication (configured during `openclaw setup`).
+
+### NemoClaw (`runtime: nemoclaw`)
+
+NemoClaw-managed runtime that initializes the sandbox/lifecycle layer and reuses the OpenClaw execution path for A2A task handling in the first release.
+
+```yaml
+runtime: nemoclaw
+```
+
+**Auth:** Uses the same model/provider credentials as the OpenClaw-backed execution path. NemoClaw onboarding is handled during adapter setup.
 
 ## Session Continuity (Claude Code)
 

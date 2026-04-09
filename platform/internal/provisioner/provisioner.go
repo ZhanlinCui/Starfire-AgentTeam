@@ -27,6 +27,7 @@ var RuntimeImages = map[string]string{
 	"langgraph":   "workspace-template:langgraph",
 	"claude-code": "workspace-template:claude-code",
 	"openclaw":    "workspace-template:openclaw",
+	"nemoclaw":    "workspace-template:nemoclaw",
 	"deepagents":  "workspace-template:deepagents",
 	"crewai":      "workspace-template:crewai",
 	"autogen":     "workspace-template:autogen",
