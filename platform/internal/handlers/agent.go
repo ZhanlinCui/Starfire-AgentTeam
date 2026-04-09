@@ -46,9 +46,13 @@ func (h *AgentHandler) Assign(c *gin.Context) {
 
 	// Check no active agent already assigned
 	var existingCount int
-	db.DB.QueryRowContext(ctx,
+	if err := db.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM agents WHERE workspace_id = $1 AND status = 'active'`, workspaceID,
-	).Scan(&existingCount)
+	).Scan(&existingCount); err != nil {
+		log.Printf("Agent assign check error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
 	if existingCount > 0 {
 		c.JSON(http.StatusConflict, gin.H{"error": "workspace already has an active agent, use PATCH to replace"})
 		return

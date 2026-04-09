@@ -24,7 +24,6 @@ class ReconnectingSocket {
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
-      console.log("WebSocket connected");
       this.attempt = 0;
       this.lastEventTime = Date.now();
       this.rehydrate();
@@ -36,13 +35,12 @@ class ReconnectingSocket {
       try {
         const msg: WSMessage = JSON.parse(event.data);
         useCanvasStore.getState().applyEvent(msg);
-      } catch (e) {
-        console.error("WebSocket message parse error:", e);
+      } catch {
+        // Malformed WS message — skip silently
       }
     };
 
     this.ws.onclose = () => {
-      console.log("WebSocket disconnected, reconnecting...");
       this.stopHealthCheck();
       const delay = Math.min(1000 * 2 ** this.attempt, 30000);
       this.attempt++;
@@ -81,8 +79,8 @@ class ReconnectingSocket {
       const { api } = await import("@/lib/api");
       const workspaces = await api.get<WorkspaceData[]>("/workspaces");
       useCanvasStore.getState().hydrate(workspaces);
-    } catch (e) {
-      console.error("Rehydration failed:", e);
+    } catch {
+      // Rehydration failed — will retry on next health check cycle
     }
   }
 
@@ -109,6 +107,7 @@ export interface WorkspaceData {
   last_sample_error: string;
   uptime_seconds: number;
   current_task: string;
+  runtime: string;
   x: number;
   y: number;
   collapsed: boolean;

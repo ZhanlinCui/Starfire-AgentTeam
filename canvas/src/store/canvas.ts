@@ -27,6 +27,7 @@ export interface WorkspaceNodeData extends Record<string, unknown> {
   url: string;
   parentId: string | null;
   currentTask: string;
+  runtime: string;
   needsRestart: boolean;
 }
 
