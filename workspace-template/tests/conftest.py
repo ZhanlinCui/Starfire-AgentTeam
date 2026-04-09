@@ -117,6 +117,8 @@ def _make_tools_mocks():
     tools_delegation_mod = ModuleType("tools.delegation")
     tools_delegation_mod.delegate_to_workspace = MagicMock()
     tools_delegation_mod.delegate_to_workspace.name = "delegate_to_workspace"
+    tools_delegation_mod.check_delegation_status = MagicMock()
+    tools_delegation_mod.check_delegation_status.name = "check_delegation_status"
 
     tools_approval_mod = ModuleType("tools.approval")
     tools_approval_mod.request_approval = MagicMock()

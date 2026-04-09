@@ -121,9 +121,10 @@ async def test_common_setup_returns_core_tools():
             for c in ctx:
                 c.stop()
 
-    assert len(result.langchain_tools) == 5
+    assert len(result.langchain_tools) == 6  # 6 core tools
     tool_names = [t.name for t in result.langchain_tools]
     assert "delegate_to_workspace" in tool_names
+    assert "check_delegation_status" in tool_names
     assert "request_approval" in tool_names
     assert "commit_memory" in tool_names
     assert "search_memory" in tool_names
@@ -151,7 +152,7 @@ async def test_common_setup_coordinator_adds_routing_tool():
                 c.stop()
 
     assert result.is_coordinator is True
-    assert len(result.langchain_tools) == 6  # 5 core + route_task_to_team
+    assert len(result.langchain_tools) == 7  # 6 core + route_task_to_team
     # Last tool should be route_task_to_team (function name or .name attribute)
     last_tool = result.langchain_tools[-1]
     tool_id = getattr(last_tool, "name", None) or getattr(last_tool, "__name__", "")

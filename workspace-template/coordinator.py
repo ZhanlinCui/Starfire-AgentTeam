@@ -124,11 +124,13 @@ async def route_task_to_team(
     )
 
     if decision.get("action") == "delegate_to_preferred_member":
-        return await delegate.ainvoke(
+        # Async delegation — returns immediately with task_id
+        result = await delegate.ainvoke(
             {
                 "workspace_id": decision["preferred_member_id"],
                 "task": task,
             }
         )
+        return result
 
     return decision
