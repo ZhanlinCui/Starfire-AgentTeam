@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { api } from "@/lib/api";
 import { useCanvasStore, summarizeWorkspaceCapabilities, type WorkspaceNodeData } from "@/store/canvas";
+import { showToast } from "../Toaster";
 
 interface Props {
   data: WorkspaceNodeData;
@@ -15,14 +17,181 @@ interface SkillEntry {
   examples: string[];
 }
 
+interface PluginInfo {
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  tags: string[];
+  skills: string[];
+}
+
 export function SkillsTab({ data }: Props) {
   const capability = summarizeWorkspaceCapabilities(data);
   const skills = useMemo(() => extractSkills(data.agentCard), [data.agentCard]);
   const setPanelTab = useCanvasStore((s) => s.setPanelTab);
   const promotionTask = data.currentTask.startsWith("Skill promotion:");
 
+  const [registry, setRegistry] = useState<PluginInfo[]>([]);
+  const [installed, setInstalled] = useState<PluginInfo[]>([]);
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [uninstalling, setUninstalling] = useState<string | null>(null);
+  const [showRegistry, setShowRegistry] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => { return () => { mountedRef.current = false; }; }, []);
+
+  const workspaceId = data.id;
+
+  const loadInstalled = useCallback(async () => {
+    try {
+      const result = await api.get<PluginInfo[]>(`/workspaces/${workspaceId}/plugins`);
+      if (mountedRef.current) setInstalled(result);
+    } catch { /* ignore */ }
+  }, [workspaceId]);
+
+  const loadRegistry = useCallback(async () => {
+    try {
+      const result = await api.get<PluginInfo[]>("/plugins");
+      if (mountedRef.current) setRegistry(result);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    loadInstalled();
+    loadRegistry();
+  }, [loadInstalled, loadRegistry]);
+
+  const installedNames = useMemo(() => new Set(installed.map((p) => p.name)), [installed]);
+
+  const handleInstall = async (pluginName: string) => {
+    setInstalling(pluginName);
+    try {
+      await api.post(`/workspaces/${workspaceId}/plugins`, { name: pluginName });
+      showToast(`Installed ${pluginName} — restarting workspace`, "success");
+      // Reload after restart settles
+      setTimeout(() => loadInstalled(), 15000);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Install failed", "error");
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const handleUninstall = async (pluginName: string) => {
+    setUninstalling(pluginName);
+    try {
+      await api.del(`/workspaces/${data.id}/plugins/${pluginName}`);
+      showToast(`Removed ${pluginName} — restarting workspace`, "success");
+      setInstalled((prev) => prev.filter((p) => p.name !== pluginName));
+      setTimeout(() => loadInstalled(), 15000);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Uninstall failed", "error");
+    } finally {
+      setUninstalling(null);
+    }
+  };
+
   return (
     <div className="p-4 space-y-4">
+      {/* Plugins section */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-zinc-500">Plugins</div>
+            <h3 className="mt-1 text-sm font-semibold text-zinc-100">
+              {installed.length} installed
+            </h3>
+          </div>
+          <button
+            onClick={() => setShowRegistry(!showRegistry)}
+            className="rounded-full border border-violet-700/50 bg-violet-950/30 px-3 py-1 text-[10px] text-violet-200 hover:bg-violet-900/40 transition-colors"
+          >
+            {showRegistry ? "Hide Registry" : "+ Install Plugin"}
+          </button>
+        </div>
+
+        {/* Installed plugins */}
+        {installed.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            {installed.map((p) => (
+              <div key={p.name} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800/60 bg-zinc-950/40 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-zinc-200">{p.name}</span>
+                    {p.version && <span className="text-[9px] text-zinc-600">v{p.version}</span>}
+                  </div>
+                  {p.description && <div className="text-[10px] text-zinc-500 truncate">{p.description}</div>}
+                  {p.skills && p.skills.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {p.skills.slice(0, 4).map((s) => (
+                        <span key={s} className="rounded-full bg-zinc-800/60 px-1.5 py-0.5 text-[8px] text-zinc-400">{s}</span>
+                      ))}
+                      {p.skills.length > 4 && (
+                        <span className="text-[8px] text-zinc-600">+{p.skills.length - 4}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleUninstall(p.name)}
+                  disabled={uninstalling === p.name}
+                  className="shrink-0 rounded-full border border-red-800/40 bg-red-950/20 px-2 py-0.5 text-[9px] text-red-400 hover:bg-red-900/30 disabled:opacity-30"
+                >
+                  {uninstalling === p.name ? "..." : "Remove"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Plugin registry (expandable) */}
+        {showRegistry && (
+          <div className="mt-3 border-t border-zinc-800/40 pt-3">
+            <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">Available plugins</div>
+            {registry.length === 0 ? (
+              <div className="text-[10px] text-zinc-600">No plugins in registry</div>
+            ) : (
+              <div className="space-y-1.5">
+                {registry.map((p) => {
+                  const isInstalled = installedNames.has(p.name);
+                  return (
+                    <div key={p.name} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800/40 bg-zinc-950/30 px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-zinc-300">{p.name}</span>
+                          {p.version && <span className="text-[9px] text-zinc-600">v{p.version}</span>}
+                        </div>
+                        {p.description && <div className="text-[10px] text-zinc-500 truncate">{p.description}</div>}
+                        {p.tags && p.tags.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {p.tags.map((t) => (
+                              <span key={t} className="rounded-full border border-zinc-700/40 px-1.5 py-0.5 text-[8px] text-zinc-500">{t}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {isInstalled ? (
+                        <span className="shrink-0 text-[9px] text-emerald-500">Installed</span>
+                      ) : (
+                        <button
+                          onClick={() => handleInstall(p.name)}
+                          disabled={installing === p.name}
+                          className="shrink-0 rounded-full border border-violet-700/50 bg-violet-950/30 px-2.5 py-0.5 text-[9px] text-violet-300 hover:bg-violet-900/40 disabled:opacity-30"
+                        >
+                          {installing === p.name ? "Installing..." : "Install"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Skills section */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -35,8 +204,7 @@ export function SkillsTab({ data }: Props) {
           </div>
         </div>
         <p className="mt-2 text-[11px] leading-5 text-zinc-500">
-          This is the live skill directory for the selected workspace. It is derived from the Agent Card,
-          so it updates when the workspace hot-reloads skills.
+          Live skill directory from the Agent Card — updates when the workspace hot-reloads skills.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
@@ -65,7 +233,7 @@ export function SkillsTab({ data }: Props) {
         <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/40 p-6 text-center">
           <div className="text-sm text-zinc-100">No skills loaded</div>
           <p className="mt-2 text-[11px] leading-5 text-zinc-500">
-            Add skills from the Config tab or let the runtime hot-load them from the workspace config.
+            Add skills from the Config tab, install a plugin above, or let the runtime hot-load them.
           </p>
         </div>
       ) : (
@@ -94,21 +262,6 @@ export function SkillsTab({ data }: Props) {
               {skill.description && (
                 <p className="mt-2 text-[11px] leading-5 text-zinc-400">{skill.description}</p>
               )}
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  onClick={() => setPanelTab("config")}
-                  className="rounded-full border border-zinc-700/70 bg-zinc-950/70 px-2.5 py-1 text-[9px] text-zinc-300 hover:bg-zinc-900"
-                >
-                  View in Config
-                </button>
-                <button
-                  onClick={() => setPanelTab("files")}
-                  className="rounded-full border border-zinc-700/70 bg-zinc-950/70 px-2.5 py-1 text-[9px] text-zinc-300 hover:bg-zinc-900"
-                >
-                  Open Files
-                </button>
-              </div>
 
               {skill.examples.length > 0 && (
                 <div className="mt-2">
