@@ -83,7 +83,29 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		"tier": payload.Tier,
 	})
 
-	// Auto-provision — always start a container
+	// External workspaces: no container provisioning — just set the URL and mark online
+	if payload.External {
+		if payload.URL != "" {
+			db.DB.ExecContext(ctx, `UPDATE workspaces SET url = $1, status = 'online', updated_at = now() WHERE id = $2`, payload.URL, id)
+			if err := db.CacheURL(ctx, id, payload.URL); err != nil {
+				log.Printf("External workspace: failed to cache URL for %s: %v", id, err)
+			}
+		} else {
+			db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, id)
+		}
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", id, map[string]interface{}{
+			"name": payload.Name, "external": true,
+		})
+		log.Printf("Created external workspace %s (%s) at %s", payload.Name, id, payload.URL)
+		c.JSON(http.StatusCreated, gin.H{
+			"id":       id,
+			"status":   "online",
+			"external": true,
+		})
+		return
+	}
+
+	// Auto-provision — start a container
 	if h.provisioner != nil {
 		var templatePath string
 		var configFiles map[string][]byte

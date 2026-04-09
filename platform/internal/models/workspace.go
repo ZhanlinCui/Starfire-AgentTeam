@@ -57,7 +57,9 @@ type CreateWorkspacePayload struct {
 	Template string  `json:"template"` // workspace-configs-templates folder name
 	Tier     int     `json:"tier"`
 	Model    string  `json:"model"`
-	Runtime  string  `json:"runtime"` // "python" (default) or "claude-code"
+	Runtime  string  `json:"runtime"`    // "langgraph" (default), "claude-code", etc.
+	External bool    `json:"external"`   // true = no Docker container, just a registered URL
+	URL      string  `json:"url"`        // for external workspaces: the A2A endpoint URL
 	ParentID *string `json:"parent_id"`
 	Canvas   struct {
 		X float64 `json:"x"`
