@@ -21,6 +21,7 @@ function makeNodeData(overrides: Partial<WorkspaceNodeData> = {}): WorkspaceNode
     parentId: null,
     currentTask: "",
     needsRestart: false,
+    runtime: "",
     ...overrides,
   };
 }

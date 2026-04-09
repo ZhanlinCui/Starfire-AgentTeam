@@ -22,7 +22,9 @@ func NewSecretsHandler(restartFunc func(string)) *SecretsHandler {
 }
 
 // List handles GET /workspaces/:id/secrets
-// Returns keys only — never exposes values to the frontend.
+// Returns a merged view: workspace-level overrides + inherited global secrets.
+// Each entry includes a "scope" field ("workspace" or "global") so the frontend
+// can distinguish overrides from inherited defaults. Never exposes values.
 func (h *SecretsHandler) List(c *gin.Context) {
 	workspaceID := c.Param("id")
 	if !uuidRegex.MatchString(workspaceID) {
@@ -30,6 +32,10 @@ func (h *SecretsHandler) List(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+
+	// 1. Workspace-level secrets
+	wsKeys := map[string]bool{}
+	secrets := make([]map[string]interface{}, 0)
 
 	rows, err := db.DB.QueryContext(ctx,
 		`SELECT key, created_at, updated_at FROM workspace_secrets WHERE workspace_id = $1 ORDER BY key`,
@@ -41,15 +47,44 @@ func (h *SecretsHandler) List(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	secrets := make([]map[string]interface{}, 0)
 	for rows.Next() {
 		var key, createdAt, updatedAt string
 		if err := rows.Scan(&key, &createdAt, &updatedAt); err != nil {
 			continue
 		}
+		wsKeys[key] = true
 		secrets = append(secrets, map[string]interface{}{
 			"key":        key,
 			"has_value":  true,
+			"scope":      "workspace",
+			"created_at": createdAt,
+			"updated_at": updatedAt,
+		})
+	}
+
+	// 2. Global secrets not overridden at workspace level
+	globalRows, err := db.DB.QueryContext(ctx,
+		`SELECT key, created_at, updated_at FROM global_secrets ORDER BY key`)
+	if err != nil {
+		log.Printf("List global secrets (merged) error: %v", err)
+		// Non-fatal: return workspace secrets only
+		c.JSON(http.StatusOK, secrets)
+		return
+	}
+	defer globalRows.Close()
+
+	for globalRows.Next() {
+		var key, createdAt, updatedAt string
+		if err := globalRows.Scan(&key, &createdAt, &updatedAt); err != nil {
+			continue
+		}
+		if wsKeys[key] {
+			continue // workspace override exists — skip global
+		}
+		secrets = append(secrets, map[string]interface{}{
+			"key":        key,
+			"has_value":  true,
+			"scope":      "global",
 			"created_at": createdAt,
 			"updated_at": updatedAt,
 		})
@@ -133,6 +168,94 @@ func (h *SecretsHandler) Delete(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "deleted", "key": key})
+}
+
+// ---------------------------------------------------------------------------
+// Global secrets — platform-wide API keys that apply to all workspaces.
+// Workspace-level secrets with the same key override globals.
+// ---------------------------------------------------------------------------
+
+// ListGlobal handles GET /admin/secrets
+func (h *SecretsHandler) ListGlobal(c *gin.Context) {
+	ctx := c.Request.Context()
+	rows, err := db.DB.QueryContext(ctx,
+		`SELECT key, created_at, updated_at FROM global_secrets ORDER BY key`)
+	if err != nil {
+		log.Printf("List global secrets error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+	defer rows.Close()
+
+	secrets := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var key, createdAt, updatedAt string
+		if err := rows.Scan(&key, &createdAt, &updatedAt); err != nil {
+			continue
+		}
+		secrets = append(secrets, map[string]interface{}{
+			"key":        key,
+			"has_value":  true,
+			"created_at": createdAt,
+			"updated_at": updatedAt,
+			"scope":      "global",
+		})
+	}
+	c.JSON(http.StatusOK, secrets)
+}
+
+// SetGlobal handles POST /admin/secrets
+func (h *SecretsHandler) SetGlobal(c *gin.Context) {
+	ctx := c.Request.Context()
+	var body struct {
+		Key   string `json:"key" binding:"required"`
+		Value string `json:"value" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	encrypted, err := crypto.Encrypt([]byte(body.Value))
+	if err != nil {
+		log.Printf("Encrypt global secret error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt"})
+		return
+	}
+
+	_, err = db.DB.ExecContext(ctx, `
+		INSERT INTO global_secrets (key, encrypted_value)
+		VALUES ($1, $2)
+		ON CONFLICT (key) DO UPDATE SET encrypted_value = $2, updated_at = now()
+	`, body.Key, encrypted)
+	if err != nil {
+		log.Printf("Set global secret error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "saved", "key": body.Key, "scope": "global"})
+}
+
+// DeleteGlobal handles DELETE /admin/secrets/:key
+func (h *SecretsHandler) DeleteGlobal(c *gin.Context) {
+	key := c.Param("key")
+	ctx := c.Request.Context()
+
+	result, err := db.DB.ExecContext(ctx,
+		`DELETE FROM global_secrets WHERE key = $1`, key)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete"})
+		return
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "secret not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "key": key, "scope": "global"})
 }
 
 // GetModel handles GET /workspaces/:id/model

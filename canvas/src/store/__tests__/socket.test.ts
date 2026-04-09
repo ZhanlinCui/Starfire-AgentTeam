@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.mocked(useCanvasStore.getState).mockReturnValue({
     applyEvent: vi.fn(),
     hydrate: vi.fn(),
-  } as ReturnType<typeof useCanvasStore.getState>);
+  } as unknown as ReturnType<typeof useCanvasStore.getState>);
 });
 
 afterEach(() => {
@@ -180,7 +180,7 @@ describe("WebSocket onmessage", () => {
     vi.mocked(useCanvasStore.getState).mockReturnValue({
       applyEvent,
       hydrate: vi.fn(),
-    } as ReturnType<typeof useCanvasStore.getState>);
+    } as unknown as ReturnType<typeof useCanvasStore.getState>);
 
     const msg = {
       event: "WORKSPACE_ONLINE",

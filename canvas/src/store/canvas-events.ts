@@ -1,6 +1,7 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { WSMessage } from "./socket";
 import type { WorkspaceNodeData } from "./canvas";
+import { extractResponseText } from "@/components/tabs/chat/message-parser";
 
 /**
  * Standalone event handler extracted from the canvas store.
@@ -180,6 +181,29 @@ export function handleCanvasEvent(
             ],
           },
         });
+      }
+      break;
+    }
+
+    case "A2A_RESPONSE": {
+      // A2A proxy completed — extract response text and store as agent message.
+      // This gives the ChatTab instant response delivery via WebSocket instead of polling.
+      const responseBody = msg.payload.response_body as Record<string, unknown> | undefined;
+      if (responseBody) {
+        const text = extractResponseText(responseBody);
+        if (text) {
+          const { agentMessages } = get();
+          const existing = agentMessages[msg.workspace_id] || [];
+          set({
+            agentMessages: {
+              ...agentMessages,
+              [msg.workspace_id]: [
+                ...existing,
+                { id: crypto.randomUUID(), content: text, timestamp: new Date().toISOString() },
+              ],
+            },
+          });
+        }
       }
       break;
     }

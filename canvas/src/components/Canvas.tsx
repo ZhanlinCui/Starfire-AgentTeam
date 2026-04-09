@@ -24,6 +24,7 @@ import { TemplatePalette } from "./TemplatePalette";
 import { ApprovalBanner } from "./ApprovalBanner";
 import { BundleDropZone } from "./BundleDropZone";
 import { EmptyState } from "./EmptyState";
+import { OnboardingWizard } from "./OnboardingWizard";
 import { SearchDialog } from "./SearchDialog";
 import { Toaster } from "./Toaster";
 import { Toolbar } from "./Toolbar";
@@ -251,6 +252,7 @@ function CanvasInner() {
       </ReactFlow>
 
       {nodes.length === 0 && <EmptyState />}
+      <OnboardingWizard />
       <Toolbar />
       <ApprovalBanner />
       <BundleDropZone />

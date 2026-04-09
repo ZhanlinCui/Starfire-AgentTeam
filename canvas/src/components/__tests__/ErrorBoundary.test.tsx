@@ -93,7 +93,7 @@ describe("ErrorBoundary", () => {
     expect(result).not.toBeNull();
     expect(typeof result).toBe("object");
     // The fallback is a div, not the original children
-    const element = result as React.ReactElement;
+    const element = result as React.ReactElement<{ className?: string }>;
     expect(element.props?.className).toContain("fixed");
     expect(element.props?.className).toContain("inset-0");
   });

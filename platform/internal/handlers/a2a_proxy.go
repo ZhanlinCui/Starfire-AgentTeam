@@ -22,7 +22,9 @@ const maxProxyRequestBody = 1 << 20
 const maxProxyResponseBody = 10 << 20
 
 // a2aClient is a shared HTTP client for proxying A2A requests to workspace agents.
-var a2aClient = &http.Client{Timeout: 30 * time.Minute}
+// No client-level timeout — timeouts are enforced per-request via context deadlines:
+// canvas = 5 min (Rule 3), agent-to-agent = 30 min (DoS cap).
+var a2aClient = &http.Client{}
 
 type proxyA2AError struct {
 	Status   int
@@ -137,15 +139,18 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 		a2aMethod = m
 	}
 
-	// Forward to the agent. Delegation chains (PM → Lead → Agent) can take arbitrarily long,
-	// so workspace-to-workspace requests have no timeout. Canvas-initiated requests (callerID=="")
-	// get a 5-minute timeout to prevent the browser from hanging indefinitely.
-	// WithoutCancel: survives client disconnect but still cancels on server shutdown.
+	// Forward to the agent. Uses WithoutCancel so delegation chains survive client
+	// disconnect (browser tab close). Canvas requests get 5-min timeout; agent-to-agent
+	// gets 30-min DoS safety cap.
 	startTime := time.Now()
 	forwardCtx := context.WithoutCancel(ctx)
 	if callerID == "" {
 		var cancel context.CancelFunc
 		forwardCtx, cancel = context.WithTimeout(forwardCtx, 5*time.Minute)
+		defer cancel()
+	} else {
+		var cancel context.CancelFunc
+		forwardCtx, cancel = context.WithTimeout(forwardCtx, 30*time.Minute)
 		defer cancel()
 	}
 	req, err := http.NewRequestWithContext(forwardCtx, "POST", agentURL, bytes.NewReader(body))
@@ -169,7 +174,9 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 			if running, _ := h.provisioner.IsRunning(ctx, workspaceID); !running {
 				containerDead = true
 				log.Printf("ProxyA2A: container for %s is dead — marking offline and triggering restart", workspaceID)
-				db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'offline', updated_at = now() WHERE id = $1 AND status NOT IN ('removed', 'provisioning')`, workspaceID)
+				if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'offline', updated_at = now() WHERE id = $1 AND status NOT IN ('removed', 'provisioning')`, workspaceID); err != nil {
+					log.Printf("ProxyA2A: failed to mark workspace %s offline: %v", workspaceID, err)
+				}
 				db.ClearWorkspaceKeys(ctx, workspaceID)
 				h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_OFFLINE", workspaceID, map[string]interface{}{})
 				go h.RestartByID(workspaceID)
@@ -245,6 +252,16 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 			DurationMs:   &durationMs,
 			Status:       logStatus,
 		})
+
+		// For canvas-initiated requests, broadcast the response via WebSocket
+		// so the frontend receives it instantly without polling.
+		if callerID == "" && resp.StatusCode < 400 {
+			h.broadcaster.BroadcastOnly(workspaceID, "A2A_RESPONSE", map[string]interface{}{
+				"response_body": json.RawMessage(respBody),
+				"method":        a2aMethod,
+				"duration_ms":   durationMs,
+			})
+		}
 	}
 	return resp.StatusCode, respBody, nil
 }

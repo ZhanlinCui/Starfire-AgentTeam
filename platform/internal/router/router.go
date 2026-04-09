@@ -144,8 +144,18 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	sech := handlers.NewSecretsHandler(wh.RestartByID)
 	r.GET("/workspaces/:id/secrets", sech.List)
 	r.POST("/workspaces/:id/secrets", sech.Set)
+	r.PUT("/workspaces/:id/secrets", sech.Set)
 	r.DELETE("/workspaces/:id/secrets/:key", sech.Delete)
 	r.GET("/workspaces/:id/model", sech.GetModel)
+
+	// Global secrets — /settings/secrets is the canonical path; /admin/secrets kept for backward compat
+	r.GET("/settings/secrets", sech.ListGlobal)
+	r.PUT("/settings/secrets", sech.SetGlobal)
+	r.POST("/settings/secrets", sech.SetGlobal)
+	r.DELETE("/settings/secrets/:key", sech.DeleteGlobal)
+	r.GET("/admin/secrets", sech.ListGlobal)
+	r.POST("/admin/secrets", sech.SetGlobal)
+	r.DELETE("/admin/secrets/:key", sech.DeleteGlobal)
 
 	// Terminal — shares Docker client with provisioner
 	var dockerCli *client.Client
