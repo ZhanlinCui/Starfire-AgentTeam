@@ -45,15 +45,8 @@ BRIDGE_DIR.mkdir(exist_ok=True)
 
 
 def notify(title: str, body: str):
-    """Send a macOS notification for instant awareness."""
-    if platform.system() == "Darwin":
-        try:
-            subprocess.run([
-                "osascript", "-e",
-                f'display notification "{body}" with title "{title}"'
-            ], capture_output=True, timeout=3)
-        except Exception:
-            pass
+    """Log the message — Claude Code checks inbox via PreToolUse hook."""
+    logger.info(f"📬 {title}: {body[:100]}")
 
 
 def resolve_workspace_name(workspace_id: str) -> str:
