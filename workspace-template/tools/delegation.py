@@ -56,6 +56,45 @@ class DelegationTask:
 # In-memory store of delegation tasks for this workspace
 _delegations: dict[str, DelegationTask] = {}
 _background_tasks: set[asyncio.Task] = set()
+MAX_DELEGATION_HISTORY = 100
+logger = __import__("logging").getLogger(__name__)
+
+
+def _evict_old_delegations():
+    """Remove completed/failed delegations when store exceeds MAX_DELEGATION_HISTORY."""
+    if len(_delegations) <= MAX_DELEGATION_HISTORY:
+        return
+    # Evict oldest completed/failed first
+    removable = [
+        tid for tid, d in _delegations.items()
+        if d.status in (DelegationStatus.COMPLETED, DelegationStatus.FAILED)
+    ]
+    for tid in removable[:len(_delegations) - MAX_DELEGATION_HISTORY]:
+        del _delegations[tid]
+
+
+def _on_task_done(task: asyncio.Task):
+    """Callback for background tasks — log unhandled exceptions."""
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception():
+        logger.error("Delegation background task failed: %s", task.exception())
+
+
+async def _notify_completion(task_id: str, target_workspace_id: str, status: str):
+    """Push notification to platform when delegation completes/fails."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/notify",
+                json={
+                    "type": "delegation_complete",
+                    "task_id": task_id,
+                    "target_workspace_id": target_workspace_id,
+                    "status": status,
+                },
+            )
+    except Exception:
+        pass  # Best-effort notification
 
 
 async def _execute_delegation(task_id: str, workspace_id: str, task: str):
@@ -151,6 +190,7 @@ async def _execute_delegation(task_id: str, workspace_id: str, task: str):
                             delegation.result = "\n".join(texts) if texts else str(task_result)
                             log_event(event_type="delegation", action="delegate", resource=workspace_id,
                                       outcome="success", trace_id=task_id, attempt=attempt + 1)
+                            await _notify_completion(task_id, workspace_id, "completed")
                             return
 
                         if "error" in result:
@@ -167,6 +207,7 @@ async def _execute_delegation(task_id: str, workspace_id: str, task: str):
             delegation.error = str(last_error)
             log_event(event_type="delegation", action="delegate", resource=workspace_id,
                       outcome="failure", trace_id=task_id, last_error=str(last_error))
+            await _notify_completion(task_id, workspace_id, "failed")
 
 
 @tool
@@ -206,10 +247,11 @@ async def delegate_to_workspace(
         task_description=task[:200],
     )
     _delegations[task_id] = delegation
+    _evict_old_delegations()
 
     bg_task = asyncio.create_task(_execute_delegation(task_id, workspace_id, task))
     _background_tasks.add(bg_task)
-    bg_task.add_done_callback(_background_tasks.discard)
+    bg_task.add_done_callback(_on_task_done)
 
     return {
         "success": True,
