@@ -137,12 +137,18 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 		a2aMethod = m
 	}
 
-	// Forward to the agent — no timeout. Agent liveness is monitored via heartbeat;
-	// if the agent dies, the TCP connection drops and the proxy returns an error.
-	// Delegation chains (PM → Lead → Agent) can take arbitrarily long.
+	// Forward to the agent. Delegation chains (PM → Lead → Agent) can take arbitrarily long,
+	// so workspace-to-workspace requests have no timeout. Canvas-initiated requests (callerID=="")
+	// get a 5-minute timeout to prevent the browser from hanging indefinitely.
 	// WithoutCancel: survives client disconnect but still cancels on server shutdown.
 	startTime := time.Now()
-	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), "POST", agentURL, bytes.NewReader(body))
+	forwardCtx := context.WithoutCancel(ctx)
+	if callerID == "" {
+		var cancel context.CancelFunc
+		forwardCtx, cancel = context.WithTimeout(forwardCtx, 5*time.Minute)
+		defer cancel()
+	}
+	req, err := http.NewRequestWithContext(forwardCtx, "POST", agentURL, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, &proxyA2AError{
 			Status:   http.StatusInternalServerError,

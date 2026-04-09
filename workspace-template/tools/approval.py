@@ -99,7 +99,10 @@ async def _create_approval_request(action: str, reason: str) -> dict:
             )
             if resp.status_code != 201:
                 return {"error": f"Failed to create request: {resp.status_code}"}
-            approval_id = resp.json().get("approval_id")
+            try:
+                approval_id = resp.json().get("approval_id")
+            except (ValueError, Exception):
+                return {"error": f"Platform returned invalid JSON (status {resp.status_code})"}
             logger.info("Approval requested: %s (id=%s)", action, approval_id)
             return {"approval_id": approval_id}
         except Exception as e:
