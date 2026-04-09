@@ -180,16 +180,16 @@ export function SidePanel() {
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto">
-        {panelTab === "details" && <DetailsTab workspaceId={selectedNodeId} data={node.data} />}
-        {panelTab === "skills" && <SkillsTab data={node.data} />}
-        {panelTab === "activity" && <ActivityTab workspaceId={selectedNodeId} />}
-        {panelTab === "chat" && <ChatTab workspaceId={selectedNodeId} data={node.data} />}
-        {panelTab === "terminal" && <TerminalTab workspaceId={selectedNodeId} />}
-        {panelTab === "config" && <ConfigTab workspaceId={selectedNodeId} />}
-        {panelTab === "files" && <FilesTab workspaceId={selectedNodeId} />}
-        {panelTab === "memory" && <MemoryTab workspaceId={selectedNodeId} />}
-        {panelTab === "traces" && <TracesTab workspaceId={selectedNodeId} />}
-        {panelTab === "events" && <EventsTab workspaceId={selectedNodeId} />}
+        {panelTab === "details" && <DetailsTab key={selectedNodeId} workspaceId={selectedNodeId} data={node.data} />}
+        {panelTab === "skills" && <SkillsTab key={selectedNodeId} data={node.data} />}
+        {panelTab === "activity" && <ActivityTab key={selectedNodeId} workspaceId={selectedNodeId} />}
+        {panelTab === "chat" && <ChatTab key={selectedNodeId} workspaceId={selectedNodeId} data={node.data} />}
+        {panelTab === "terminal" && <TerminalTab key={selectedNodeId} workspaceId={selectedNodeId} />}
+        {panelTab === "config" && <ConfigTab key={selectedNodeId} workspaceId={selectedNodeId} />}
+        {panelTab === "files" && <FilesTab key={selectedNodeId} workspaceId={selectedNodeId} />}
+        {panelTab === "memory" && <MemoryTab key={selectedNodeId} workspaceId={selectedNodeId} />}
+        {panelTab === "traces" && <TracesTab key={selectedNodeId} workspaceId={selectedNodeId} />}
+        {panelTab === "events" && <EventsTab key={selectedNodeId} workspaceId={selectedNodeId} />}
       </div>
 
       {/* Footer — workspace ID */}
