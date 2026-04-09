@@ -393,7 +393,7 @@ func TestProxyA2A_AgentUnreachable(t *testing.T) {
 	mr.Set(fmt.Sprintf("ws:%s:url", "ws-dead"), "http://127.0.0.1:1")
 
 	// Expect workspace name query for error activity log
-	mock.ExpectQuery("SELECT name FROM workspaces WHERE id =").
+	mock.ExpectQuery("SELECT name FROM workspaces").
 		WithArgs("ws-dead").
 		WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("Dead Agent"))
 	mock.ExpectExec("INSERT INTO activity_logs").
@@ -480,10 +480,10 @@ func TestDiscover_TargetOffline(t *testing.T) {
 		WithArgs("ws-off").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow("ws-off", nil))
 
-	// Name lookup
-	mock.ExpectQuery("SELECT name FROM workspaces WHERE id =").
+	// Name + runtime lookup (discovery now queries both)
+	mock.ExpectQuery("SELECT COALESCE").
 		WithArgs("ws-off").
-		WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow("Offline Agent"))
+		WillReturnRows(sqlmock.NewRows([]string{"name", "runtime"}).AddRow("Offline Agent", "langgraph"))
 
 	// No cached internal URL → falls to DB status check → offline
 	mock.ExpectQuery("SELECT status FROM workspaces WHERE id =").

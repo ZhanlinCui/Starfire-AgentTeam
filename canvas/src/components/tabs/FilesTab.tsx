@@ -377,6 +377,9 @@ export function FilesTab({ workspaceId }: Props) {
               selectedPath={selectedFile}
               onSelect={openFile}
               onDelete={root === "/configs" ? requestDeleteFile : () => {}}
+              expandedDirs={expandedDirs}
+              onToggleDir={toggleDir}
+              loadingDir={loadingDir}
             />
           )}
         </div>
@@ -519,12 +522,18 @@ function TreeView({
   selectedPath,
   onSelect,
   onDelete,
+  expandedDirs,
+  onToggleDir,
+  loadingDir,
   depth = 0,
 }: {
   nodes: TreeNode[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
   onDelete: (path: string) => void;
+  expandedDirs: Set<string>;
+  onToggleDir: (path: string) => void;
+  loadingDir: string | null;
   depth?: number;
 }) {
   return (
@@ -536,6 +545,9 @@ function TreeView({
           selectedPath={selectedPath}
           onSelect={onSelect}
           onDelete={onDelete}
+          expandedDirs={expandedDirs}
+          onToggleDir={onToggleDir}
+          loadingDir={loadingDir}
           depth={depth}
         />
       ))}
@@ -548,16 +560,23 @@ function TreeItem({
   selectedPath,
   onSelect,
   onDelete,
+  expandedDirs,
+  onToggleDir,
+  loadingDir,
   depth,
 }: {
   node: TreeNode;
   selectedPath: string | null;
   onSelect: (path: string) => void;
   onDelete: (path: string) => void;
+  expandedDirs: Set<string>;
+  onToggleDir: (path: string) => void;
+  loadingDir: string | null;
   depth: number;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const isSelected = selectedPath === node.path;
+  const expanded = expandedDirs.has(node.path);
+  const isLoading = loadingDir === node.path;
 
   if (node.isDir) {
     return (
@@ -565,9 +584,9 @@ function TreeItem({
         <div
           className="group w-full flex items-center gap-1 px-2 py-0.5 text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => onToggleDir(node.path)}
         >
-          <span className="text-[9px] text-zinc-500 w-3">{expanded ? "▼" : "▶"}</span>
+          <span className="text-[9px] text-zinc-500 w-3">{isLoading ? "…" : expanded ? "▼" : "▶"}</span>
           <span className="text-[10px]">📁</span>
           <span className="text-[10px] text-zinc-400 flex-1">{node.name}</span>
           <button
@@ -586,6 +605,9 @@ function TreeItem({
             selectedPath={selectedPath}
             onSelect={onSelect}
             onDelete={onDelete}
+            expandedDirs={expandedDirs}
+            onToggleDir={onToggleDir}
+            loadingDir={loadingDir}
             depth={depth + 1}
           />
         )}
