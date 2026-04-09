@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/provisioner"
@@ -38,11 +39,25 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// Workspace-to-workspace: return Docker-internal URL (containers can't reach host ports)
+	// External workspaces: return their registered URL with host.docker.internal
 	// Canvas/external: return host-accessible URL
 	if callerID != "" {
-		// Look up workspace name for agent-to-agent discovery responses
-		var wsName string
-		db.DB.QueryRowContext(ctx, `SELECT name FROM workspaces WHERE id = $1`, targetID).Scan(&wsName)
+		var wsName, wsRuntime string
+		db.DB.QueryRowContext(ctx, `SELECT COALESCE(name,''), COALESCE(runtime,'langgraph') FROM workspaces WHERE id = $1`, targetID).Scan(&wsName, &wsRuntime)
+
+		// External workspaces: return their URL rewritten for Docker container access
+		if wsRuntime == "external" {
+			var wsURL string
+			db.DB.QueryRowContext(ctx, `SELECT COALESCE(url,'') FROM workspaces WHERE id = $1`, targetID).Scan(&wsURL)
+			if wsURL != "" {
+				// Rewrite 127.0.0.1 → host.docker.internal so containers can reach the host
+				dockerURL := strings.Replace(wsURL, "127.0.0.1", "host.docker.internal", 1)
+				dockerURL = strings.Replace(dockerURL, "localhost", "host.docker.internal", 1)
+				c.JSON(http.StatusOK, gin.H{"id": targetID, "url": dockerURL, "name": wsName})
+				return
+			}
+		}
+
 		// Try cached internal URL first
 		if internalURL, err := db.GetCachedInternalURL(ctx, targetID); err == nil && internalURL != "" {
 			c.JSON(http.StatusOK, gin.H{"id": targetID, "url": internalURL, "name": wsName})
