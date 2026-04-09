@@ -8,15 +8,16 @@ The provisioner is the platform component that deploys workspace containers and 
 2. Platform writes a `WORKSPACE_PROVISIONING` event and broadcasts it (canvas shows spinner)
 3. Provisioner reads the workspace config (tier, model, env requirements)
 4. Provisioner reads secrets from `workspace_secrets` table, decrypts them, prepares as env vars
-5. Provisioner deploys based on tier:
-   - **T1 (Sandboxed):** Docker container, no `/workspace` mount
-   - **T2 (Standard):** Docker container + `/workspace` mount
-   - **T3 (Full Access):** Docker container, privileged + host PID
+5. Provisioner deploys based on tier (via `ApplyTierConfig()`):
+   - **T1 (Sandboxed):** Docker container, readonly rootfs, tmpfs /tmp, no `/workspace` mount
+   - **T2 (Standard):** Docker container + `/workspace` mount + resource limits (512 MiB, 1 CPU)
+   - **T3 (Privileged):** Docker container, `--privileged` + host PID (Docker network, not host)
+   - **T4 (Full Access):** Docker container, privileged + host PID + host network + Docker socket
 5. Provisioner waits for first heartbeat (workspace is live)
 6. On first heartbeat: status transitions to `online`
 7. On timeout (3 minutes) or immediate error: status transitions to `failed`
 
-## Docker Networking (Tier 1-3)
+## Docker Networking (Tier 1-3, Tier 4 uses host)
 
 All workspace containers join the `agent-molecule-net` Docker network. Containers are named `ws-{id[:12]}` (first 12 chars of workspace UUID). Two exported helpers in `provisioner` package provide the canonical naming:
 
@@ -45,9 +46,12 @@ For external HTTPS access (multi-host mode), Nginx on the host handles TLS termi
 
 | Tier | Flags |
 |------|-------|
-| T1 (Sandboxed) | Config volume only, no `/workspace` mount |
-| T2 (Standard) | Config + workspace volume, normal Docker |
-| T3 (Full Access) | Config + workspace + `--privileged` + `--pid=host` |
+| T1 (Sandboxed) | Config volume only, readonly rootfs, tmpfs /tmp, no `/workspace` mount |
+| T2 (Standard) | Config + workspace volume, 512 MiB memory, 1 CPU |
+| T3 (Privileged) | Config + workspace + `--privileged` + `--pid=host` (Docker network) |
+| T4 (Full Access) | Config + workspace + `--privileged` + `--pid=host` + `--network=host` + Docker socket |
+
+Tier configuration is applied via the exported `ApplyTierConfig()` function in `provisioner.go`. Unknown or zero tier values default to T2 (safe resource-limited container).
 
 ## Workspace Lifecycle States
 
