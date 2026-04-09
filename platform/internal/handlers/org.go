@@ -240,16 +240,15 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 			}
 		}
 
-		var configFiles map[string][]byte
-		if templatePath == "" {
-			configFiles = h.workspace.ensureDefaultConfig(id, payload)
-		}
+		// Always generate default config.yaml (runtime, model, tier, etc.)
+		configFiles := h.workspace.ensureDefaultConfig(id, payload)
 
-		// Load files from files_dir (system-prompt.md, CLAUDE.md, skills/, etc.)
+		// Copy files_dir contents on top (system-prompt.md, CLAUDE.md, skills/, etc.)
+		// Uses templatePath for CopyTemplateToContainer — runs AFTER configFiles are written
 		if ws.FilesDir != "" && orgBaseDir != "" {
 			filesPath := filepath.Join(orgBaseDir, ws.FilesDir)
 			if info, err := os.Stat(filesPath); err == nil && info.IsDir() {
-				templatePath = filesPath // copy entire directory into /configs
+				templatePath = filesPath
 			}
 		}
 
