@@ -363,6 +363,24 @@ Re-hydrate on every reconnect — don't try to replay missed events, just fetch 
 
 Workspace agents use the same pattern (exponential backoff reconnect) but don't re-hydrate — missed peer events just mean the system prompt might be slightly stale until the next relevant event fires on the 30s heartbeat cycle.
 
+## Error Handling
+
+### ErrorBoundary
+
+A React class component (`canvas/src/components/ErrorBoundary.tsx`) wraps the entire app in `layout.tsx`. It catches unhandled React render errors and displays a full-screen fallback UI with:
+
+- Error message (handles null errors gracefully with "Unknown error")
+- "Reload" button (triggers `window.location.reload()`)
+- "Report" link (opens mailto with error details)
+
+Caught errors and component stacks are logged to `console.error`.
+
+### Hydration Error Banner
+
+When the initial `GET /workspaces` fetch fails during page load, a fixed red banner appears at the top of the viewport showing the error message (including `PLATFORM_URL` for debugging). A "Retry" button clears the error and re-attempts hydration by calling `hydrateData()` again.
+
+Viewport fetch failure (`GET /canvas/viewport`) is non-fatal -- only workspace fetch failure triggers the banner.
+
 ## Environment Variables
 
 ```

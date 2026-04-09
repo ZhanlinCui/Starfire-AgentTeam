@@ -62,6 +62,19 @@ Workspace secrets (API keys, credentials) are stored in Postgres with AES-256 en
 
 Concurrent canvas modifications from multiple clients use last-write-wins. No optimistic locking or CRDTs for MVP.
 
+## 13. Security Headers on All Responses
+
+The platform applies HTTP security headers via middleware (`platform/internal/middleware/securityheaders.go`):
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+
+These are applied after CORS middleware on every response.
+
+## 14. No Exposed Database Ports
+
+Postgres and Redis must not expose host ports. They communicate exclusively over the internal Docker network (`agent-molecule-net`). Use `docker compose exec` for direct access during development.
+
 ## Related Docs
 
 - [SaaS Upgrade Path](../product/saas-upgrade.md) — How auth and multi-tenancy are added

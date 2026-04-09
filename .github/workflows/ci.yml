@@ -22,7 +22,17 @@ jobs:
       - run: go build ./cmd/server
       - run: go build -o molecli ./cmd/cli
       - run: go vet ./...
-      - run: go test ./...
+      - name: Run tests with race detection and coverage
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Check coverage baseline
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          THRESHOLD=25
+          awk "BEGIN{if ($COVERAGE < $THRESHOLD) exit 1}" || {
+            echo "::error::Coverage ${COVERAGE}% is below the ${THRESHOLD}% threshold"
+            exit 1
+          }
 
   canvas-build:
     name: Canvas (Next.js)
@@ -38,7 +48,7 @@ jobs:
       - run: rm -f package-lock.json && npm install
       - run: npm run build
       - name: Run tests
-        run: npx vitest run --passWithNoTests
+        run: npx vitest run
 
   mcp-server-build:
     name: MCP Server (Node.js)
@@ -69,5 +79,5 @@ jobs:
           python-version: '3.11'
           cache: pip
           cache-dependency-path: workspace-template/requirements.txt
-      - run: pip install -r requirements.txt pytest pytest-asyncio
-      - run: pytest --no-header -q
+      - run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov
+      - run: python -m pytest --tb=short -q --cov=. --cov-report=term-missing

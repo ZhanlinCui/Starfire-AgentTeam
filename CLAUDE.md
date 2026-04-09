@@ -81,8 +81,8 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 
 ### Unit Tests
 ```bash
-cd platform && go test ./...                    # 141 Go tests (handlers, registry, CLI — sqlmock + miniredis)
-cd canvas && npm test                            # 61 Vitest store tests
+cd platform && go test -race ./...               # 358 Go tests (handlers, registry, provisioner, CLI — sqlmock + miniredis)
+cd canvas && npm test                            # 188 Vitest tests (store, components, hydration)
 cd workspace-template && python -m pytest -v     # 148 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli)
 ```
 
@@ -109,10 +109,10 @@ Exposes 20 tools for managing Starfire from Claude Code, Cursor, Codex, or any M
 
 ### CI Pipeline
 GitHub Actions (`.github/workflows/ci.yml`) runs on push to main and PRs:
-- **platform-build**: Go build, vet, test
-- **canvas-build**: npm build, vitest
+- **platform-build**: Go build, vet, `go test -race` with coverage profiling (25% baseline threshold)
+- **canvas-build**: npm build, `vitest run` (no `--passWithNoTests` -- tests must exist and pass)
 - **mcp-server-build**: npm build
-- **python-lint**: pytest
+- **python-lint**: `pytest --cov=. --cov-report=term-missing` (pytest-cov enabled)
 
 ### Docker Compose
 ```bash
