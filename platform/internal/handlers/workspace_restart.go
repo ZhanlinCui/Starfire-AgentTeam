@@ -180,22 +180,39 @@ func (h *WorkspaceHandler) Pause(c *gin.Context) {
 		return
 	}
 
-	// Stop container if provisioner is available
-	if h.provisioner != nil {
-		h.provisioner.Stop(ctx, id)
+	// Collect this workspace + all descendants to pause
+	toPause := []struct{ id, name string }{{id, wsName}}
+	rows, _ := db.DB.QueryContext(ctx,
+		`WITH RECURSIVE descendants AS (
+			SELECT id, name FROM workspaces WHERE parent_id = $1 AND status NOT IN ('removed', 'paused')
+			UNION ALL
+			SELECT w.id, w.name FROM workspaces w JOIN descendants d ON w.parent_id = d.id WHERE w.status NOT IN ('removed', 'paused')
+		) SELECT id, name FROM descendants`, id)
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var cid, cname string
+			if rows.Scan(&cid, &cname) == nil {
+				toPause = append(toPause, struct{ id, name string }{cid, cname})
+			}
+		}
 	}
 
-	// Mark as paused — health sweep and liveness monitor will skip this workspace
-	db.DB.ExecContext(ctx,
-		`UPDATE workspaces SET status = 'paused', url = '', updated_at = now() WHERE id = $1`, id)
-	db.ClearWorkspaceKeys(ctx, id)
+	// Stop containers and mark all as paused
+	for _, ws := range toPause {
+		if h.provisioner != nil {
+			h.provisioner.Stop(ctx, ws.id)
+		}
+		db.DB.ExecContext(ctx,
+			`UPDATE workspaces SET status = 'paused', url = '', updated_at = now() WHERE id = $1`, ws.id)
+		db.ClearWorkspaceKeys(ctx, ws.id)
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PAUSED", ws.id, map[string]interface{}{
+			"name": ws.name,
+		})
+	}
 
-	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PAUSED", id, map[string]interface{}{
-		"name": wsName,
-	})
-
-	log.Printf("Paused workspace %s (%s)", wsName, id)
-	c.JSON(http.StatusOK, gin.H{"status": "paused"})
+	log.Printf("Paused workspace %s (%s) + %d children", wsName, id, len(toPause)-1)
+	c.JSON(http.StatusOK, gin.H{"status": "paused", "paused_count": len(toPause)})
 }
 
 // Resume handles POST /workspaces/:id/resume
@@ -223,16 +240,39 @@ func (h *WorkspaceHandler) Resume(c *gin.Context) {
 		return
 	}
 
-	db.DB.ExecContext(ctx,
-		`UPDATE workspaces SET status = 'provisioning', updated_at = now() WHERE id = $1`, id)
-	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", id, map[string]interface{}{
-		"name": wsName, "tier": tier,
-	})
+	// Collect this workspace + all paused descendants to resume
+	type wsInfo struct {
+		id, name, runtime string
+		tier              int
+	}
+	toResume := []wsInfo{{id, wsName, dbRuntime, tier}}
+	rows, _ := db.DB.QueryContext(ctx,
+		`WITH RECURSIVE descendants AS (
+			SELECT id, name, tier, COALESCE(runtime, 'langgraph') AS runtime FROM workspaces WHERE parent_id = $1 AND status = 'paused'
+			UNION ALL
+			SELECT w.id, w.name, w.tier, COALESCE(w.runtime, 'langgraph') FROM workspaces w JOIN descendants d ON w.parent_id = d.id WHERE w.status = 'paused'
+		) SELECT id, name, tier, runtime FROM descendants`, id)
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var ws wsInfo
+			if rows.Scan(&ws.id, &ws.name, &ws.tier, &ws.runtime) == nil {
+				toResume = append(toResume, ws)
+			}
+		}
+	}
 
-	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: dbRuntime}
-	// Resume uses existing config volume — no template needed
-	go h.provisionWorkspace(id, "", nil, payload)
+	// Re-provision all
+	for _, ws := range toResume {
+		db.DB.ExecContext(ctx,
+			`UPDATE workspaces SET status = 'provisioning', updated_at = now() WHERE id = $1`, ws.id)
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", ws.id, map[string]interface{}{
+			"name": ws.name, "tier": ws.tier,
+		})
+		payload := models.CreateWorkspacePayload{Name: ws.name, Tier: ws.tier, Runtime: ws.runtime}
+		go h.provisionWorkspace(ws.id, "", nil, payload)
+	}
 
-	log.Printf("Resuming workspace %s (%s)", wsName, id)
-	c.JSON(http.StatusOK, gin.H{"status": "provisioning"})
+	log.Printf("Resuming workspace %s (%s) + %d children", wsName, id, len(toResume)-1)
+	c.JSON(http.StatusOK, gin.H{"status": "provisioning", "resumed_count": len(toResume)})
 }
