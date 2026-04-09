@@ -10,8 +10,8 @@ This starts:
 
 | Service | Port | Description |
 |---------|------|-------------|
-| Postgres | `:5432` | Primary database |
-| Redis | `:6379` | Ephemeral state |
+| Postgres | internal only | Primary database |
+| Redis | internal only | Ephemeral state |
 | Platform (Go) | `:8080` | Control plane API |
 | Canvas (Next.js) | `:3000` | Visual frontend |
 | Langfuse web | `:3001` (host) / `:3000` (internal) | Observability UI |
@@ -42,7 +42,7 @@ docker compose --profile local-models up    # Add Ollama (local LLM models)
 ### Platform (Go)
 
 ```
-DATABASE_URL=postgres://dev:dev@postgres:5432/agentmolecule
+DATABASE_URL=postgres://dev:dev@postgres:5432/agentmolecule?sslmode=prefer
 REDIS_URL=redis://redis:6379
 PORT=8080
 SECRETS_ENCRYPTION_KEY=dev-key-change-in-production
@@ -92,9 +92,9 @@ Docker Compose  2.x
 ### Unit Tests
 
 ```bash
-cd platform && go test ./...                    # Go handler tests (25 tests)
-cd canvas && npm test                            # Vitest store tests (58 tests)
-cd workspace-template && python -m pytest -v     # Python runtime tests (49 tests)
+cd platform && go test -race ./...               # Go tests with race detection (358 tests)
+cd canvas && npm test                            # Vitest tests (188 tests)
+cd workspace-template && python -m pytest -v     # Python runtime tests (148 tests)
 ```
 
 ### Integration Tests
@@ -108,10 +108,12 @@ bash test_activity_e2e.sh    # 25 activity/task E2E tests (requires platform + 1
 ### CI Pipeline
 
 GitHub Actions runs automatically on push to `main` and on PRs (`.github/workflows/ci.yml`):
-- **platform-build** — Go build, vet, test
-- **canvas-build** — npm build, vitest
+- **platform-build** — Go build, vet, `go test -race` with coverage profiling (25% baseline threshold)
+- **canvas-build** — npm build, `vitest run` (no `--passWithNoTests` -- tests must exist and pass)
 - **mcp-server-build** — npm build
-- **python-lint** — pytest
+- **python-lint** — `pytest --cov=. --cov-report=term-missing` (pytest-cov enabled)
+
+Postgres and Redis are not exposed to the host -- use `docker compose exec postgres psql` or `docker compose exec redis redis-cli` for direct access.
 
 ## Utility Scripts
 
