@@ -1,7 +1,7 @@
 """Tests for shared runtime helpers used by A2A-backed executors."""
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -117,3 +117,73 @@ async def test_set_current_task_updates_heartbeat():
 @pytest.mark.asyncio
 async def test_set_current_task_is_noop_for_none():
     await set_current_task(None, "Working")
+
+
+# ---------------------------------------------------------------------------
+# build_task_text() with no history
+# ---------------------------------------------------------------------------
+
+def test_build_task_text_no_history_returns_user_message():
+    """When history is empty, build_task_text() returns the user_message directly."""
+    result = build_task_text("What is the weather?", [])
+    assert result == "What is the weather?"
+
+
+# ---------------------------------------------------------------------------
+# summarize_peer_cards() edge cases
+# ---------------------------------------------------------------------------
+
+def test_summarize_peer_cards_invalid_json_string_skipped():
+    """A peer whose agent_card is an invalid JSON string is skipped entirely."""
+    peers = [
+        {"id": "peer-bad", "status": "online", "agent_card": "{not valid json}"},
+        {
+            "id": "peer-good",
+            "status": "online",
+            "agent_card": {"name": "Good Peer", "skills": []},
+        },
+    ]
+    result = summarize_peer_cards(peers)
+    assert len(result) == 1
+    assert result[0]["id"] == "peer-good"
+
+
+def test_summarize_peer_cards_json_string_not_dict_skipped():
+    """A peer whose agent_card is a JSON-encoded list (not a dict) is skipped."""
+    import json
+    peers = [
+        {"id": "peer-list", "status": "online", "agent_card": json.dumps(["skill1"])},
+        {
+            "id": "peer-dict",
+            "status": "online",
+            "agent_card": {"name": "Dict Peer", "skills": []},
+        },
+    ]
+    result = summarize_peer_cards(peers)
+    assert len(result) == 1
+    assert result[0]["id"] == "peer-dict"
+
+
+# ---------------------------------------------------------------------------
+# set_current_task() httpx exception is swallowed
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_current_task_httpx_exception_is_silenced(monkeypatch):
+    """set_current_task() silently ignores exceptions from the httpx heartbeat push."""
+    monkeypatch.setenv("WORKSPACE_ID", "ws-test")
+    monkeypatch.setenv("PLATFORM_URL", "http://platform:8080")
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(side_effect=Exception("Connection refused"))
+
+    # httpx is imported lazily inside the function, so patch at the httpx module level
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        # Should not raise — exception is swallowed with pass
+        heartbeat = SimpleNamespace(current_task="", active_tasks=0)
+        await set_current_task(heartbeat, "Doing work")
+
+    assert heartbeat.current_task == "Doing work"
+    assert heartbeat.active_tasks == 1

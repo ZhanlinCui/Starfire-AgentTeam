@@ -140,5 +140,5 @@ class CrewAIA2AExecutor(AgentExecutor):
 
         await event_queue.enqueue_event(new_agent_text_message(reply))
 
-    async def cancel(self, context, event_queue):
+    async def cancel(self, context, event_queue):  # pragma: no cover
         pass

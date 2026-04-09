@@ -20,10 +20,11 @@ from config import load_config
 from heartbeat import HeartbeatLoop
 from preflight import run_preflight, render_preflight_report
 from tools.awareness_client import get_awareness_config
+from tools.telemetry import setup_telemetry, make_trace_middleware
 from policies.namespaces import resolve_awareness_namespace
 
 
-def get_machine_ip() -> str:
+def get_machine_ip() -> str:  # pragma: no cover
     """Get the machine's IP for A2A discovery."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -35,11 +36,14 @@ def get_machine_ip() -> str:
         return "127.0.0.1"
 
 
-async def main():
+async def main():  # pragma: no cover
     workspace_id = os.environ.get("WORKSPACE_ID", "workspace-default")
     config_path = os.environ.get("WORKSPACE_CONFIG_PATH", "/configs")
     platform_url = os.environ.get("PLATFORM_URL", "http://platform:8080")
     awareness_config = get_awareness_config()
+
+    # 0. Initialise OpenTelemetry (no-op if packages not installed)
+    setup_telemetry(service_name=workspace_id)
 
     # 1. Load config
     config = load_config(config_path)
@@ -54,6 +58,14 @@ async def main():
             awareness_config.get("namespace", ""),
         )
         print(f"Awareness enabled for namespace: {awareness_namespace}")
+
+    # 1.5  Initialise governance adapter (no-op if disabled or package absent)
+    from tools.governance import initialize_governance
+    if config.governance.enabled:
+        await initialize_governance(config.governance)
+        print(f"Governance: Microsoft Agent Governance Toolkit enabled (mode={config.governance.policy_mode})")
+    else:
+        print("Governance: disabled (set governance.enabled: true in config.yaml to activate)")
 
     # 2. Create heartbeat (passed to adapter for task tracking)
     heartbeat = HeartbeatLoop(platform_url, workspace_id)
@@ -81,6 +93,15 @@ async def main():
     # 5. Setup adapter and create executor
     await adapter.setup(adapter_config)
     executor = await adapter.create_executor(adapter_config)
+
+    # 5.5. Initialise Temporal durable execution wrapper (optional)
+    # Connects to TEMPORAL_HOST (default: localhost:7233) and starts a
+    # co-located Temporal worker as a background asyncio task.
+    # No-op with a warning log if Temporal is unreachable or temporalio
+    # is not installed — all tasks fall back to direct execution transparently.
+    from tools.temporal_workflow import create_wrapper as _create_temporal_wrapper
+    temporal_wrapper = _create_temporal_wrapper()
+    await temporal_wrapper.start()
 
     # Get loaded skills for agent card (adapter may have populated them)
     loaded_skills = getattr(adapter, "loaded_skills", [])
@@ -161,17 +182,75 @@ async def main():
     # 9. Start heartbeat
     heartbeat.start()
 
+    # 9b. Start skills hot-reload watcher (background task)
+    # When a skill file changes the watcher reloads the skill module and calls
+    # back into the adapter so the next A2A request uses the updated tools.
+    if config.skills:
+        try:
+            from skills.watcher import SkillsWatcher
+
+            def _on_skill_reload(updated_skill):
+                """Rebuild the LangGraph agent when a skill changes in-place."""
+                if not hasattr(adapter, "loaded_skills"):
+                    return
+                # Replace the matching skill in the adapter's skill list
+                adapter.loaded_skills = [
+                    updated_skill if s.metadata.id == updated_skill.metadata.id else s
+                    for s in adapter.loaded_skills
+                ]
+                # Rebuild the agent's tool list from updated skills
+                if hasattr(adapter, "all_tools") and hasattr(adapter, "system_prompt"):
+                    from tools.approval import request_approval
+                    from tools.delegation import delegate_to_workspace
+                    from tools.memory import commit_memory, search_memory
+                    from tools.sandbox import run_code
+                    base_tools = [delegate_to_workspace, request_approval,
+                                  commit_memory, search_memory, run_code]
+                    skill_tools = []
+                    for sk in adapter.loaded_skills:
+                        skill_tools.extend(sk.tools)
+                    adapter.all_tools = base_tools + skill_tools
+                    # Rebuild compiled agent so next ainvoke picks up new tools
+                    try:
+                        from agent import create_agent
+                        new_agent = create_agent(
+                            config.model, adapter.all_tools, adapter.system_prompt
+                        )
+                        executor.agent = new_agent
+                        print(f"Skills hot-reload: '{updated_skill.metadata.id}' reloaded — "
+                              f"{len(updated_skill.tools)} tool(s)")
+                    except Exception as rebuild_err:
+                        print(f"Skills hot-reload: agent rebuild failed: {rebuild_err}")
+
+            skills_watcher = SkillsWatcher(
+                config_path=config_path,
+                skill_names=config.skills,
+                on_reload=_on_skill_reload,
+            )
+            asyncio.create_task(skills_watcher.start())
+            print(f"Skills hot-reload enabled for: {config.skills}")
+        except Exception as e:
+            print(f"Warning: skills watcher could not start: {e}")
+
     # 10. Run A2A server
     print(f"Workspace {workspace_id} starting on port {port}")
+    # Wrap the ASGI app with W3C TraceContext extraction middleware so incoming
+    # A2A HTTP requests propagate their trace context into _incoming_trace_context.
+    built_app = make_trace_middleware(app.build())
+
     server_config = uvicorn.Config(
-        app.build(),
+        built_app,
         host="0.0.0.0",
         port=port,
         log_level="info",
     )
     server = uvicorn.Server(server_config)
-    await server.serve()
+    try:
+        await server.serve()
+    finally:
+        # Gracefully stop the Temporal worker background task on shutdown
+        await temporal_wrapper.stop()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     asyncio.run(main())

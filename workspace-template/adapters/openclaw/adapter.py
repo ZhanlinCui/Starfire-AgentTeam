@@ -54,7 +54,7 @@ class OpenClawAdapter(BaseAdapter):
             "gateway_port": {"type": "integer", "description": "OpenClaw gateway port", "default": 18789},
         }
 
-    async def setup(self, config: AdapterConfig) -> None:
+    async def setup(self, config: AdapterConfig) -> None:  # pragma: no cover
         """Install OpenClaw, run onboard, copy workspace files, start gateway."""
         npm_prefix = os.path.expanduser("~/.local")
         os.environ["PATH"] = f"{npm_prefix}/bin:{os.environ.get('PATH', '')}"
@@ -235,5 +235,5 @@ class OpenClawA2AExecutor(AgentExecutor):
 
         await event_queue.enqueue_event(new_agent_text_message(reply))
 
-    async def cancel(self, context, event_queue):
+    async def cancel(self, context, event_queue):  # pragma: no cover
         pass

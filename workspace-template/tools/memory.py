@@ -4,15 +4,37 @@ Hierarchical Memory Architecture:
 - LOCAL: private to this workspace, invisible to others
 - TEAM: shared with parent + siblings (same team)
 - GLOBAL: readable by all, writable by root workspaces only
+
+RBAC enforcement
+----------------
+``commit_memory`` requires the ``"memory.write"`` action.
+``search_memory`` requires the ``"memory.read"`` action.
+Roles are read from ``config.yaml`` under ``rbac.roles`` (default: operator).
+
+Audit trail
+-----------
+Every memory operation appends a JSON Lines record to the audit log:
+
+  memory / memory.write / allowed   — write permitted by RBAC
+  memory / memory.write / success   — write committed successfully
+  memory / memory.write / failure   — write failed (platform error)
+  memory / memory.read  / allowed   — read permitted by RBAC
+  memory / memory.read  / success   — search returned results
+  memory / memory.read  / failure   — search failed (platform error)
+
+RBAC denials emit ``rbac / rbac.deny / denied`` events instead.
 """
 
 import json
 import os
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
 from langchain_core.tools import tool
 from tools.awareness_client import build_awareness_client
+from tools.audit import check_permission, get_workspace_roles, log_event
+from tools.telemetry import MEMORY_QUERY, MEMORY_SCOPE, WORKSPACE_ID_ATTR, get_tracer
 
 try:  # pragma: no cover - optional runtime dependency in lightweight test envs
     import httpx  # type: ignore
@@ -31,34 +53,121 @@ async def commit_memory(content: str, scope: str = "LOCAL") -> dict:
         content: The fact or knowledge to remember.
         scope: Memory scope — LOCAL (private), TEAM (shared with team), or GLOBAL (company-wide, root only).
     """
+    trace_id = str(uuid.uuid4())
     scope = scope.upper()
     if scope not in ("LOCAL", "TEAM", "GLOBAL"):
         return {"error": "scope must be LOCAL, TEAM, or GLOBAL"}
 
-    awareness_client = build_awareness_client()
-    if awareness_client is not None:
-        try:
-            result = await awareness_client.commit(content, scope)
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-    else:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+    # --- RBAC check -----------------------------------------------------------
+    roles, custom_perms = get_workspace_roles()
+    if not check_permission("memory.write", roles, custom_perms):
+        log_event(
+            event_type="rbac",
+            action="rbac.deny",
+            resource=scope,
+            outcome="denied",
+            trace_id=trace_id,
+            attempted_action="memory.write",
+            roles=roles,
+        )
+        return {
+            "success": False,
+            "error": (
+                "RBAC: this workspace does not have the 'memory.write' permission. "
+                f"Current roles: {roles}"
+            ),
+        }
+
+    log_event(
+        event_type="memory",
+        action="memory.write",
+        resource=scope,
+        outcome="allowed",
+        trace_id=trace_id,
+        memory_scope=scope,
+        content_length=len(content),
+    )
+
+    # ── OTEL: memory_write span ──────────────────────────────────────────────
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span("memory_write") as mem_span:
+        mem_span.set_attribute(WORKSPACE_ID_ATTR, WORKSPACE_ID)
+        mem_span.set_attribute(MEMORY_SCOPE, scope)
+        mem_span.set_attribute("memory.content_length", len(content))
+
+        awareness_client = build_awareness_client()
+        if awareness_client is not None:
             try:
-                resp = await client.post(
-                    f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
-                    json={"content": content, "scope": scope},
-                )
-                if resp.status_code == 201:
-                    result = {"success": True, "id": resp.json().get("id"), "scope": scope}
-                else:
-                    result = {"success": False, "error": resp.json().get("error", resp.text)}
+                result = await awareness_client.commit(content, scope)
             except Exception as e:
+                log_event(
+                    event_type="memory",
+                    action="memory.write",
+                    resource=scope,
+                    outcome="failure",
+                    trace_id=trace_id,
+                    memory_scope=scope,
+                    error=str(e),
+                )
+                try:
+                    mem_span.record_exception(e)
+                except Exception:
+                    pass
                 return {"success": False, "error": str(e)}
+        else:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                try:
+                    resp = await client.post(
+                        f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
+                        json={"content": content, "scope": scope},
+                    )
+                    if resp.status_code == 201:
+                        result = {"success": True, "id": resp.json().get("id"), "scope": scope}
+                    else:
+                        result = {"success": False, "error": resp.json().get("error", resp.text)}
+                except Exception as e:
+                    log_event(
+                        event_type="memory",
+                        action="memory.write",
+                        resource=scope,
+                        outcome="failure",
+                        trace_id=trace_id,
+                        memory_scope=scope,
+                        error=str(e),
+                    )
+                    try:
+                        mem_span.record_exception(e)
+                    except Exception:
+                        pass
+                    return {"success": False, "error": str(e)}
 
-    if result.get("success"):
-        await _maybe_log_skill_promotion(content, scope, result)
+        if result.get("success"):
+            mem_span.set_attribute("memory.id", result.get("id") or "")
+            mem_span.set_attribute("memory.success", True)
+            log_event(
+                event_type="memory",
+                action="memory.write",
+                resource=scope,
+                outcome="success",
+                trace_id=trace_id,
+                memory_scope=scope,
+                memory_id=result.get("id"),
+            )
+            await _maybe_log_skill_promotion(content, scope, result)
+        else:
+            mem_span.set_attribute("memory.success", False)
+            log_event(
+                event_type="memory",
+                action="memory.write",
+                resource=scope,
+                outcome="failure",
+                trace_id=trace_id,
+                memory_scope=scope,
+                error=result.get("error"),
+            )
 
-    return result
+        return result
 
 
 @tool
@@ -69,39 +178,137 @@ async def search_memory(query: str = "", scope: str = "") -> dict:
         query: Text to search for (empty returns all).
         scope: Filter by scope — LOCAL, TEAM, GLOBAL, or empty for all accessible.
     """
+    trace_id = str(uuid.uuid4())
     scope = scope.upper()
     if scope and scope not in ("LOCAL", "TEAM", "GLOBAL"):
         return {"error": "scope must be LOCAL, TEAM, GLOBAL, or empty"}
 
-    awareness_client = build_awareness_client()
-    if awareness_client is not None:
-        try:
-            return await awareness_client.search(query, scope)
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+    # --- RBAC check -----------------------------------------------------------
+    roles, custom_perms = get_workspace_roles()
+    if not check_permission("memory.read", roles, custom_perms):
+        log_event(
+            event_type="rbac",
+            action="rbac.deny",
+            resource=scope or "all",
+            outcome="denied",
+            trace_id=trace_id,
+            attempted_action="memory.read",
+            roles=roles,
+        )
+        return {
+            "success": False,
+            "error": (
+                "RBAC: this workspace does not have the 'memory.read' permission. "
+                f"Current roles: {roles}"
+            ),
+        }
 
-    params = {}
-    if query:
-        params["q"] = query
-    if scope:
-        params["scope"] = scope.upper()
+    log_event(
+        event_type="memory",
+        action="memory.read",
+        resource=scope or "all",
+        outcome="allowed",
+        trace_id=trace_id,
+        memory_scope=scope or "all",
+        query_length=len(query),
+    )
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.get(
-                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
-                params=params,
-            )
-            if resp.status_code == 200:
-                memories = resp.json()
-                return {
-                    "success": True,
-                    "count": len(memories),
-                    "memories": memories,
-                }
-            return {"success": False, "error": resp.json().get("error", resp.text)}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+    # ── OTEL: memory_read span ───────────────────────────────────────────────
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span("memory_read") as mem_span:
+        mem_span.set_attribute(WORKSPACE_ID_ATTR, WORKSPACE_ID)
+        mem_span.set_attribute(MEMORY_SCOPE, scope or "all")
+        mem_span.set_attribute(MEMORY_QUERY, query[:256] if query else "")
+
+        awareness_client = build_awareness_client()
+        if awareness_client is not None:
+            try:
+                result = await awareness_client.search(query, scope)
+                mem_span.set_attribute("memory.result_count", result.get("count", 0))
+                mem_span.set_attribute("memory.success", result.get("success", False))
+                log_event(
+                    event_type="memory",
+                    action="memory.read",
+                    resource=scope or "all",
+                    outcome="success" if result.get("success") else "failure",
+                    trace_id=trace_id,
+                    memory_scope=scope or "all",
+                    result_count=result.get("count", 0),
+                )
+                return result
+            except Exception as e:
+                log_event(
+                    event_type="memory",
+                    action="memory.read",
+                    resource=scope or "all",
+                    outcome="failure",
+                    trace_id=trace_id,
+                    memory_scope=scope or "all",
+                    error=str(e),
+                )
+                try:
+                    mem_span.record_exception(e)
+                except Exception:
+                    pass
+                return {"success": False, "error": str(e)}
+
+        params = {}
+        if query:
+            params["q"] = query
+        if scope:
+            params["scope"] = scope.upper()
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                resp = await client.get(
+                    f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/memories",
+                    params=params,
+                )
+                if resp.status_code == 200:
+                    memories = resp.json()
+                    mem_span.set_attribute("memory.result_count", len(memories))
+                    mem_span.set_attribute("memory.success", True)
+                    log_event(
+                        event_type="memory",
+                        action="memory.read",
+                        resource=scope or "all",
+                        outcome="success",
+                        trace_id=trace_id,
+                        memory_scope=scope or "all",
+                        result_count=len(memories),
+                    )
+                    return {
+                        "success": True,
+                        "count": len(memories),
+                        "memories": memories,
+                    }
+                mem_span.set_attribute("memory.success", False)
+                log_event(
+                    event_type="memory",
+                    action="memory.read",
+                    resource=scope or "all",
+                    outcome="failure",
+                    trace_id=trace_id,
+                    memory_scope=scope or "all",
+                    http_status=resp.status_code,
+                )
+                return {"success": False, "error": resp.json().get("error", resp.text)}
+            except Exception as e:
+                log_event(
+                    event_type="memory",
+                    action="memory.read",
+                    resource=scope or "all",
+                    outcome="failure",
+                    trace_id=trace_id,
+                    memory_scope=scope or "all",
+                    error=str(e),
+                )
+                try:
+                    mem_span.record_exception(e)
+                except Exception:
+                    pass
+                return {"success": False, "error": str(e)}
 
 
 def _parse_promotion_packet(content: str) -> dict[str, Any] | None:
@@ -115,7 +322,7 @@ def _parse_promotion_packet(content: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
 
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict):  # pragma: no cover
         return None
     if not payload.get("promote_to_skill"):
         return None

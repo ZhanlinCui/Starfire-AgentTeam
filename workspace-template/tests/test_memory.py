@@ -219,3 +219,524 @@ def test_search_memory_rejects_invalid_scope(memory_modules):
     result = asyncio.run(memory.search_memory("status", "bad"))
 
     assert result == {"error": "scope must be LOCAL, TEAM, GLOBAL, or empty"}
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def memory_modules_with_mocks(monkeypatch):
+    """Load real memory module with full control over audit / telemetry / awareness."""
+    import sys
+    from types import ModuleType
+    from unittest.mock import MagicMock, AsyncMock
+
+    monkeypatch.setenv("PLATFORM_URL", "http://platform.test")
+    monkeypatch.setenv("WORKSPACE_ID", "ws-test")
+    monkeypatch.delenv("AWARENESS_URL", raising=False)
+    monkeypatch.delenv("AWARENESS_NAMESPACE", raising=False)
+
+    # --- audit mock -----------------------------------------------------------
+    mock_audit = ModuleType("tools.audit")
+    mock_audit.check_permission = MagicMock(return_value=True)
+    mock_audit.get_workspace_roles = MagicMock(return_value=(["operator"], {}))
+    mock_audit.log_event = MagicMock(return_value="trace-id")
+    monkeypatch.setitem(sys.modules, "tools.audit", mock_audit)
+
+    # --- telemetry mock -------------------------------------------------------
+    mock_telemetry = ModuleType("tools.telemetry")
+    mock_span = MagicMock()
+    mock_span.__enter__ = MagicMock(return_value=mock_span)
+    mock_span.__exit__ = MagicMock(return_value=False)
+    mock_tracer = MagicMock()
+    mock_tracer.start_as_current_span = MagicMock(return_value=mock_span)
+    mock_telemetry.get_tracer = MagicMock(return_value=mock_tracer)
+    mock_telemetry.MEMORY_QUERY = "memory.query"
+    mock_telemetry.MEMORY_SCOPE = "memory.scope"
+    mock_telemetry.WORKSPACE_ID_ATTR = "workspace.id"
+    monkeypatch.setitem(sys.modules, "tools.telemetry", mock_telemetry)
+
+    # --- awareness_client mock (no client by default) -------------------------
+    mock_awareness_mod = ModuleType("tools.awareness_client")
+    mock_awareness_mod.build_awareness_client = MagicMock(return_value=None)
+    monkeypatch.setitem(sys.modules, "tools.awareness_client", mock_awareness_mod)
+
+    # Remove any cached memory module so it re-imports with our mocks
+    sys.modules.pop("tools.memory", None)
+
+    tools_pkg = sys.modules.get("tools")
+    if tools_pkg is not None:
+        monkeypatch.setattr(tools_pkg, "__path__", [str(TOOLS_DIR)], raising=False)
+
+    memory = _load_module("tools.memory_mocked", TOOLS_DIR / "memory.py")
+    # Patch module-level constants
+    memory.PLATFORM_URL = "http://platform.test"
+    memory.WORKSPACE_ID = "ws-test"
+
+    yield memory, mock_audit, mock_awareness_mod
+
+    sys.modules.pop("tools.memory_mocked", None)
+
+
+# ---------------------------------------------------------------------------
+# commit_memory — RBAC deny
+# ---------------------------------------------------------------------------
+
+def test_commit_memory_rbac_deny(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+    mock_audit.check_permission.return_value = False
+    mock_audit.get_workspace_roles.return_value = (["read-only"], {})
+
+    result = asyncio.run(memory.commit_memory("secret", "local"))
+
+    assert result["success"] is False
+    assert "RBAC" in result["error"]
+    assert "memory.write" in result["error"]
+    # Denial event logged
+    mock_audit.log_event.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# commit_memory — invalid scope
+# ---------------------------------------------------------------------------
+
+def test_commit_memory_invalid_scope(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+
+    result = asyncio.run(memory.commit_memory("content", "INVALID"))
+
+    assert result == {"error": "scope must be LOCAL, TEAM, or GLOBAL"}
+
+
+# ---------------------------------------------------------------------------
+# commit_memory — awareness_client raises
+# ---------------------------------------------------------------------------
+
+def test_commit_memory_awareness_client_exception(memory_modules_with_mocks):
+    from unittest.mock import AsyncMock, MagicMock
+    memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
+
+    mock_ac = MagicMock()
+    mock_ac.commit = AsyncMock(side_effect=RuntimeError("awareness down"))
+    # Patch directly on the loaded module since it imported the name at load time
+    memory.build_awareness_client = MagicMock(return_value=mock_ac)
+
+    result = asyncio.run(memory.commit_memory("some content", "team"))
+
+    assert result["success"] is False
+    assert "awareness down" in result["error"]
+    # Failure event must be logged
+    log_calls = [str(c) for c in mock_audit.log_event.call_args_list]
+    assert any("failure" in call for call in log_calls)
+
+
+# ---------------------------------------------------------------------------
+# commit_memory — httpx 201 success (no awareness_client)
+# ---------------------------------------------------------------------------
+
+def test_commit_memory_httpx_201_success(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json):
+            captured["url"] = url
+            return _FakeResponse(201, {"id": "new-mem-1"})
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.commit_memory("hello", "local"))
+
+    assert result == {"success": True, "id": "new-mem-1", "scope": "LOCAL"}
+    assert "memories" in captured["url"]
+
+
+# ---------------------------------------------------------------------------
+# commit_memory — httpx non-201
+# ---------------------------------------------------------------------------
+
+def test_commit_memory_httpx_non_201(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json):
+            return _FakeResponse(400, {"error": "bad request"})
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.commit_memory("bad content", "local"))
+
+    assert result["success"] is False
+    assert "bad request" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# commit_memory — httpx raises
+# ---------------------------------------------------------------------------
+
+def test_commit_memory_httpx_exception(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json):
+            raise ConnectionError("network gone")
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.commit_memory("content", "global"))
+
+    assert result["success"] is False
+    assert "network gone" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# commit_memory — result.success=False (platform returned error payload)
+# ---------------------------------------------------------------------------
+
+def test_commit_memory_result_failure(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json):
+            return _FakeResponse(400, {"error": "storage full"})
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.commit_memory("data", "team"))
+
+    assert result["success"] is False
+    # failure event should be logged
+    log_calls = [str(c) for c in mock_audit.log_event.call_args_list]
+    assert any("failure" in call for call in log_calls)
+
+
+# ---------------------------------------------------------------------------
+# search_memory — RBAC deny
+# ---------------------------------------------------------------------------
+
+def test_search_memory_rbac_deny(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+    mock_audit.check_permission.return_value = False
+    mock_audit.get_workspace_roles.return_value = (["read-only-special"], {})
+
+    result = asyncio.run(memory.search_memory("find something", "local"))
+
+    assert result["success"] is False
+    assert "RBAC" in result["error"]
+    assert "memory.read" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# search_memory — invalid scope
+# ---------------------------------------------------------------------------
+
+def test_search_memory_invalid_scope(memory_modules_with_mocks):
+    memory, _mock_audit, _ = memory_modules_with_mocks
+
+    result = asyncio.run(memory.search_memory("q", "BAD"))
+
+    assert result == {"error": "scope must be LOCAL, TEAM, GLOBAL, or empty"}
+
+
+# ---------------------------------------------------------------------------
+# search_memory — awareness_client success
+# ---------------------------------------------------------------------------
+
+def test_search_memory_awareness_client_success(memory_modules_with_mocks):
+    from unittest.mock import AsyncMock, MagicMock
+    memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
+
+    mock_ac = MagicMock()
+    mock_ac.search = AsyncMock(return_value={
+        "success": True,
+        "count": 2,
+        "memories": [{"content": "a"}, {"content": "b"}],
+    })
+    # Patch directly on the loaded module since it imported the name at load time
+    memory.build_awareness_client = MagicMock(return_value=mock_ac)
+
+    result = asyncio.run(memory.search_memory("find", "team"))
+
+    assert result["success"] is True
+    assert result["count"] == 2
+    assert len(result["memories"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# search_memory — awareness_client raises
+# ---------------------------------------------------------------------------
+
+def test_search_memory_awareness_client_exception(memory_modules_with_mocks):
+    from unittest.mock import AsyncMock, MagicMock
+    memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
+
+    mock_ac = MagicMock()
+    mock_ac.search = AsyncMock(side_effect=RuntimeError("awareness search failed"))
+    # Patch directly on the loaded module since it imported the name at load time
+    memory.build_awareness_client = MagicMock(return_value=mock_ac)
+
+    result = asyncio.run(memory.search_memory("query", "local"))
+
+    assert result["success"] is False
+    assert "awareness search failed" in result["error"]
+    log_calls = [str(c) for c in mock_audit.log_event.call_args_list]
+    assert any("failure" in call for call in log_calls)
+
+
+# ---------------------------------------------------------------------------
+# search_memory — httpx 200 success (no awareness_client)
+# ---------------------------------------------------------------------------
+
+def test_search_memory_httpx_200_success(memory_modules_with_mocks):
+    memory, _mock_audit, _ = memory_modules_with_mocks
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def get(self, url, params):
+            return _FakeResponse(200, [{"content": "result1"}, {"content": "result2"}])
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.search_memory("find", "global"))
+
+    assert result["success"] is True
+    assert result["count"] == 2
+    assert result["memories"] == [{"content": "result1"}, {"content": "result2"}]
+
+
+# ---------------------------------------------------------------------------
+# search_memory — httpx non-200
+# ---------------------------------------------------------------------------
+
+def test_search_memory_httpx_non_200(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def get(self, url, params):
+            return _FakeResponse(500, {"error": "server error"})
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.search_memory("q", ""))
+
+    assert result["success"] is False
+    assert "server error" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# search_memory — httpx raises
+# ---------------------------------------------------------------------------
+
+def test_search_memory_httpx_exception(memory_modules_with_mocks):
+    memory, mock_audit, _ = memory_modules_with_mocks
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def get(self, url, params):
+            raise TimeoutError("request timed out")
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.search_memory("query", "local"))
+
+    assert result["success"] is False
+    assert "request timed out" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# _parse_promotion_packet
+# ---------------------------------------------------------------------------
+
+def test_parse_promotion_packet_not_json(memory_modules_with_mocks):
+    memory, _, _ = memory_modules_with_mocks
+
+    result = memory._parse_promotion_packet("this is not JSON at all")
+    assert result is None
+
+
+def test_parse_promotion_packet_no_promote_key(memory_modules_with_mocks):
+    memory, _, _ = memory_modules_with_mocks
+
+    result = memory._parse_promotion_packet('{"title": "something", "summary": "no promote key"}')
+    assert result is None
+
+
+def test_parse_promotion_packet_valid(memory_modules_with_mocks):
+    memory, _, _ = memory_modules_with_mocks
+
+    packet = {
+        "title": "My skill",
+        "summary": "Does something useful",
+        "promote_to_skill": True,
+    }
+    result = memory._parse_promotion_packet(json.dumps(packet))
+    assert result is not None
+    assert result["promote_to_skill"] is True
+    assert result["title"] == "My skill"
+
+
+# ---------------------------------------------------------------------------
+# _maybe_log_skill_promotion
+# ---------------------------------------------------------------------------
+
+def test_maybe_log_skill_promotion_no_packet(memory_modules_with_mocks):
+    """Non-promotion content → _maybe_log_skill_promotion returns without HTTP calls."""
+    memory, _, _ = memory_modules_with_mocks
+    http_called = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json):
+            http_called.append(url)
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    asyncio.run(memory._maybe_log_skill_promotion(
+        "plain text content", "LOCAL", {"success": True, "id": "m1"}
+    ))
+
+    assert http_called == []
+
+
+def test_commit_memory_awareness_exception_span_record_fails(memory_modules_with_mocks):
+    """awareness_client.commit raises + span.record_exception also raises: error still returned."""
+    from unittest.mock import AsyncMock, MagicMock
+    memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
+
+    # Get the span mock from the telemetry module loaded in sys.modules
+    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
+    mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
+
+    # Make awareness_client raise
+    mock_ac = MagicMock()
+    mock_ac.commit = AsyncMock(side_effect=RuntimeError("awareness down"))
+    memory.build_awareness_client = MagicMock(return_value=mock_ac)
+
+    result = asyncio.run(memory.commit_memory("test content", "local"))
+    assert result["success"] is False  # error propagated despite span failure
+
+
+def test_search_memory_awareness_exception_span_record_fails(memory_modules_with_mocks):
+    """awareness_client.search raises + span.record_exception also raises: error still returned."""
+    from unittest.mock import AsyncMock, MagicMock
+    memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
+
+    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
+    mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
+
+    mock_ac = MagicMock()
+    mock_ac.search = AsyncMock(side_effect=RuntimeError("awareness down"))
+    memory.build_awareness_client = MagicMock(return_value=mock_ac)
+
+    result = asyncio.run(memory.search_memory("test", "local"))
+    assert result["success"] is False
+
+
+def test_commit_memory_httpx_exception_span_record_fails(memory_modules_with_mocks):
+    """httpx raises in commit_memory + span.record_exception also raises: error still returned."""
+    from unittest.mock import MagicMock
+    memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
+
+    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
+    mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json):
+            raise ConnectionError("network gone")
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.commit_memory("content", "global"))
+    assert result["success"] is False
+
+
+def test_search_memory_httpx_exception_span_record_fails(memory_modules_with_mocks):
+    """httpx raises in search_memory + span.record_exception also raises: error still returned."""
+    from unittest.mock import MagicMock
+    memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
+
+    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
+    mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def get(self, url, params):
+            raise TimeoutError("request timed out")
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    result = asyncio.run(memory.search_memory("query", "local"))
+    assert result["success"] is False
+
+
+def test_parse_promotion_packet_invalid_json(memory_modules_with_mocks):
+    """Lines 322-323: content starts with { but is invalid JSON → JSONDecodeError → None."""
+    memory, _, _ = memory_modules_with_mocks
+    result = memory._parse_promotion_packet("{bad: json}")
+    assert result is None
+
+
+def test_parse_promotion_packet_invalid_json_2(memory_modules_with_mocks):
+    """Lines 322-323: another invalid JSON starting with { — missing closing brace."""
+    memory, _, _ = memory_modules_with_mocks
+    result = memory._parse_promotion_packet("{not valid json at all }")
+    assert result is None
+
+
+def test_maybe_log_skill_promotion_no_workspace_id(memory_modules_with_mocks):
+    """Empty WORKSPACE_ID → returns early without HTTP calls."""
+    memory, _, _ = memory_modules_with_mocks
+    memory.WORKSPACE_ID = ""
+
+    http_called = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json):
+            http_called.append(url)
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    packet = json.dumps({"promote_to_skill": True, "summary": "test"})
+    asyncio.run(memory._maybe_log_skill_promotion(packet, "TEAM", {"success": True, "id": "m2"}))
+
+    assert http_called == []

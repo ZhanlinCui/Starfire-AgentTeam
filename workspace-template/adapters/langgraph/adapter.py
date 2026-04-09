@@ -47,4 +47,4 @@ class LangGraphAdapter(BaseAdapter):
         from a2a_executor import LangGraphA2AExecutor
 
         agent = create_agent(config.model, self.all_tools, self.system_prompt)
-        return LangGraphA2AExecutor(agent, heartbeat=config.heartbeat)
+        return LangGraphA2AExecutor(agent, heartbeat=config.heartbeat, model=config.model)

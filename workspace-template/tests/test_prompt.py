@@ -1,9 +1,12 @@
 """Tests for prompt.py — system prompt construction."""
 
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from skills.loader import LoadedSkill, SkillMetadata
-from prompt import build_system_prompt
+from prompt import build_system_prompt, get_peer_capabilities
 
 
 def test_build_system_prompt_with_prompt_files(tmp_path):
@@ -326,3 +329,66 @@ def test_parent_context_skips_empty_content(tmp_path):
     assert "### whitespace.md" not in result
     assert "### real.md" in result
     assert "Real content here." in result
+
+
+# ---------------------------------------------------------------------------
+# get_peer_capabilities() tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_peer_capabilities_success():
+    """get_peer_capabilities() returns the list from a 200 response."""
+    peers = [
+        {"id": "peer-1", "name": "Alpha"},
+        {"id": "peer-2", "name": "Beta"},
+    ]
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = peers
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    # httpx is imported lazily inside get_peer_capabilities(), so patch at module level
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await get_peer_capabilities("http://platform:8080", "ws-abc")
+
+    assert result == peers
+    mock_client.get.assert_called_once_with(
+        "http://platform:8080/registry/ws-abc/peers",
+        headers={"X-Workspace-ID": "ws-abc"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_peer_capabilities_non_200():
+    """get_peer_capabilities() returns [] when response status is not 200."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await get_peer_capabilities("http://platform:8080", "ws-abc")
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_peer_capabilities_exception():
+    """get_peer_capabilities() returns [] when httpx raises an exception."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(side_effect=Exception("Network unreachable"))
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await get_peer_capabilities("http://platform:8080", "ws-abc")
+
+    assert result == []

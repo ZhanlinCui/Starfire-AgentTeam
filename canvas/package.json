@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@rolldown/binding-linux-arm64-gnu": "^1.0.0-rc.12",
     "@tailwindcss/typography": "^0.5.19",
     "@xterm/addon-fit": "^0.11.0",
     "@xyflow/react": "^12.4.0",

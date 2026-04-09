@@ -35,9 +35,55 @@ def _make_a2a_mocks():
 
     events_mod.EventQueue = EventQueue
 
-    # a2a.utils needs new_agent_text_message as a passthrough
+    # a2a.server.tasks needs a TaskUpdater stub whose async methods are no-ops.
+    # In tests, TaskUpdater calls go to this stub rather than the real SDK so
+    # event_queue.enqueue_event is only called via explicit executor code paths.
+    tasks_mod = ModuleType("a2a.server.tasks")
+
+    class TaskUpdater:
+        """Stub TaskUpdater — no-op async methods for unit tests."""
+
+        def __init__(self, event_queue, task_id, context_id, *args, **kwargs):
+            self.event_queue = event_queue
+            self.task_id = task_id
+            self.context_id = context_id
+
+        async def start_work(self, message=None):
+            pass
+
+        async def complete(self, message=None):
+            pass
+
+        async def failed(self, message=None):
+            pass
+
+        async def add_artifact(
+            self, parts, artifact_id=None, name=None, metadata=None,
+            append=None, last_chunk=None, extensions=None
+        ):
+            pass
+
+    tasks_mod.TaskUpdater = TaskUpdater
+
+    # a2a.types needs Part and TextPart stubs for artifact construction
+    types_mod = ModuleType("a2a.types")
+
+    class TextPart:
+        """Stub for A2A TextPart."""
+        def __init__(self, text=""):
+            self.text = text
+
+    class Part:
+        """Stub for A2A Part (wraps TextPart / FilePart / DataPart)."""
+        def __init__(self, root=None):
+            self.root = root
+
+    types_mod.TextPart = TextPart
+    types_mod.Part = Part
+
+    # a2a.utils needs new_agent_text_message as a passthrough (accepts kwargs)
     utils_mod = ModuleType("a2a.utils")
-    utils_mod.new_agent_text_message = lambda x: x
+    utils_mod.new_agent_text_message = lambda text, **kwargs: text
 
     # Register all module paths
     a2a_mod = ModuleType("a2a")
@@ -47,6 +93,8 @@ def _make_a2a_mocks():
     sys.modules["a2a.server"] = a2a_server_mod
     sys.modules["a2a.server.agent_execution"] = agent_execution_mod
     sys.modules["a2a.server.events"] = events_mod
+    sys.modules["a2a.server.tasks"] = tasks_mod
+    sys.modules["a2a.types"] = types_mod
     sys.modules["a2a.utils"] = utils_mod
 
 
@@ -92,6 +140,53 @@ def _make_tools_mocks():
     tools_awareness_mod = ModuleType("tools.awareness_client")
     tools_awareness_mod.get_awareness_config = MagicMock(return_value=None)
 
+    # tools.telemetry — provide constants and no-op callables used by a2a_executor
+    from contextvars import ContextVar
+    tools_telemetry_mod = ModuleType("tools.telemetry")
+    tools_telemetry_mod.GEN_AI_SYSTEM = "gen_ai.system"
+    tools_telemetry_mod.GEN_AI_REQUEST_MODEL = "gen_ai.request.model"
+    tools_telemetry_mod.GEN_AI_OPERATION_NAME = "gen_ai.operation.name"
+    tools_telemetry_mod.GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
+    tools_telemetry_mod.GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
+    tools_telemetry_mod.GEN_AI_RESPONSE_FINISH_REASONS = "gen_ai.response.finish_reasons"
+    tools_telemetry_mod.WORKSPACE_ID_ATTR = "workspace.id"
+    tools_telemetry_mod.A2A_TASK_ID = "a2a.task_id"
+    tools_telemetry_mod.A2A_SOURCE_WORKSPACE = "a2a.source_workspace_id"
+    tools_telemetry_mod.A2A_TARGET_WORKSPACE = "a2a.target_workspace_id"
+    tools_telemetry_mod.MEMORY_SCOPE = "memory.scope"
+    tools_telemetry_mod.MEMORY_QUERY = "memory.query"
+    tools_telemetry_mod._incoming_trace_context = ContextVar("otel_incoming_trace_context", default=None)
+    tools_telemetry_mod.get_tracer = MagicMock(return_value=MagicMock())
+    tools_telemetry_mod.setup_telemetry = MagicMock()
+    tools_telemetry_mod.make_trace_middleware = MagicMock(side_effect=lambda app: app)
+    tools_telemetry_mod.inject_trace_headers = MagicMock(side_effect=lambda h: h)
+    tools_telemetry_mod.extract_trace_context = MagicMock(return_value=None)
+    tools_telemetry_mod.get_current_traceparent = MagicMock(return_value=None)
+    tools_telemetry_mod.gen_ai_system_from_model = lambda m: m.split(":")[0] if ":" in m else "unknown"
+    tools_telemetry_mod.record_llm_token_usage = MagicMock()
+
+    # tools.audit — provide RBAC helpers and log_event as no-ops
+    tools_audit_mod = ModuleType("tools.audit")
+    tools_audit_mod.log_event = MagicMock(return_value="mock-trace-id")
+    tools_audit_mod.check_permission = MagicMock(return_value=True)
+    tools_audit_mod.get_workspace_roles = MagicMock(return_value=(["operator"], {}))
+    tools_audit_mod.ROLE_PERMISSIONS = {
+        "admin": {"delegate", "approve", "memory.read", "memory.write"},
+        "operator": {"delegate", "approve", "memory.read", "memory.write"},
+        "read-only": {"memory.read"},
+    }
+
+    # tools.hitl — lightweight stubs for the HITL tools
+    tools_hitl_mod = ModuleType("tools.hitl")
+    tools_hitl_mod.pause_task = MagicMock()
+    tools_hitl_mod.pause_task.name = "pause_task"
+    tools_hitl_mod.resume_task = MagicMock()
+    tools_hitl_mod.resume_task.name = "resume_task"
+    tools_hitl_mod.list_paused_tasks = MagicMock()
+    tools_hitl_mod.list_paused_tasks.name = "list_paused_tasks"
+    tools_hitl_mod.requires_approval = MagicMock(side_effect=lambda *a, **kw: (lambda f: f))
+    tools_hitl_mod.pause_registry = MagicMock()
+
     sys.modules["tools"] = tools_mod
     sys.modules["tools.delegation"] = tools_delegation_mod
     sys.modules["tools.approval"] = tools_approval_mod
@@ -99,6 +194,9 @@ def _make_tools_mocks():
     sys.modules["tools.sandbox"] = tools_sandbox_mod
     sys.modules["tools.a2a_tools"] = tools_a2a_mod
     sys.modules["tools.awareness_client"] = tools_awareness_mod
+    sys.modules["tools.telemetry"] = tools_telemetry_mod
+    sys.modules["tools.audit"] = tools_audit_mod
+    sys.modules["tools.hitl"] = tools_hitl_mod
 
 
 # Install mocks before any test collection imports a2a_executor

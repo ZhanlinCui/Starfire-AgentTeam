@@ -9,6 +9,65 @@ import yaml
 
 
 @dataclass
+class RBACConfig:
+    """Role-based access control settings for this workspace.
+
+    ``roles`` declares what this workspace is *allowed* to do.  Each role
+    name maps to a set of permitted actions.  Built-in roles are defined in
+    ``tools/audit.ROLE_PERMISSIONS``; custom roles can be added via
+    ``allowed_actions``.
+
+    Built-in roles
+    --------------
+    admin           All actions (delegate, approve, memory.read, memory.write)
+    operator        Same as admin — standard agent role  (default)
+    read-only       memory.read only
+    no-delegation   approve + memory.read + memory.write
+    no-approval     delegate + memory.read + memory.write
+    memory-readonly memory.read only
+
+    Example config.yaml snippet::
+
+        rbac:
+          roles:
+            - operator
+          allowed_actions:
+            analyst:
+              - memory.read
+              - memory.write
+    """
+
+    roles: list[str] = field(default_factory=lambda: ["operator"])
+    """List of role names granted to this workspace."""
+
+    allowed_actions: dict[str, list[str]] = field(default_factory=dict)
+    """Custom role → [action, ...] overrides.  Takes precedence over built-ins."""
+
+
+@dataclass
+class HITLConfig:
+    """Human-In-The-Loop settings loaded from the ``hitl:`` block in config.yaml.
+
+    Example config.yaml snippet::
+
+        hitl:
+          channels:
+            - type: dashboard       # always active
+            - type: slack
+              webhook_url: https://hooks.slack.com/services/…
+            - type: email
+              smtp_host: smtp.example.com
+              from: alerts@example.com
+              to: ops@example.com
+          default_timeout: 300      # seconds
+          bypass_roles: [admin]
+    """
+    channels: list[dict] = field(default_factory=lambda: [{"type": "dashboard"}])
+    default_timeout: float = 300.0
+    bypass_roles: list[str] = field(default_factory=list)
+
+
+@dataclass
 class DelegationConfig:
     retry_attempts: int = 3
     retry_delay: float = 5.0
@@ -41,6 +100,91 @@ class RuntimeConfig:
 
 
 @dataclass
+class GovernanceConfig:
+    """Microsoft Agent Governance Toolkit integration settings.
+
+    When ``enabled`` is True, Starfire's RBAC and audit trail are bridged
+    to the Agent Governance Toolkit (agent-os-kernel) for policy evaluation.
+
+    ``toolkit`` is reserved for future extensibility — only ``"microsoft"``
+    is supported today.
+
+    ``policy_mode`` controls enforcement:
+      strict      RBAC *and* toolkit policy must both allow — strictest mode
+      permissive  RBAC must allow; toolkit denials are logged but not enforced
+      audit       RBAC only; toolkit evaluated and logged but never blocks
+
+    ``policy_file`` path to a Rego (.rego), YAML (.yaml/.yml), or Cedar
+    (.cedar) policy file, loaded into the PolicyEvaluator at startup.
+
+    ``blocked_patterns`` is a list of regex patterns that the toolkit will
+    always deny regardless of roles or policy.
+    """
+
+    enabled: bool = False
+    toolkit: str = "microsoft"
+    policy_endpoint: str = ""
+    policy_mode: str = "audit"           # strict | permissive | audit
+    policy_file: str = ""
+    blocked_patterns: list[str] = field(default_factory=list)
+    max_tool_calls_per_task: int = 50
+
+
+@dataclass
+class SecurityScanConfig:
+    """Skill dependency security scanning settings.
+
+    ``mode`` controls what happens when critical/high CVEs are found:
+
+    block  — raise ``SkillSecurityError``; the skill is NOT loaded.
+    warn   — emit a WARNING + audit event; the skill is loaded anyway (default).
+    off    — skip scanning entirely (air-gapped or CI environments).
+
+    Scanners tried in order: Snyk CLI (requires ``SNYK_TOKEN``), then
+    pip-audit.  If neither is available the scan is silently skipped.
+
+    Example config.yaml snippet::
+
+        security_scan: warn         # shorthand string form
+        # or verbose form:
+        security_scan:
+          mode: block
+    """
+
+    mode: str = "warn"
+    """One of: block | warn | off."""
+
+
+@dataclass
+class ComplianceConfig:
+    """OWASP Top 10 for Agentic Applications compliance settings.
+
+    Set ``mode: owasp_agentic`` to enable all checks.  When ``mode`` is
+    empty or absent the compliance layer is a complete no-op.
+
+    Example config.yaml snippet::
+
+        compliance:
+          mode: owasp_agentic
+          prompt_injection: block        # detect | block  (default: detect)
+          max_tool_calls_per_task: 30
+          max_task_duration_seconds: 180
+    """
+
+    mode: str = ""
+    """Enable compliance mode.  Set to ``owasp_agentic`` to activate."""
+
+    prompt_injection: str = "detect"
+    """``detect`` logs injection attempts; ``block`` raises PromptInjectionError."""
+
+    max_tool_calls_per_task: int = 50
+    """Maximum number of tool invocations per task before ExcessiveAgencyError."""
+
+    max_task_duration_seconds: int = 300
+    """Maximum wall-clock seconds per task before ExcessiveAgencyError."""
+
+
+@dataclass
 class WorkspaceConfig:
     name: str = "Workspace"
     description: str = ""
@@ -56,6 +200,11 @@ class WorkspaceConfig:
     a2a: A2AConfig = field(default_factory=A2AConfig)
     delegation: DelegationConfig = field(default_factory=DelegationConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
+    rbac: RBACConfig = field(default_factory=RBACConfig)
+    hitl: HITLConfig = field(default_factory=HITLConfig)
+    governance: GovernanceConfig = field(default_factory=GovernanceConfig)
+    security_scan: SecurityScanConfig = field(default_factory=SecurityScanConfig)
+    compliance: ComplianceConfig = field(default_factory=ComplianceConfig)
     sub_workspaces: list[dict] = field(default_factory=list)
 
 
@@ -80,6 +229,13 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
     a2a_raw = raw.get("a2a", {})
     delegation_raw = raw.get("delegation", {})
     sandbox_raw = raw.get("sandbox", {})
+    rbac_raw = raw.get("rbac", {})
+    hitl_raw = raw.get("hitl", {})
+    governance_raw = raw.get("governance", {})
+    # security_scan accepts both shorthand string ("warn") and dict ({"mode": "warn"})
+    _ss_raw = raw.get("security_scan", {})
+    security_scan_raw = _ss_raw if isinstance(_ss_raw, dict) else {"mode": str(_ss_raw)}
+    compliance_raw = raw.get("compliance", {})
 
     return WorkspaceConfig(
         name=raw.get("name", "Workspace"),
@@ -115,6 +271,33 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
             backend=sandbox_raw.get("backend", "subprocess"),
             memory_limit=sandbox_raw.get("memory_limit", "256m"),
             timeout=sandbox_raw.get("timeout", 30),
+        ),
+        rbac=RBACConfig(
+            roles=rbac_raw.get("roles", ["operator"]),
+            allowed_actions=rbac_raw.get("allowed_actions", {}),
+        ),
+        hitl=HITLConfig(
+            channels=hitl_raw.get("channels", [{"type": "dashboard"}]),
+            default_timeout=float(hitl_raw.get("default_timeout", 300)),
+            bypass_roles=hitl_raw.get("bypass_roles", []),
+        ),
+        governance=GovernanceConfig(
+            enabled=governance_raw.get("enabled", False),
+            toolkit=governance_raw.get("toolkit", "microsoft"),
+            policy_endpoint=governance_raw.get("policy_endpoint", ""),
+            policy_mode=governance_raw.get("policy_mode", "audit"),
+            policy_file=governance_raw.get("policy_file", ""),
+            blocked_patterns=governance_raw.get("blocked_patterns", []),
+            max_tool_calls_per_task=governance_raw.get("max_tool_calls_per_task", 50),
+        ),
+        security_scan=SecurityScanConfig(
+            mode=security_scan_raw.get("mode", "warn"),
+        ),
+        compliance=ComplianceConfig(
+            mode=compliance_raw.get("mode", ""),
+            prompt_injection=compliance_raw.get("prompt_injection", "detect"),
+            max_tool_calls_per_task=int(compliance_raw.get("max_tool_calls_per_task", 50)),
+            max_task_duration_seconds=int(compliance_raw.get("max_task_duration_seconds", 300)),
         ),
         sub_workspaces=raw.get("sub_workspaces", []),
     )

@@ -8,6 +8,12 @@ from typing import Any
 
 import yaml
 
+try:
+    from tools.security_scan import SkillSecurityError, scan_skill_dependencies
+    _SECURITY_SCAN_AVAILABLE = True
+except ImportError:  # lightweight test environments without tools/ on sys.path
+    _SECURITY_SCAN_AVAILABLE = False
+
 
 @dataclass
 class SkillMetadata:
@@ -76,6 +82,16 @@ def load_skills(config_path: str, skill_names: list[str]) -> list[LoadedSkill]:
     skills_dir = Path(config_path) / "skills"
     loaded = []
 
+    # Resolve security scan mode once before the loop
+    scan_mode = "warn"
+    if _SECURITY_SCAN_AVAILABLE:
+        try:
+            from config import load_config
+            _cfg = load_config(config_path)
+            scan_mode = _cfg.security_scan.mode
+        except Exception:
+            pass  # use default "warn" — never block on config error
+
     for skill_name in skill_names:
         skill_path = skills_dir / skill_name
         skill_md = skill_path / "SKILL.md"
@@ -83,6 +99,14 @@ def load_skills(config_path: str, skill_names: list[str]) -> list[LoadedSkill]:
         if not skill_md.exists():
             print(f"Warning: SKILL.md not found for {skill_name}, skipping")
             continue
+
+        # --- Security scan before loading any code from the skill ------------
+        if _SECURITY_SCAN_AVAILABLE and scan_mode != "off":
+            try:
+                scan_skill_dependencies(skill_name, skill_path, scan_mode)
+            except SkillSecurityError as exc:
+                print(f"Skipping skill '{skill_name}': blocked by security scan — {exc}")
+                continue
 
         frontmatter, instructions = parse_skill_frontmatter(skill_md)
 

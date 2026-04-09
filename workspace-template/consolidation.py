@@ -73,6 +73,7 @@ class ConsolidationLoop:
             )
 
             # Use the agent to generate the summary if available
+            summary = ""
             if self.agent:
                 try:
                     result = await self.agent.ainvoke(

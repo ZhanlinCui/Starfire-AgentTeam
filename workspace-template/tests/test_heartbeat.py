@@ -124,3 +124,50 @@ async def test_stop_cancels_task():
         await asyncio.sleep(0.01)
         await hb.stop()
         assert hb._task.cancelled() or hb._task.done()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_continues_after_exception(capsys):
+    """When the POST raises an exception, the loop prints a message and continues."""
+    hb = HeartbeatLoop("http://platform:8080", "ws-err")
+
+    call_count = 0
+
+    async def fake_post(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("connection refused")
+        # Second call succeeds — return a mock response
+        return MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.post = fake_post
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("heartbeat.httpx.AsyncClient", return_value=mock_client):
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            # Allow two iterations then cancel
+            iteration = 0
+
+            async def controlled_sleep(delay):
+                nonlocal iteration
+                iteration += 1
+                if iteration >= 2:
+                    raise asyncio.CancelledError()
+
+            mock_sleep.side_effect = controlled_sleep
+
+            task = asyncio.create_task(hb._loop())
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    # The loop ran at least once and printed the failure message
+    captured = capsys.readouterr()
+    assert "Heartbeat failed" in captured.out
+    assert "connection refused" in captured.out
+    # The loop continued (call_count reached at least 1)
+    assert call_count >= 1

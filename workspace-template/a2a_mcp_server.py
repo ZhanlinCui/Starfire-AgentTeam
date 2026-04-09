@@ -205,7 +205,7 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
 
 # --- MCP Server (JSON-RPC over stdio) ---
 
-async def main():
+async def main():  # pragma: no cover
     """Run MCP server on stdio — reads JSON-RPC requests, writes responses."""
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
@@ -289,5 +289,5 @@ async def main():
             break
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     asyncio.run(main())

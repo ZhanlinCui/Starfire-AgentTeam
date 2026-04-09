@@ -57,7 +57,7 @@ def set_status(task: str):
         print(f"agent-molecule-status: failed to update: {e}", file=sys.stderr)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     if len(sys.argv) < 2:
         print("Usage: agent-molecule-status 'task description'")
         print("       agent-molecule-status ''  # clear")

@@ -507,7 +507,7 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                 )
                 return
 
-    def _cleanup_temp_files(self):
+    def _cleanup_temp_files(self):  # pragma: no cover
         """Clean up temp files. Called via atexit for reliable cleanup."""
         for f in self._temp_files:
             try:
@@ -520,7 +520,7 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             except OSError:
                 pass
 
-    def __del__(self):
+    def __del__(self):  # pragma: no cover
         """Clean up temp files (fallback — prefer atexit-registered _cleanup_temp_files)."""
         for f in self._temp_files:
             try:
@@ -533,6 +533,6 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             except OSError:
                 pass
 
-    async def cancel(self, context: RequestContext, event_queue: EventQueue):
+    async def cancel(self, context: RequestContext, event_queue: EventQueue):  # pragma: no cover
         """Cancel a running task."""
         pass
