@@ -56,17 +56,20 @@ class ClaudeCodeAdapter(BaseAdapter):
 
         # Copy plugin skills into /configs/skills/ for hot-reload
         skills_dst = os.path.join(config.config_path, "skills")
-        os.makedirs(skills_dst, exist_ok=True)
-        copied = 0
-        for skill_dir in plugins.skill_dirs:
-            for skill_name in sorted(os.listdir(skill_dir)):
-                src = os.path.join(skill_dir, skill_name)
-                dst = os.path.join(skills_dst, skill_name)
-                if os.path.isdir(src) and not os.path.exists(dst):
-                    shutil.copytree(src, dst)
-                    copied += 1
-        if copied:
-            logger.info("Claude Code: copied %d plugin skills to %s", copied, skills_dst)
+        try:
+            os.makedirs(skills_dst, exist_ok=True)
+            copied = 0
+            for skill_dir in plugins.skill_dirs:
+                for skill_name in sorted(os.listdir(skill_dir)):
+                    src = os.path.join(skill_dir, skill_name)
+                    dst = os.path.join(skills_dst, skill_name)
+                    if os.path.isdir(src) and not os.path.exists(dst):
+                        shutil.copytree(src, dst)
+                        copied += 1
+            if copied:
+                logger.info("Claude Code: copied %d plugin skills to %s", copied, skills_dst)
+        except PermissionError:
+            logger.warning("Claude Code: cannot copy plugin skills to %s (permission denied) — skills remain in plugin dir", skills_dst)
 
     async def setup(self, config: AdapterConfig) -> None:
         import shutil
