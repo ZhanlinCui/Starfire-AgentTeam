@@ -44,6 +44,17 @@ export function handleCanvasEvent(
       break;
     }
 
+    case "WORKSPACE_PAUSED": {
+      set({
+        nodes: nodes.map((n) =>
+          n.id === msg.workspace_id
+            ? { ...n, data: { ...n.data, status: "paused", currentTask: "" } }
+            : n
+        ),
+      });
+      break;
+    }
+
     case "WORKSPACE_DEGRADED": {
       set({
         nodes: nodes.map((n) =>

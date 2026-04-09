@@ -3,6 +3,7 @@
 export const STATUS_COLORS: Record<string, string> = {
   online: "bg-emerald-400",
   offline: "bg-zinc-500",
+  paused: "bg-indigo-400",
   degraded: "bg-amber-400",
   failed: "bg-red-400",
   provisioning: "bg-sky-400 animate-pulse",

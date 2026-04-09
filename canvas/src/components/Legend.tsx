@@ -13,6 +13,7 @@ export function Legend() {
           <StatusItem color="bg-sky-400 animate-pulse" label="Starting" />
           <StatusItem color="bg-amber-400" label="Degraded" />
           <StatusItem color="bg-red-400" label="Failed" />
+          <StatusItem color="bg-indigo-400" label="Paused" />
           <StatusItem color="bg-zinc-500" label="Offline" />
         </div>
       </div>
