@@ -94,8 +94,12 @@ class OpenAIProcessor(MessageProcessor):
         self.model = model
         self.base_url = base_url or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        if not self.api_key:
+            logger.warning("OpenAI processor: no API key set (OPENAI_API_KEY env var or --api-key)")
 
     def process(self, message: str, sender: str, context: dict) -> str:
+        if not self.api_key:
+            return "OpenAI API key not configured. Set OPENAI_API_KEY environment variable."
         try:
             import httpx
             resp = httpx.post(
@@ -125,8 +129,12 @@ class AnthropicProcessor(MessageProcessor):
     def __init__(self, model: str = "claude-sonnet-4-6", api_key: str = ""):
         self.model = model
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        if not self.api_key:
+            logger.warning("Anthropic processor: no API key set (ANTHROPIC_API_KEY env var)")
 
     def process(self, message: str, sender: str, context: dict) -> str:
+        if not self.api_key:
+            return "Anthropic API key not configured. Set ANTHROPIC_API_KEY environment variable."
         try:
             import httpx
             resp = httpx.post(
@@ -179,6 +187,9 @@ class EchoProcessor(MessageProcessor):
     """Simple echo for testing — returns the message back."""
 
     name = "echo"
+
+    def __init__(self, **kwargs):
+        pass  # No config needed
 
     def process(self, message: str, sender: str, context: dict) -> str:
         return f"Echo from bridge: {message}"

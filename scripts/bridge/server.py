@@ -5,6 +5,7 @@ import logging
 import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Callable
 
 from .processor import MessageProcessor
 
@@ -14,9 +15,9 @@ logger = logging.getLogger("bridge.server")
 class A2AHandler(BaseHTTPRequestHandler):
     """Handles incoming A2A JSON-RPC requests, delegates to a MessageProcessor."""
 
-    processor: MessageProcessor  # set by BridgeServer
+    processor: MessageProcessor
     inbox_path: Path
-    resolve_name: callable
+    resolve_name: Callable[[str], str]
 
     def log_message(self, format, *args):
         pass
