@@ -56,19 +56,53 @@ export function FilesTab({ workspaceId }: Props) {
     return () => clearTimeout(successTimerRef.current);
   }, []);
 
-  const loadFiles = useCallback(async () => {
-    setLoading(true);
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [loadingDir, setLoadingDir] = useState<string | null>(null);
+
+  const loadFiles = useCallback(async (subPath = "", depth = 1) => {
+    if (!subPath) setLoading(true);
+    else setLoadingDir(subPath);
     try {
-      const data = await api.get<FileEntry[]>(`/workspaces/${workspaceId}/files?root=${encodeURIComponent(root)}`);
-      setFiles(data);
+      const params = new URLSearchParams({ root, depth: String(depth) });
+      if (subPath) params.set("path", subPath);
+      const data = await api.get<FileEntry[]>(`/workspaces/${workspaceId}/files?${params}`);
+      if (!subPath) {
+        // Root load — replace all
+        setFiles(data);
+      } else {
+        // Subfolder load — merge into existing files (remove old children, add new)
+        setFiles((prev) => {
+          const prefix = subPath + "/";
+          const filtered = prev.filter((f) => !f.path.startsWith(prefix) || f.path === subPath);
+          // Add the subfolder's children with full paths
+          const newFiles = data.map((f) => ({ ...f, path: subPath + "/" + f.path }));
+          return [...filtered, ...newFiles];
+        });
+      }
     } catch {
-      setFiles([]);
+      if (!subPath) setFiles([]);
     } finally {
       setLoading(false);
+      setLoadingDir(null);
     }
   }, [workspaceId, root]);
 
+  const toggleDir = useCallback((dirPath: string) => {
+    setExpandedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) {
+        next.delete(dirPath);
+      } else {
+        next.add(dirPath);
+        // Lazy load children
+        loadFiles(dirPath, 1);
+      }
+      return next;
+    });
+  }, [loadFiles]);
+
   useEffect(() => {
+    setExpandedDirs(new Set());
     loadFiles();
   }, [loadFiles]);
 
@@ -275,7 +309,7 @@ export function FilesTab({ workspaceId }: Props) {
               Clear
             </button>
           )}
-          <button onClick={loadFiles} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Refresh">
+          <button onClick={() => loadFiles()} className="text-[10px] text-zinc-500 hover:text-zinc-300" title="Refresh">
             ↻
           </button>
         </div>
@@ -522,7 +556,7 @@ function TreeItem({
   onDelete: (path: string) => void;
   depth: number;
 }) {
-  const [expanded, setExpanded] = useState(depth < 2);
+  const [expanded, setExpanded] = useState(false);
   const isSelected = selectedPath === node.path;
 
   if (node.isDir) {

@@ -122,11 +122,25 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
-	// Query param ?root= to explore different container paths (default: /configs)
+	// Query params:
+	//   ?root=  — base path in container (default: /configs)
+	//   ?path=  — subdirectory to list (relative to root, default: "")
+	//   ?depth= — max depth to recurse (default: 1, max: 5)
 	rootPath := c.DefaultQuery("root", "/configs")
 	if !allowedRoots[rootPath] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "root must be one of: /configs, /workspace, /home, /plugins"})
 		return
+	}
+	subPath := c.DefaultQuery("path", "")
+	depth := 1
+	if d := c.Query("depth"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n >= 1 && n <= 5 {
+			depth = n
+		}
+	}
+	listPath := rootPath
+	if subPath != "" {
+		listPath = rootPath + "/" + subPath
 	}
 
 	var wsName string
@@ -147,10 +161,10 @@ func (h *TemplatesHandler) ListFiles(c *gin.Context) {
 		// Uses find + sh -c stat to output TYPE|SIZE|PATH per line.
 		output, err := h.execInContainer(ctx, containerName, []string{
 			"sh", "-c",
-			fmt.Sprintf(`find %s -maxdepth 5 -not -path '*/.git/*' -not -name .DS_Store | while IFS= read -r f; do
+			fmt.Sprintf(`find %s -maxdepth %d -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -path '*/node_modules/*' -not -name .DS_Store | while IFS= read -r f; do
 				rel="${f#%s/}"; [ "$rel" = "%s" ] && continue; [ -z "$rel" ] && continue
 				if [ -d "$f" ]; then echo "d|0|$rel"; else s=$(stat -c %%s "$f" 2>/dev/null || stat -f %%z "$f" 2>/dev/null || echo 0); echo "f|$s|$rel"; fi
-			done`, rootPath, rootPath, rootPath),
+			done`, listPath, depth, listPath, listPath),
 		})
 		if err != nil {
 			log.Printf("Container file list failed, falling back to host: %v", err)
