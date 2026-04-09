@@ -31,8 +31,48 @@ class ClaudeCodeAdapter(BaseAdapter):
             "timeout": {"type": "integer", "description": "Timeout in seconds (0 = no timeout)", "default": 0},
         }
 
+    async def inject_plugins(self, config, plugins) -> None:
+        """Claude Code: append plugin rules to CLAUDE.md, copy plugin skills to /configs/skills/."""
+        import shutil
+
+        if not plugins.rules and not plugins.skill_dirs:
+            return
+
+        # Append rules to CLAUDE.md
+        if plugins.rules:
+            claude_md = os.path.join(config.config_path, "CLAUDE.md")
+            with open(claude_md, "a") as f:
+                f.write("\n\n# Plugin Rules\n")
+                for rule in plugins.rules:
+                    f.write(f"\n{rule}\n")
+            logger.info("Claude Code: injected %d plugin rules into CLAUDE.md", len(plugins.rules))
+
+        # Copy plugin skills into /configs/skills/ for hot-reload
+        skills_dst = os.path.join(config.config_path, "skills")
+        os.makedirs(skills_dst, exist_ok=True)
+        copied = 0
+        for skill_dir in plugins.skill_dirs:
+            for skill_name in sorted(os.listdir(skill_dir)):
+                src = os.path.join(skill_dir, skill_name)
+                dst = os.path.join(skills_dst, skill_name)
+                if os.path.isdir(src) and not os.path.exists(dst):
+                    shutil.copytree(src, dst)
+                    copied += 1
+        if copied:
+            logger.info("Claude Code: copied %d plugin skills to %s", copied, skills_dst)
+
     async def setup(self, config: AdapterConfig) -> None:
         import shutil
+
+        # Load and inject plugins before CLI setup
+        from plugins import load_plugins
+        workspace_plugins_dir = os.path.join(config.config_path, "plugins")
+        plugins = load_plugins(
+            workspace_plugins_dir=workspace_plugins_dir,
+            shared_plugins_dir=os.environ.get("PLUGINS_DIR", "/plugins"),
+        )
+        await self.inject_plugins(config, plugins)
+
         cmd = config.runtime_config.get("command") or "claude"
         if not shutil.which(cmd):
             logger.warning(f"Claude Code CLI '{cmd}' not found in PATH")

@@ -72,6 +72,16 @@ class BaseAdapter(ABC):
         Override in subclasses for adapter-specific settings."""
         return {}
 
+    async def inject_plugins(self, config: AdapterConfig, plugins) -> None:
+        """Apply plugin content to the runtime. Override per adapter.
+
+        Default implementation does nothing — _common_setup handles injection
+        for LangChain-based adapters (langgraph, crewai, autogen).
+        Non-LangChain adapters (claude-code) should override this to inject
+        rules into their native config format (e.g. CLAUDE.md) and copy skills.
+        """
+        pass
+
     async def _common_setup(self, config: AdapterConfig) -> SetupResult:
         """Shared setup pipeline — loads plugins, skills, tools, coordinator, and builds system prompt.
 
@@ -90,8 +100,13 @@ class BaseAdapter(ABC):
 
         platform_url = os.environ.get("PLATFORM_URL", "http://platform:8080")
 
-        # Load plugins
-        plugins = load_plugins()
+        # Load plugins from per-workspace dir first, then shared fallback
+        workspace_plugins_dir = os.path.join(config.config_path, "plugins")
+        plugins = load_plugins(
+            workspace_plugins_dir=workspace_plugins_dir,
+            shared_plugins_dir=os.environ.get("PLUGINS_DIR", "/plugins"),
+        )
+        await self.inject_plugins(config, plugins)
         if plugins.plugin_names:
             logger.info(f"Plugins: {', '.join(plugins.plugin_names)}")
 

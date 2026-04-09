@@ -182,6 +182,14 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.PUT("/workspaces/:id/files/*path", tmplh.WriteFile)
 	r.DELETE("/workspaces/:id/files/*path", tmplh.DeleteFile)
 
+	// Plugins
+	pluginsDir := findPluginsDir(configsDir)
+	plgh := handlers.NewPluginsHandler(pluginsDir, dockerCli, wh.RestartByID)
+	r.GET("/plugins", plgh.ListRegistry)
+	r.GET("/workspaces/:id/plugins", plgh.ListInstalled)
+	r.POST("/workspaces/:id/plugins", plgh.Install)
+	r.DELETE("/workspaces/:id/plugins/:name", plgh.Uninstall)
+
 	// Bundles
 	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir, dockerCli)
 	r.GET("/bundles/export/:id", bh.Export)
@@ -198,6 +206,29 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/ws", sh.HandleConnect)
 
 	return r
+}
+
+func findPluginsDir(configsDir string) string {
+	// configsDir-relative is most reliable (avoids empty platform/plugins/)
+	candidates := []string{
+		filepath.Join(configsDir, "..", "plugins"),
+		"../plugins",
+		"plugins",
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			// Must have at least one plugin subfolder to be valid
+			entries, _ := os.ReadDir(c)
+			for _, e := range entries {
+				if e.IsDir() {
+					abs, _ := filepath.Abs(c)
+					return abs
+				}
+			}
+		}
+	}
+	abs, _ := filepath.Abs(filepath.Join(configsDir, "..", "plugins"))
+	return abs
 }
 
 func findOrgDir(configsDir string) string {
