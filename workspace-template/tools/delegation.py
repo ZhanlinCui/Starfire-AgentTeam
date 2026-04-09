@@ -236,7 +236,10 @@ async def delegate_to_workspace(
                     )
 
                     if a2a_resp.status_code == 200:
-                        result = a2a_resp.json()
+                        try:
+                            result = a2a_resp.json()
+                        except (ValueError, Exception) as e:
+                            return f"Peer responded with status 200 but invalid JSON: {str(e)[:200]}"
                         if "result" in result:
                             task_result = result["result"]
                             # Extract text from artifacts

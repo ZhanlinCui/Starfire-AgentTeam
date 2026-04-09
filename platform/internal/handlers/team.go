@@ -104,9 +104,11 @@ func (h *TeamHandler) Expand(c *gin.Context) {
 		}
 
 		// Insert canvas layout (offset from parent)
-		db.DB.ExecContext(ctx, `
+		if _, err := db.DB.ExecContext(ctx, `
 			INSERT INTO canvas_layouts (workspace_id, x, y) VALUES ($1, $2, $3)
-		`, childID, 0, 0)
+		`, childID, 0, 0); err != nil {
+			log.Printf("Team expand: failed to insert layout for child %s: %v", childID, err)
+		}
 
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", childID, map[string]interface{}{
 			"name":      childName,
@@ -183,10 +185,14 @@ func (h *TeamHandler) Collapse(c *gin.Context) {
 		}
 
 		// Mark as removed
-		db.DB.ExecContext(ctx,
-			`UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, childID)
-		db.DB.ExecContext(ctx,
-			`DELETE FROM canvas_layouts WHERE workspace_id = $1`, childID)
+		if _, err := db.DB.ExecContext(ctx,
+			`UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, childID); err != nil {
+			log.Printf("Team collapse: failed to remove workspace %s: %v", childID, err)
+		}
+		if _, err := db.DB.ExecContext(ctx,
+			`DELETE FROM canvas_layouts WHERE workspace_id = $1`, childID); err != nil {
+			log.Printf("Team collapse: failed to delete layout for %s: %v", childID, err)
+		}
 
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", childID, map[string]interface{}{})
 

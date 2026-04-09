@@ -218,12 +218,14 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		}
 	}
 
-	// Resolve the host-mapped port so the platform can reach the container from the host.
-	// The provisioner uses ephemeral port binding (127.0.0.1:0 → 8000/tcp), so we need
-	// to inspect the container to find the actual assigned port.
+	// Resolve the host-mapped port. Retry inspect up to 3 times if Docker hasn't
+	// bound the ephemeral port yet (rare race under heavy load).
 	hostURL := InternalURL(cfg.WorkspaceID) // fallback to Docker-internal
-	info, inspectErr := p.cli.ContainerInspect(ctx, resp.ID)
-	if inspectErr == nil {
+	for attempt := 0; attempt < 3; attempt++ {
+		info, inspectErr := p.cli.ContainerInspect(ctx, resp.ID)
+		if inspectErr != nil {
+			break
+		}
 		portBindings := info.NetworkSettings.Ports[nat.Port(DefaultPort+"/tcp")]
 		if len(portBindings) > 0 {
 			hostPort := portBindings[0].HostPort
@@ -232,6 +234,10 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 				hostIP = "127.0.0.1"
 			}
 			hostURL = fmt.Sprintf("http://%s:%s", hostIP, hostPort)
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(500 * time.Millisecond) // wait for Docker to bind the port
 		}
 	}
 

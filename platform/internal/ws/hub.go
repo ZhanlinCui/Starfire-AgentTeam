@@ -19,11 +19,13 @@ type Client struct {
 }
 
 type Hub struct {
-	mu           sync.RWMutex
-	clients      map[*Client]bool
-	Register     chan *Client
-	Unregister   chan *Client
+	mu             sync.RWMutex
+	clients        map[*Client]bool
+	Register       chan *Client
+	Unregister     chan *Client
 	canCommunicate AccessChecker
+	done           chan struct{} // closed once on shutdown
+	closeOnce      sync.Once
 }
 
 func NewHub(canCommunicate AccessChecker) *Hub {
@@ -32,6 +34,7 @@ func NewHub(canCommunicate AccessChecker) *Hub {
 		Register:       make(chan *Client),
 		Unregister:     make(chan *Client),
 		canCommunicate: canCommunicate,
+		done:           make(chan struct{}),
 	}
 }
 
@@ -51,18 +54,18 @@ func (h *Hub) Run() {
 				close(client.Send)
 			}
 			h.mu.Unlock()
-			log.Printf("WebSocket client disconnected (workspace=%q)", client.WorkspaceID)
+
+		case <-h.done:
+			return
 		}
 	}
 }
 
 // Broadcast sends a WSMessage to all appropriate clients.
-// Canvas clients (no WorkspaceID) receive all events.
-// Workspace clients only receive events about reachable peers.
 func (h *Hub) Broadcast(msg models.WSMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("Error marshaling broadcast: %v", err)
+		log.Printf("WS: marshal error: %v", err)
 		return
 	}
 
@@ -101,23 +104,31 @@ func WritePump(client *Client) {
 	}
 }
 
-// Close disconnects all WebSocket clients gracefully.
+// Close disconnects all WebSocket clients gracefully. Safe to call multiple times.
 func (h *Hub) Close() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	count := len(h.clients)
-	for client := range h.clients {
-		close(client.Send)
-		client.Conn.Close()
-		delete(h.clients, client)
-	}
-	log.Printf("WebSocket hub closed (%d clients disconnected)", count)
+	h.closeOnce.Do(func() {
+		close(h.done) // signal Run() to exit
+
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		count := len(h.clients)
+		for client := range h.clients {
+			close(client.Send)
+			client.Conn.Close()
+			delete(h.clients, client)
+		}
+		log.Printf("WebSocket hub closed (%d clients disconnected)", count)
+	})
 }
 
 // ReadPump reads from WebSocket (keeps connection alive, discards messages).
 func ReadPump(client *Client, hub *Hub) {
 	defer func() {
-		hub.Unregister <- client
+		// Guard against sending to Unregister after hub is closed
+		select {
+		case hub.Unregister <- client:
+		case <-hub.done:
+		}
 		client.Conn.Close()
 	}()
 	for {
