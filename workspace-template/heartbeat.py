@@ -1,18 +1,27 @@
-"""Send heartbeat to platform registry every 30 seconds.
+"""Heartbeat loop — alive signal + delegation status checker.
 
-Resilient: recreates HTTP client on failure, never crashes the event loop.
+Every 30 seconds:
+1. Send heartbeat to platform (alive signal with current_task, error_rate)
+2. Check pending delegations — any results back?
+3. Store completed delegation results for the agent to pick up
+
+Resilient: recreates HTTP client on failure, auto-restarts on crash.
 """
 
 import asyncio
+import json
 import logging
+import os
 import time
+from pathlib import Path
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL = 30  # seconds
-MAX_CONSECUTIVE_FAILURES = 10  # log warning after this many failures
+MAX_CONSECUTIVE_FAILURES = 10
+DELEGATION_RESULTS_FILE = "/tmp/delegation_results.jsonl"
 
 
 class HeartbeatLoop:
@@ -27,6 +36,7 @@ class HeartbeatLoop:
         self.sample_error = ""
         self._task = None
         self._consecutive_failures = 0
+        self._seen_delegation_ids: set[str] = set()
 
     @property
     def error_rate(self) -> float:
@@ -44,13 +54,11 @@ class HeartbeatLoop:
 
     def start(self):
         self._task = asyncio.create_task(self._loop())
-        # Prevent silent task death — log unhandled exceptions
         self._task.add_done_callback(self._on_done)
 
     def _on_done(self, task):
         if not task.cancelled() and task.exception():
             logger.error("Heartbeat loop died: %s — restarting", task.exception())
-            # Restart the loop
             self._task = asyncio.create_task(self._loop())
             self._task.add_done_callback(self._on_done)
 
@@ -68,6 +76,7 @@ class HeartbeatLoop:
             try:
                 client = httpx.AsyncClient(timeout=10.0)
                 while True:
+                    # 1. Send heartbeat
                     try:
                         await client.post(
                             f"{self.platform_url}/registry/heartbeat",
@@ -80,7 +89,6 @@ class HeartbeatLoop:
                                 "uptime_seconds": int(time.time() - self.start_time),
                             },
                         )
-                        # Reset counters after successful heartbeat
                         self.error_count = 0
                         self.request_count = 0
                         self._consecutive_failures = 0
@@ -89,18 +97,23 @@ class HeartbeatLoop:
                         if self._consecutive_failures <= 3 or self._consecutive_failures % MAX_CONSECUTIVE_FAILURES == 0:
                             logger.warning("Heartbeat failed (%d consecutive): %s", self._consecutive_failures, e)
                         if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                            # Recreate client — connection may be stale
                             logger.info("Heartbeat: recreating HTTP client after %d failures", self._consecutive_failures)
                             try:
                                 await client.aclose()
                             except Exception:
                                 pass
-                            break  # Break inner loop to recreate client
+                            break
+
+                    # 2. Check delegation status
+                    try:
+                        await self._check_delegations(client)
+                    except Exception as e:
+                        logger.debug("Delegation check failed: %s", e)
 
                     await asyncio.sleep(HEARTBEAT_INTERVAL)
 
             except asyncio.CancelledError:
-                raise  # Propagate cancellation
+                raise
             except Exception as e:
                 logger.error("Heartbeat loop error: %s — retrying in 30s", e)
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
@@ -110,3 +123,59 @@ class HeartbeatLoop:
                         await client.aclose()
                     except Exception:
                         pass
+
+    async def _check_delegations(self, client: httpx.AsyncClient):
+        """Check for completed delegations and store results for the agent."""
+        try:
+            resp = await client.get(
+                f"{self.platform_url}/workspaces/{self.workspace_id}/delegations"
+            )
+            if resp.status_code != 200:
+                return
+
+            delegations = resp.json()
+            if not isinstance(delegations, list):
+                return
+
+            new_results = []
+            for d in delegations:
+                did = d.get("delegation_id", "")
+                status = d.get("status", "")
+
+                if not did or did in self._seen_delegation_ids:
+                    continue
+
+                if status in ("completed", "failed"):
+                    self._seen_delegation_ids.add(did)
+                    new_results.append({
+                        "delegation_id": did,
+                        "target_id": d.get("target_id", ""),
+                        "status": status,
+                        "summary": d.get("summary", ""),
+                        "response_preview": d.get("response_preview", ""),
+                        "error": d.get("error", ""),
+                        "timestamp": time.time(),
+                    })
+
+            if new_results:
+                # Append to results file for the agent to pick up
+                with open(DELEGATION_RESULTS_FILE, "a") as f:
+                    for r in new_results:
+                        f.write(json.dumps(r) + "\n")
+                logger.info("Heartbeat: %d new delegation results stored", len(new_results))
+
+                # Also push notification to user via platform
+                for r in new_results:
+                    try:
+                        msg = f"Delegation {r['status']}: {r['summary'][:100]}"
+                        if r.get("response_preview"):
+                            msg += f"\nResult: {r['response_preview'][:200]}"
+                        await client.post(
+                            f"{self.platform_url}/workspaces/{self.workspace_id}/notify",
+                            json={"message": msg, "type": "delegation_result"},
+                        )
+                    except Exception:
+                        pass  # Best-effort notification
+
+        except Exception as e:
+            logger.debug("Delegation check error: %s", e)

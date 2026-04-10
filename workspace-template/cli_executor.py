@@ -290,6 +290,32 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         except Exception:
             pass
 
+    def _read_delegation_results(self) -> str:
+        """Read and consume delegation results written by heartbeat loop."""
+        results_file = Path("/tmp/delegation_results.jsonl")
+        if not results_file.exists():
+            return ""
+        try:
+            lines = results_file.read_text().strip().split("\n")
+            results_file.unlink()  # Consume — don't re-inject next time
+            parts = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                    status = r.get("status", "?")
+                    summary = r.get("summary", "")
+                    preview = r.get("response_preview", "")
+                    parts.append(f"- [{status}] {summary}")
+                    if preview:
+                        parts.append(f"  Response: {preview[:200]}")
+                except json.JSONDecodeError:
+                    continue
+            return "\n".join(parts) if parts else ""
+        except Exception:
+            return ""
+
     def _get_system_prompt(self) -> str | None:
         """Get system prompt — re-read from file each time (supports hot-reload)."""
         prompt_file = Path(self.config_path) / "system-prompt.md"
@@ -376,12 +402,17 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
 
+        # Inject delegation results that arrived since last message
+        delegation_context = self._read_delegation_results()
+        if delegation_context:
+            user_input = f"[Delegation results received while you were idle]\n{delegation_context}\n\n[New message]\n{user_input}"
+
         # Auto-recall: inject prior memories into the prompt on first message (no session yet)
         original_input = user_input  # Keep clean copy for memory
         if not self._session_id:
             memories = await self._recall_memories()
             if memories:
-                user_input = f"[Prior context from memory]\n{memories}\n\n[Current request]\n{user_input}"
+                user_input = f"[Prior context from memory]\n{memories}\n\n{user_input}"
 
         try:
             await self._run_cli(user_input, event_queue)
