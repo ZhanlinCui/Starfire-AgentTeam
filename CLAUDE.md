@@ -138,6 +138,8 @@ Three layers detect dead containers (e.g. Docker Desktop crash):
 All three call `onWorkspaceOffline` which broadcasts `WORKSPACE_OFFLINE` + `go wh.RestartByID()`. Redis cleanup uses shared `db.ClearWorkspaceKeys()`.
 
 ### Template Resolution (Create)
+Runtime detection happens **before** DB insert: if `payload.Runtime` is empty and a template is specified, the handler reads `runtime:` from `configsDir/template/config.yaml` first. If still empty, defaults to `"langgraph"`. This ensures the correct runtime (e.g. `claude-code`) is persisted in the DB and used for container image selection.
+
 When a workspace specifies a template that doesn't exist, the Create handler falls back:
 1. Check `os.Stat(configsDir/template)` — use if exists
 2. Try `{runtime}-default` template (e.g. `claude-code-default/`)

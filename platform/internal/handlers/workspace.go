@@ -47,6 +47,23 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 	if payload.Tier == 0 {
 		payload.Tier = 1
 	}
+
+	// Detect runtime from template config.yaml if not specified in request.
+	// Must happen before DB insert so the correct runtime is persisted.
+	if payload.Runtime == "" && payload.Template != "" {
+		candidatePath := filepath.Join(h.configsDir, payload.Template)
+		cfgData, readErr := os.ReadFile(filepath.Join(candidatePath, "config.yaml"))
+		if readErr != nil {
+			log.Printf("Create: could not read config.yaml for template %q: %v", payload.Template, readErr)
+		}
+		for _, line := range strings.Split(string(cfgData), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "runtime:") {
+				payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+				break
+			}
+		}
+	}
 	if payload.Runtime == "" {
 		payload.Runtime = "langgraph"
 	}
@@ -124,17 +141,6 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 			candidatePath := filepath.Join(h.configsDir, payload.Template)
 			if _, err := os.Stat(candidatePath); err == nil {
 				templatePath = candidatePath
-				// Read runtime from template config.yaml if not specified in request
-				if payload.Runtime == "" {
-					cfgData, _ := os.ReadFile(filepath.Join(templatePath, "config.yaml"))
-					for _, line := range strings.Split(string(cfgData), "\n") {
-						line = strings.TrimSpace(line)
-						if strings.HasPrefix(line, "runtime:") {
-							payload.Runtime = strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
-							break
-						}
-					}
-				}
 			} else {
 				// Template not found — try runtime-default template, then generate config
 				log.Printf("Create: template %q not found, falling back for %s", payload.Template, payload.Name)
