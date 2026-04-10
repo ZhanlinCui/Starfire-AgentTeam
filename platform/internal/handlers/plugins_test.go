@@ -1,0 +1,378 @@
+package handlers
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ---------- ListRegistry: empty dir → 200 [] ----------
+
+func TestPluginListRegistry_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	h := NewPluginsHandler(dir, nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/plugins", nil)
+
+	h.ListRegistry(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var plugins []pluginInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &plugins); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(plugins) != 0 {
+		t.Errorf("expected 0 plugins, got %d", len(plugins))
+	}
+}
+
+// ---------- ListRegistry: non-existent dir → 200 [] ----------
+
+func TestPluginListRegistry_NonExistentDir(t *testing.T) {
+	h := NewPluginsHandler("/tmp/does-not-exist-plugins-xyz", nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/plugins", nil)
+
+	h.ListRegistry(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var plugins []pluginInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &plugins); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(plugins) != 0 {
+		t.Errorf("expected 0 plugins, got %d", len(plugins))
+	}
+}
+
+// ---------- ListRegistry: with plugins → returns manifest data ----------
+
+func TestPluginListRegistry_WithPlugins(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a plugin with manifest
+	pluginDir := filepath.Join(dir, "my-plugin")
+	if err := os.Mkdir(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `name: my-plugin
+version: "1.0.0"
+description: A test plugin
+author: tester
+tags:
+  - test
+  - example
+skills:
+  - greet
+`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a plugin without manifest (just a directory)
+	bareDir := filepath.Join(dir, "bare-plugin")
+	if err := os.Mkdir(bareDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a regular file (should be skipped — not a directory)
+	if err := os.WriteFile(filepath.Join(dir, "not-a-dir.txt"), []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewPluginsHandler(dir, nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/plugins", nil)
+
+	h.ListRegistry(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var plugins []pluginInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &plugins); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if len(plugins) != 2 {
+		t.Fatalf("expected 2 plugins, got %d", len(plugins))
+	}
+
+	// Find the manifest plugin (order depends on readdir)
+	var found bool
+	for _, p := range plugins {
+		if p.Name == "my-plugin" {
+			found = true
+			if p.Version != "1.0.0" {
+				t.Errorf("expected version 1.0.0, got %s", p.Version)
+			}
+			if p.Description != "A test plugin" {
+				t.Errorf("expected description 'A test plugin', got %s", p.Description)
+			}
+			if p.Author != "tester" {
+				t.Errorf("expected author 'tester', got %s", p.Author)
+			}
+			if len(p.Tags) != 2 || p.Tags[0] != "test" || p.Tags[1] != "example" {
+				t.Errorf("unexpected tags: %v", p.Tags)
+			}
+			if len(p.Skills) != 1 || p.Skills[0] != "greet" {
+				t.Errorf("unexpected skills: %v", p.Skills)
+			}
+		}
+		if p.Name == "bare-plugin" {
+			if p.Version != "" {
+				t.Errorf("bare plugin should have empty version, got %s", p.Version)
+			}
+		}
+	}
+	if !found {
+		t.Error("my-plugin not found in results")
+	}
+}
+
+// ---------- Install: missing name → 400 ----------
+
+func TestPluginInstall_MissingName(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-123/plugins", bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.Install(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- Install: invalid name (path traversal) → 400 ----------
+
+func TestPluginInstall_InvalidName_PathTraversal(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
+	body := `{"name":"../../../etc/passwd"}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-123/plugins", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.Install(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- Install: plugin not found → 404 ----------
+
+func TestPluginInstall_NotFound(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
+	body := `{"name":"nonexistent-plugin"}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-123/plugins", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.Install(c)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- Uninstall: invalid name → 400 ----------
+
+func TestPluginUninstall_InvalidName(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "ws-123"},
+		{Key: "name", Value: "../escape"},
+	}
+	c.Request = httptest.NewRequest("DELETE", "/workspaces/ws-123/plugins/../escape", nil)
+
+	h.Uninstall(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- Uninstall: empty name → 400 ----------
+
+func TestPluginUninstall_EmptyName(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "ws-123"},
+		{Key: "name", Value: ""},
+	}
+	c.Request = httptest.NewRequest("DELETE", "/workspaces/ws-123/plugins/", nil)
+
+	h.Uninstall(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---------- validatePluginName: valid names pass ----------
+
+func TestValidatePluginName_ValidNames(t *testing.T) {
+	valid := []string{
+		"my-plugin",
+		"plugin_v2",
+		"AwesomePlugin",
+		"plugin123",
+		"a",
+	}
+	for _, name := range valid {
+		if err := validatePluginName(name); err != nil {
+			t.Errorf("validatePluginName(%q) should pass, got: %v", name, err)
+		}
+	}
+}
+
+// ---------- validatePluginName: "/" rejected ----------
+
+func TestValidatePluginName_SlashRejected(t *testing.T) {
+	names := []string{
+		"foo/bar",
+		"/leading",
+		"trailing/",
+		"a/b/c",
+	}
+	for _, name := range names {
+		if err := validatePluginName(name); err == nil {
+			t.Errorf("validatePluginName(%q) should fail for slash", name)
+		}
+	}
+}
+
+// ---------- validatePluginName: ".." rejected ----------
+
+func TestValidatePluginName_DotDotRejected(t *testing.T) {
+	names := []string{
+		"..",
+		"..foo",
+		"foo..",
+		"a..b",
+	}
+	for _, name := range names {
+		if err := validatePluginName(name); err == nil {
+			t.Errorf("validatePluginName(%q) should fail for '..'", name)
+		}
+	}
+}
+
+// ---------- validatePluginName: backslash rejected ----------
+
+func TestValidatePluginName_BackslashRejected(t *testing.T) {
+	if err := validatePluginName(`foo\bar`); err == nil {
+		t.Error(`validatePluginName("foo\\bar") should fail`)
+	}
+}
+
+// ---------- validatePluginName: empty rejected ----------
+
+func TestValidatePluginName_EmptyRejected(t *testing.T) {
+	if err := validatePluginName(""); err == nil {
+		t.Error("validatePluginName(\"\") should fail")
+	}
+}
+
+// ---------- parseManifestYAML: valid yaml → correct pluginInfo ----------
+
+func TestParseManifestYAML_ValidYAML(t *testing.T) {
+	yaml := []byte(`
+name: test-plugin
+version: "2.0.0"
+description: "Does things"
+author: "dev"
+tags:
+  - utility
+  - automation
+skills:
+  - summarize
+  - translate
+`)
+	info := parseManifestYAML("fallback-name", yaml)
+
+	// Name should use fallbackName, not the yaml name field
+	if info.Name != "fallback-name" {
+		t.Errorf("expected name 'fallback-name', got %s", info.Name)
+	}
+	if info.Version != "2.0.0" {
+		t.Errorf("expected version 2.0.0, got %s", info.Version)
+	}
+	if info.Description != "Does things" {
+		t.Errorf("expected description 'Does things', got %s", info.Description)
+	}
+	if info.Author != "dev" {
+		t.Errorf("expected author 'dev', got %s", info.Author)
+	}
+	if len(info.Tags) != 2 || info.Tags[0] != "utility" || info.Tags[1] != "automation" {
+		t.Errorf("unexpected tags: %v", info.Tags)
+	}
+	if len(info.Skills) != 2 || info.Skills[0] != "summarize" || info.Skills[1] != "translate" {
+		t.Errorf("unexpected skills: %v", info.Skills)
+	}
+}
+
+// ---------- parseManifestYAML: invalid yaml → fallback ----------
+
+func TestParseManifestYAML_InvalidYAML(t *testing.T) {
+	info := parseManifestYAML("safe-name", []byte(`{{{not valid yaml`))
+	if info.Name != "safe-name" {
+		t.Errorf("expected fallback name 'safe-name', got %s", info.Name)
+	}
+	if info.Version != "" {
+		t.Errorf("expected empty version on invalid yaml, got %s", info.Version)
+	}
+}
+
+// ---------- parseManifestYAML: minimal yaml (no tags/skills) ----------
+
+func TestParseManifestYAML_MinimalYAML(t *testing.T) {
+	yaml := []byte(`version: "0.1"`)
+	info := parseManifestYAML("minimal", yaml)
+
+	if info.Name != "minimal" {
+		t.Errorf("expected name 'minimal', got %s", info.Name)
+	}
+	if info.Version != "0.1" {
+		t.Errorf("expected version '0.1', got %s", info.Version)
+	}
+	if info.Tags != nil {
+		t.Errorf("expected nil tags, got %v", info.Tags)
+	}
+	if info.Skills != nil {
+		t.Errorf("expected nil skills, got %v", info.Skills)
+	}
+}
