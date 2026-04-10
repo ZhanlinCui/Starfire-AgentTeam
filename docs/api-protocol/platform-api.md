@@ -41,7 +41,7 @@ The platform uses the caller identity to enforce hierarchy-based access rules.
 | `POST` | `/workspaces/:id/restart` | Restart workspace (reads runtime from container config.yaml before stop — detects runtime changes) |
 | `POST` | `/workspaces/:id/pause` | Pause workspace |
 | `POST` | `/workspaces/:id/resume` | Resume workspace |
-| `POST` | `/workspaces/:id/a2a` | Proxy A2A request to the target workspace (synchronous) |
+| `POST` | `/workspaces/:id/a2a` | Proxy A2A request to the target workspace (synchronous, enforces hierarchy access control via `X-Workspace-ID`) |
 | `POST` | `/workspaces/:id/delegate` | Async delegation — fire-and-forget, returns delegation_id |
 | `GET` | `/workspaces/:id/delegations` | List delegation status (pending/completed/failed) |
 
@@ -214,6 +214,7 @@ Canvas clients receive the global event stream. Workspaces connect with `X-Works
 
 It currently:
 
+- enforces access control via `CanCommunicate` for agent-to-agent calls (workspace caller IDs from `X-Workspace-ID`); canvas requests, self-calls, and system callers (`webhook:*`, `system:*`, `test:*`) bypass
 - normalizes incoming JSON into JSON-RPC 2.0
 - injects `messageId` when missing
 - applies different timeout rules for browser-initiated vs workspace-initiated calls
