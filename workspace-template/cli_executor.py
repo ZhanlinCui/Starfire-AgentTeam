@@ -60,8 +60,9 @@ def _brief_summary(text: str, max_len: int = 80) -> str:
 RUNTIME_PRESETS: dict[str, dict] = {
     "claude-code": {
         "command": "claude",
-        # Required for unattended agent operation — workspace tier controls access at the platform level
-        "base_args": ["--print", "--dangerously-skip-permissions", "--allowed-tools", "Bash"],
+        # Full agentic mode — all tools enabled, dangerously-skip-permissions for unattended operation
+        # Workspace tier controls access at the platform level
+        "base_args": ["--print", "--dangerously-skip-permissions"],
         "prompt_flag": "-p",
         "model_flag": "--model",
         "system_prompt_flag": "--system-prompt",
@@ -406,11 +407,16 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         for attempt in range(max_retries):
             proc = None
             try:
+                # Run in /workspace if it exists and has content (cloned repo),
+                # otherwise /configs (agent config files)
+                cwd = "/workspace" if os.path.isdir("/workspace") and os.listdir("/workspace") else "/configs"
+
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
+                    cwd=cwd,
                 )
                 if timeout:
                     stdout, stderr = await asyncio.wait_for(
