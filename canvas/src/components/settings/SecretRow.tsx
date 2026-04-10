@@ -42,6 +42,7 @@ export function SecretRow({ secret, workspaceId }: SecretRowProps) {
   // Auto-hide revealed value after 30s
   useEffect(() => {
     if (revealed) {
+      clearTimeout(revealTimerRef.current);
       revealTimerRef.current = setTimeout(() => setRevealed(false), AUTO_HIDE_MS);
       return () => clearTimeout(revealTimerRef.current);
     }

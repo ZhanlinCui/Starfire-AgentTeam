@@ -37,7 +37,7 @@ export function KeyValueField({
   const handleChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
       // Auto-trim whitespace on paste
-      onChange(e.target.value.trim() !== e.target.value.trim()
+      onChange(e.target.value !== e.target.value.trim()
         ? e.target.value.trim()
         : e.target.value);
     },

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSecretsStore } from '@/stores/secrets-store';
 import { fetchDependents } from '@/lib/api/secrets';
@@ -27,6 +27,12 @@ export function DeleteConfirmDialog({ workspaceId }: DeleteConfirmDialogProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const deleteSecret = useSecretsStore((s) => s.deleteSecret);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(confirmTimerRef.current);
+  }, []);
 
   // Listen for delete requests from SecretRow
   useEffect(() => {
@@ -45,7 +51,8 @@ export function DeleteConfirmDialog({ workspaceId }: DeleteConfirmDialogProps) {
         .finally(() => setIsLoadingDependents(false));
 
       // Enable confirm after 1s delay
-      setTimeout(() => setConfirmEnabled(true), CONFIRM_DELAY_MS);
+      clearTimeout(confirmTimerRef.current);
+      confirmTimerRef.current = setTimeout(() => setConfirmEnabled(true), CONFIRM_DELAY_MS);
     }
     window.addEventListener('secret:delete-request', handler);
     return () => window.removeEventListener('secret:delete-request', handler);

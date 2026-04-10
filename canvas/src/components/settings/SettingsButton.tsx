@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import { useSecretsStore } from '@/stores/secrets-store';
 import * as Tooltip from '@radix-ui/react-tooltip';
 
@@ -10,40 +11,43 @@ import * as Tooltip from '@radix-ui/react-tooltip';
  * - Tooltip: "Settings ⌘," (300ms delay)
  * - Active state: accent fill when panel is open
  */
-export function SettingsButton() {
-  const isPanelOpen = useSecretsStore((s) => s.isPanelOpen);
-  const openPanel = useSecretsStore((s) => s.openPanel);
-  const closePanel = useSecretsStore((s) => s.closePanel);
-  const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent);
+export const SettingsButton = forwardRef<HTMLButtonElement>(
+  function SettingsButton(_props, ref) {
+    const isPanelOpen = useSecretsStore((s) => s.isPanelOpen);
+    const openPanel = useSecretsStore((s) => s.openPanel);
+    const closePanel = useSecretsStore((s) => s.closePanel);
+    const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent);
 
-  const handleClick = () => {
-    if (isPanelOpen) closePanel();
-    else openPanel();
-  };
+    const handleClick = () => {
+      if (isPanelOpen) closePanel();
+      else openPanel();
+    };
 
-  return (
-    <Tooltip.Provider delayDuration={300}>
-      <Tooltip.Root>
-        <Tooltip.Trigger asChild>
-          <button
-            onClick={handleClick}
-            className={`settings-button ${isPanelOpen ? 'settings-button--active' : ''}`}
-            aria-label="Settings"
-            aria-expanded={isPanelOpen}
-          >
-            <GearIcon />
-          </button>
-        </Tooltip.Trigger>
-        <Tooltip.Portal>
-          <Tooltip.Content className="settings-button__tooltip" sideOffset={5}>
-            Settings {isMac ? '⌘,' : 'Ctrl+,'}
-            <Tooltip.Arrow />
-          </Tooltip.Content>
-        </Tooltip.Portal>
-      </Tooltip.Root>
-    </Tooltip.Provider>
-  );
-}
+    return (
+      <Tooltip.Provider delayDuration={300}>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild>
+            <button
+              ref={ref}
+              onClick={handleClick}
+              className={`settings-button ${isPanelOpen ? 'settings-button--active' : ''}`}
+              aria-label="Settings"
+              aria-expanded={isPanelOpen}
+            >
+              <GearIcon />
+            </button>
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content className="settings-button__tooltip" sideOffset={5}>
+              Settings {isMac ? '⌘,' : 'Ctrl+,'}
+              <Tooltip.Arrow />
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    );
+  },
+);
 
 function GearIcon() {
   return (

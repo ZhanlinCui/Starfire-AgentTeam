@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { TestConnectionState, SecretGroup } from '@/types/secrets';
 import { validateSecret } from '@/lib/api/secrets';
 
@@ -33,10 +33,17 @@ export function TestConnectionButton({
 }: TestConnectionButtonProps) {
   const [state, setState] = useState<TestConnectionState>('idle');
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(resetTimerRef.current);
+  }, []);
 
   const handleTest = useCallback(async () => {
     setState('testing');
     setErrorDetail(null);
+    clearTimeout(resetTimerRef.current);
     try {
       const result = await validateSecret(provider, secretValue);
       const nextState = result.valid ? 'success' : 'failure';
@@ -45,12 +52,12 @@ export function TestConnectionButton({
         setErrorDetail(result.error ?? 'Could not verify key. Check it has the required permissions.');
       }
       onResult?.(result.valid);
-      setTimeout(() => setState('idle'), RESET_DELAYS[nextState]!);
+      resetTimerRef.current = setTimeout(() => setState('idle'), RESET_DELAYS[nextState]!);
     } catch {
       setState('failure');
       setErrorDetail('Connection timed out. Service may be down.');
       onResult?.(false);
-      setTimeout(() => setState('idle'), RESET_DELAYS.failure);
+      resetTimerRef.current = setTimeout(() => setState('idle'), RESET_DELAYS.failure);
     }
   }, [provider, secretValue, onResult]);
 

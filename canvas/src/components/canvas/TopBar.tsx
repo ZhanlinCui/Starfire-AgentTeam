@@ -1,4 +1,5 @@
 import { SettingsButton } from '@/components/settings/SettingsButton';
+import { settingsGearRef } from '@/components/settings/SettingsPanel';
 
 interface TopBarProps {
   canvasName?: string;
@@ -24,7 +25,7 @@ export function TopBar({ canvasName = 'Canvas' }: TopBarProps) {
       <div className="top-bar__right">
         <button className="top-bar__btn">+ New Agent</button>
         {/* === INTEGRATION POINT: Settings gear icon === */}
-        <SettingsButton />
+        <SettingsButton ref={settingsGearRef} />
         {/* Bell and Avatar would go here */}
       </div>
     </div>
