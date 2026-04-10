@@ -190,11 +190,12 @@ class HeartbeatLoop:
                     "Use send_message_to_user if the user should know."
                 )
 
-                # Send A2A message to self — this wakes the agent (cooldown to prevent loops)
+                # Send A2A self-message to wake the agent.
+                # Minimum 60s between self-messages to avoid spam, but always send
+                # when there are genuinely NEW results to process.
                 now = time.time()
-                if now - self._last_self_message_time < self._self_message_cooldown:
-                    logger.info("Heartbeat: skipping self-message (cooldown %ds remaining)",
-                                int(self._self_message_cooldown - (now - self._last_self_message_time)))
+                if now - self._last_self_message_time < 60:
+                    logger.debug("Heartbeat: self-message cooldown (60s), will retry next cycle")
                 else:
                     self._last_self_message_time = now
                     try:
