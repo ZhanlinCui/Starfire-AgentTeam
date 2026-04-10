@@ -8,9 +8,14 @@ import type { Secret } from '@/types/secrets';
  * handlers. The contracts below are the agreed-upon target shape.
  */
 
-const PLATFORM_URL = process.env.NEXT_PUBLIC_PLATFORM_URL ?? '';
+const PLATFORM_URL = process.env.NEXT_PUBLIC_PLATFORM_URL ?? 'http://localhost:8080';
 
 function apiUrl(workspaceId: string, path = ''): string {
+  // "global" workspaceId → use /settings/secrets (global secrets)
+  // Otherwise → use /workspaces/:id/secrets (workspace secrets)
+  if (workspaceId === 'global') {
+    return `${PLATFORM_URL}/settings/secrets${path}`;
+  }
   return `${PLATFORM_URL}/workspaces/${workspaceId}/secrets${path}`;
 }
 

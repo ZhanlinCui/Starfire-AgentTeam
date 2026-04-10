@@ -79,6 +79,7 @@ export function SettingsPanel({ workspaceId }: SettingsPanelProps) {
           <Dialog.Content
             className="settings-panel"
             aria-label="Settings: API Keys"
+            aria-describedby={undefined}
             onEscapeKeyDown={(e) => {
               if (hasDirtyForm) {
                 e.preventDefault();
