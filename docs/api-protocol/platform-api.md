@@ -77,7 +77,7 @@ Workspace creation also assigns an `awareness_namespace` on the workspace row. T
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/workspaces/:id/activity` | List activity rows |
+| `GET` | `/workspaces/:id/activity` | List activity rows (`?type=`, `?source=canvas\|agent`, `?limit=`) |
 | `POST` | `/workspaces/:id/activity` | Report activity from a workspace |
 | `POST` | `/workspaces/:id/notify` | Emit user-facing notifications/activity |
 | `GET` | `/workspaces/:id/session-search` | Search recent activity + memory for recall |

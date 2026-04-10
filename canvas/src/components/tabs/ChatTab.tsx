@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { WS_URL } from "@/store/socket";
 import { type ChatMessage, createMessage } from "./chat/types";
-import { extractResponseText } from "./chat/message-parser";
+import { extractResponseText, extractRequestText } from "./chat/message-parser";
 import { AgentCommsPanel } from "./chat/AgentCommsPanel";
 
 interface Props {
@@ -35,11 +35,8 @@ async function loadMessagesFromDB(workspaceId: string): Promise<ChatMessage[]> {
     // Activities are newest-first, reverse for chronological order
     for (const a of [...activities].reverse()) {
       // Extract user message from request_body
-      const reqParams = (a.request_body as Record<string, unknown>)?.params as Record<string, unknown> | undefined;
-      const reqMsg = reqParams?.message as Record<string, unknown> | undefined;
-      const reqParts = reqMsg?.parts as Array<Record<string, unknown>> | undefined;
-      const userText = reqParts?.[0]?.text as string || reqParts?.[0]?.kind === "text" && reqParts?.[0]?.text as string;
-      if (userText && typeof userText === "string") {
+      const userText = extractRequestText(a.request_body);
+      if (userText) {
         messages.push(createMessage("user", userText));
       }
 

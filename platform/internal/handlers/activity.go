@@ -54,6 +54,9 @@ func (h *ActivityHandler) List(c *gin.Context) {
 		query += " AND source_id IS NULL"
 	} else if source == "agent" {
 		query += " AND source_id IS NOT NULL"
+	} else if source != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source must be 'canvas' or 'agent'"})
+		return
 	}
 
 	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", argIdx)

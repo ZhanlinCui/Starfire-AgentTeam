@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { WS_URL } from "@/store/socket";
-import { extractResponseText } from "./message-parser";
+import { extractResponseText, extractRequestText } from "./message-parser";
 
 interface ActivityEntry {
   id: string;
@@ -35,19 +35,12 @@ function resolveName(id: string): string {
   return (node?.data as WorkspaceNodeData)?.name || id.slice(0, 8);
 }
 
-function extractRequestText(entry: ActivityEntry): string {
-  const params = entry.request_body?.params as Record<string, unknown> | undefined;
-  const msg = params?.message as Record<string, unknown> | undefined;
-  const parts = msg?.parts as Array<Record<string, unknown>> | undefined;
-  return (parts?.[0]?.text as string) || entry.summary || "";
-}
-
 function toCommMessage(entry: ActivityEntry, workspaceId: string): CommMessage | null {
   const isOutgoing = entry.activity_type === "a2a_send";
   const peerId = isOutgoing ? (entry.target_id || "") : (entry.source_id || "");
   if (!peerId) return null;
 
-  const text = isOutgoing ? extractRequestText(entry) : extractRequestText(entry);
+  const text = extractRequestText(entry.request_body) || entry.summary || "";
   const responseText = entry.response_body ? extractResponseText(entry.response_body) : null;
 
   return {
@@ -64,7 +57,8 @@ function toCommMessage(entry: ActivityEntry, workspaceId: string): CommMessage |
 export function AgentCommsPanel({ workspaceId }: { workspaceId: string }) {
   const [messages, setMessages] = useState<CommMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const seenIds = useRef(new Set<string>());
+  // Dedup by timestamp+type+peer to handle API load + WebSocket race
+  const seenKeys = useRef(new Set<string>());
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Load history
@@ -79,8 +73,9 @@ export function AgentCommsPanel({ workspaceId }: { workspaceId: string }) {
         for (const e of filtered) {
           const m = toCommMessage(e, workspaceId);
           if (m) {
+            const key = `${m.timestamp}:${m.direction}:${m.peerId}`;
             msgs.push(m);
-            seenIds.current.add(m.id);
+            seenKeys.current.add(key);
           }
         }
         setMessages(msgs);
@@ -115,8 +110,10 @@ export function AgentCommsPanel({ workspaceId }: { workspaceId: string }) {
             created_at: msg.timestamp || new Date().toISOString(),
           };
           const m = toCommMessage(entry, workspaceId);
-          if (m && !seenIds.current.has(m.id)) {
-            seenIds.current.add(m.id);
+          if (m) {
+            const key = `${m.timestamp}:${m.direction}:${m.peerId}`;
+            if (seenKeys.current.has(key)) return;
+            seenKeys.current.add(key);
             setMessages((prev) => [...prev, m]);
           }
         }
