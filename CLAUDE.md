@@ -88,10 +88,10 @@ cd workspace-template && python -m pytest -v     # 869 pytest tests (config, hea
 
 ### Integration Tests
 ```bash
-bash test_api.sh             # Runs 62 API tests against localhost:8080
-bash test_a2a_e2e.sh         # Runs 22 A2A end-to-end tests (requires 2 online agents)
-bash test_activity_e2e.sh    # Runs 25 activity/task E2E tests (requires 1 online agent)
-bash test_comprehensive_e2e.sh # Runs 68 checks — ALL endpoints, memory, runtime, bundles, approvals
+bash tests/e2e/test_api.sh             # 62 API tests against localhost:8080
+bash tests/e2e/test_a2a_e2e.sh         # 22 A2A end-to-end tests (requires 2 online agents)
+bash tests/e2e/test_activity_e2e.sh    # 25 activity/task E2E tests (requires 1 online agent)
+bash tests/e2e/test_comprehensive_e2e.sh # 68 checks — ALL endpoints, memory, runtime, bundles, approvals
 ```
 `test_api.sh` requires platform running. Tests full CRUD, registry, heartbeat, discovery, peers, access control, events, degraded/recovery lifecycle, activity logging, current task tracking, bundle round-trip (export → delete → import → verify).
 
