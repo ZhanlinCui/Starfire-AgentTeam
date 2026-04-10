@@ -317,7 +317,7 @@ async def main():  # pragma: no cover
                 except OSError:
                     pass
 
-            print("Initial prompt: sending to self...", flush=True)
+            print("Initial prompt: sending via platform proxy...", flush=True)
             loop = asyncio.get_event_loop()
             loop.run_in_executor(None, _do_send_sync)
 

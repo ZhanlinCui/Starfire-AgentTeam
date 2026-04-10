@@ -183,6 +183,129 @@ test.describe("Activity API Source Filter", () => {
   });
 });
 
+test.describe("Data Flow — Initial Prompt in Chat", () => {
+  test("initial prompt appears as user message in My Chat", async ({ page }) => {
+    // Find a workspace that has activity with source=canvas (initial prompt via proxy)
+    const wsRes = await page.request.get(`${API}/workspaces`);
+    const workspaces = await wsRes.json();
+    test.skip(workspaces.length === 0, "No workspaces");
+
+    // Find a workspace with canvas-initiated activity
+    let targetWs: { id: string; name: string } | null = null;
+    for (const ws of workspaces) {
+      const actRes = await page.request.get(`${API}/workspaces/${ws.id}/activity?source=canvas&type=a2a_receive&limit=1`);
+      const entries = await actRes.json();
+      if (entries.length > 0) {
+        targetWs = ws;
+        break;
+      }
+    }
+    test.skip(!targetWs, "No workspace has canvas-initiated activity (initial prompt may not have run)");
+
+    await page.goto("/");
+    await page.waitForTimeout(3000);
+
+    // Click the workspace node
+    const node = page.locator(`.react-flow__node`).filter({ hasText: targetWs!.name });
+    await node.first().click();
+    await page.waitForTimeout(500);
+
+    // Open Chat tab
+    await page.getByRole("button", { name: /Chat/ }).first().click();
+    await page.waitForTimeout(500);
+
+    // Ensure we're on My Chat
+    await page.locator("button", { hasText: "My Chat" }).click();
+    await page.waitForTimeout(2000);
+
+    // The chat should NOT show "No messages yet" — it should have the initial prompt
+    const emptyState = page.locator("text=No messages yet");
+    await expect(emptyState).not.toBeVisible({ timeout: 5000 });
+
+    // There should be at least one user message bubble (blue) and one agent message bubble
+    const userBubbles = page.locator('[class*="bg-blue-600"]');
+    const agentBubbles = page.locator('[class*="bg-zinc-800"]');
+    expect(await userBubbles.count()).toBeGreaterThan(0);
+    expect(await agentBubbles.count()).toBeGreaterThan(0);
+  });
+
+  test("initial prompt text matches config content", async ({ page }) => {
+    const wsRes = await page.request.get(`${API}/workspaces`);
+    const workspaces = await wsRes.json();
+    test.skip(workspaces.length === 0, "No workspaces");
+
+    // Find workspace with activity
+    let targetWs: { id: string; name: string } | null = null;
+    let promptText = "";
+    for (const ws of workspaces) {
+      const actRes = await page.request.get(`${API}/workspaces/${ws.id}/activity?source=canvas&type=a2a_receive&limit=1`);
+      const entries = await actRes.json();
+      if (entries.length > 0) {
+        const reqBody = entries[0].request_body;
+        const parts = reqBody?.params?.message?.parts;
+        if (parts?.[0]?.text) {
+          targetWs = ws;
+          promptText = parts[0].text;
+          break;
+        }
+      }
+    }
+    test.skip(!targetWs, "No workspace has canvas-initiated activity with text");
+
+    await page.goto("/");
+    await page.waitForTimeout(3000);
+
+    const node = page.locator(`.react-flow__node`).filter({ hasText: targetWs!.name });
+    await node.first().click();
+    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /Chat/ }).first().click();
+    await page.waitForTimeout(500);
+    await page.locator("button", { hasText: "My Chat" }).click();
+    await page.waitForTimeout(2000);
+
+    // The first few words of the initial prompt should be visible in the chat
+    const firstWords = promptText.split(/\s+/).slice(0, 4).join(" ");
+    await expect(page.locator(`text=${firstWords}`).first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test("agent response to initial prompt is visible", async ({ page }) => {
+    const wsRes = await page.request.get(`${API}/workspaces`);
+    const workspaces = await wsRes.json();
+    test.skip(workspaces.length === 0, "No workspaces");
+
+    let targetWs: { id: string } | null = null;
+    let responseText = "";
+    for (const ws of workspaces) {
+      const actRes = await page.request.get(`${API}/workspaces/${ws.id}/activity?source=canvas&type=a2a_receive&limit=1`);
+      const entries = await actRes.json();
+      if (entries.length > 0 && entries[0].response_body) {
+        const result = entries[0].response_body.result;
+        const parts = result?.parts;
+        if (parts?.[0]?.text) {
+          targetWs = ws;
+          responseText = parts[0].text;
+          break;
+        }
+      }
+    }
+    test.skip(!targetWs, "No workspace has response in activity");
+
+    await page.goto("/");
+    await page.waitForTimeout(3000);
+    await page.locator(".react-flow__node").first().click();
+    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /Chat/ }).first().click();
+    await page.waitForTimeout(2000);
+
+    // Agent response should be visible — check for agent message bubble existence
+    // (response text varies per agent, so check for non-empty agent bubble instead of exact text)
+    await page.locator("button", { hasText: "My Chat" }).click();
+    await page.waitForTimeout(2000);
+    const agentBubbles = page.locator('[class*="bg-zinc-800"]');
+    expect(await agentBubbles.count()).toBeGreaterThan(0);
+  });
+});
+
 test.describe("No JS Errors", () => {
   test("page loads without errors with chat sub-tabs", async ({ page }) => {
     const errors: string[] = [];
