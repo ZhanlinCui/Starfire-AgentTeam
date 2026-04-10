@@ -29,7 +29,6 @@ import { SearchDialog } from "./SearchDialog";
 import { Toaster } from "./Toaster";
 import { Toolbar } from "./Toolbar";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { TopBar } from "./canvas/TopBar";
 import { SettingsPanel, DeleteConfirmDialog } from "./settings";
 import { ProvisioningTimeout } from "./ProvisioningTimeout";
 
@@ -205,9 +204,7 @@ function CanvasInner() {
   const settingsWorkspaceId = selectedNodeId ?? "global";
 
   return (
-    <div className="w-screen h-screen bg-zinc-950 flex flex-col">
-      <TopBar />
-      <div className="flex-1 relative">
+    <div className="w-screen h-screen bg-zinc-950">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -290,7 +287,6 @@ function CanvasInner() {
       {/* Settings Panel — global secrets management drawer */}
       <SettingsPanel workspaceId={settingsWorkspaceId} />
       <DeleteConfirmDialog workspaceId={settingsWorkspaceId} />
-      </div>
     </div>
   );
 }

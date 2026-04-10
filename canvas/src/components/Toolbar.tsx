@@ -3,6 +3,8 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
+import { SettingsButton } from "@/components/settings/SettingsButton";
+import { settingsGearRef } from "@/components/settings/SettingsPanel";
 
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
@@ -153,6 +155,9 @@ export function Toolbar() {
           </div>
         )}
       </div>
+
+      {/* Settings gear icon */}
+      <SettingsButton ref={settingsGearRef} />
     </div>
   );
 }
