@@ -22,6 +22,10 @@ import (
 )
 
 // OrgHandler manages org template import/export.
+// workspaceCreatePacingMs is the brief delay between sibling workspace creations
+// during org import. Prevents overwhelming Docker when creating many containers.
+const workspaceCreatePacingMs = 50
+
 type OrgHandler struct {
 	workspace   *WorkspaceHandler
 	broadcaster *events.Broadcaster
@@ -376,14 +380,14 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		"tier":  tier,
 	})
 
-	// Recurse into children. Brief 50ms pacing avoids overwhelming Docker
-	// when creating many containers in sequence; container provisioning runs
-	// in goroutines so the main createWorkspaceTree returns quickly.
+	// Recurse into children. Brief pacing avoids overwhelming Docker when
+	// creating many containers in sequence; container provisioning runs in
+	// goroutines so the main createWorkspaceTree returns quickly.
 	for _, child := range ws.Children {
 		if err := h.createWorkspaceTree(child, &id, defaults, orgBaseDir, results); err != nil {
 			return err
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(workspaceCreatePacingMs * time.Millisecond)
 	}
 
 	return nil
