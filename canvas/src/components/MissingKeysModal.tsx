@@ -106,6 +106,11 @@ export function MissingKeysModal({
   );
 
   const handleAddKeysAndDeploy = useCallback(() => {
+    const anySaving = entries.some((e) => e.saving);
+    if (anySaving) {
+      setGlobalError("Please wait for all keys to finish saving.");
+      return;
+    }
     const allSaved = entries.every((e) => e.saved);
     if (!allSaved) {
       setGlobalError("Please save all required keys before deploying.");
@@ -117,7 +122,8 @@ export function MissingKeysModal({
   if (!open) return null;
 
   const allSaved = entries.every((e) => e.saved);
-  const runtimeLabel = runtime.replace("-", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const anySaving = entries.some((e) => e.saving);
+  const runtimeLabel = runtime.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -239,10 +245,10 @@ export function MissingKeysModal({
             </button>
             <button
               onClick={handleAddKeysAndDeploy}
-              disabled={!allSaved}
+              disabled={!allSaved || anySaving}
               className="px-3.5 py-1.5 text-[12px] bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-40"
             >
-              {allSaved ? "Deploy" : "Add Keys"}
+              {anySaving ? "Saving..." : allSaved ? "Deploy" : "Add Keys"}
             </button>
           </div>
         </div>

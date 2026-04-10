@@ -93,7 +93,9 @@ export async function checkDeploySecrets(
 
     const missingKeys = findMissingKeys(runtime, configuredKeys);
     return { ok: missingKeys.length === 0, missingKeys, runtime };
-  } catch {
+  } catch (error) {
+    // Log the error before falling back — aids debugging when the API is down.
+    console.error("[deploy-preflight] Failed to check secrets, assuming all missing:", error);
     // If we can't reach the secrets API, assume missing — safer to prompt the user.
     return { ok: false, missingKeys: requiredKeys, runtime };
   }

@@ -95,6 +95,9 @@ export function ProvisioningTimeout({
     return () => clearInterval(interval);
   }, [provisioningNodes, timeoutMs]);
 
+  const RETRY_COOLDOWN_MS = 5_000;
+  const [retryCooldown, setRetryCooldown] = useState<Set<string>>(new Set());
+
   const handleRetry = useCallback(async (workspaceId: string) => {
     setRetrying((prev) => new Set(prev).add(workspaceId));
     try {
@@ -114,10 +117,28 @@ export function ProvisioningTimeout({
         next.delete(workspaceId);
         return next;
       });
+      // Start cooldown — disable retry button for 5s
+      setRetryCooldown((prev) => new Set(prev).add(workspaceId));
+      setTimeout(() => {
+        setRetryCooldown((prev) => {
+          const next = new Set(prev);
+          next.delete(workspaceId);
+          return next;
+        });
+      }, RETRY_COOLDOWN_MS);
     }
   }, []);
 
-  const handleCancel = useCallback(async (workspaceId: string) => {
+  const [confirmingCancel, setConfirmingCancel] = useState<string | null>(null);
+
+  const handleCancelRequest = useCallback((workspaceId: string) => {
+    setConfirmingCancel(workspaceId);
+  }, []);
+
+  const handleCancelConfirm = useCallback(async () => {
+    if (!confirmingCancel) return;
+    const workspaceId = confirmingCancel;
+    setConfirmingCancel(null);
     setCancelling((prev) => new Set(prev).add(workspaceId));
     try {
       await api.del(`/workspaces/${workspaceId}`);
@@ -136,7 +157,7 @@ export function ProvisioningTimeout({
         return next;
       });
     }
-  }, []);
+  }, [confirmingCancel]);
 
   const handleViewLogs = useCallback((workspaceId: string) => {
     // Open the terminal tab for this workspace so user can see logs
@@ -188,13 +209,13 @@ export function ProvisioningTimeout({
                 <div className="flex items-center gap-2 mt-2.5">
                   <button
                     onClick={() => handleRetry(entry.workspaceId)}
-                    disabled={isRetrying || isCancelling}
+                    disabled={isRetrying || isCancelling || retryCooldown.has(entry.workspaceId)}
                     className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-[11px] font-medium rounded-lg text-white disabled:opacity-40 transition-colors"
                   >
-                    {isRetrying ? "Retrying..." : "Retry"}
+                    {isRetrying ? "Retrying..." : retryCooldown.has(entry.workspaceId) ? "Wait..." : "Retry"}
                   </button>
                   <button
-                    onClick={() => handleCancel(entry.workspaceId)}
+                    onClick={() => handleCancelRequest(entry.workspaceId)}
                     disabled={isRetrying || isCancelling}
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-300 rounded-lg border border-zinc-600 disabled:opacity-40 transition-colors"
                   >
@@ -212,6 +233,35 @@ export function ProvisioningTimeout({
           </div>
         );
       })}
+
+      {/* Cancel confirmation dialog */}
+      {confirmingCancel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmingCancel(null)} />
+          <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-5 max-w-[340px] w-full mx-4">
+            <h3 className="text-sm font-semibold text-zinc-100 mb-2">
+              Cancel deployment?
+            </h3>
+            <p className="text-[12px] text-zinc-400 mb-4 leading-relaxed">
+              This will permanently remove the workspace. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmingCancel(null)}
+                className="px-3.5 py-1.5 text-[12px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors"
+              >
+                Keep
+              </button>
+              <button
+                onClick={handleCancelConfirm}
+                className="px-3.5 py-1.5 text-[12px] bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors"
+              >
+                Remove Workspace
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
