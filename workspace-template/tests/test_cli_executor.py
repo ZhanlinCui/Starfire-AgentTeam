@@ -1191,3 +1191,58 @@ async def test_execute_uses_root_text_when_no_direct_text(tmp_path):
 
     assert len(captured_inputs) == 1
     assert "text from root attribute" in captured_inputs[0]
+
+
+# ---------------------------------------------------------------------------
+# Delegation results injection tests
+# ---------------------------------------------------------------------------
+
+def test_read_delegation_results_empty(tmp_path):
+    """No results file → empty string."""
+    from cli_executor import CLIAgentExecutor
+    from config import RuntimeConfig
+    executor = CLIAgentExecutor("claude-code", RuntimeConfig(), config_path=str(tmp_path))
+    import os
+    os.environ["DELEGATION_RESULTS_FILE"] = str(tmp_path / "nonexistent.jsonl")
+    result = executor._read_delegation_results()
+    assert result == ""
+
+
+def test_read_delegation_results_parses_and_consumes(tmp_path):
+    """Results file is read, parsed, and consumed (deleted)."""
+    import json
+    from cli_executor import CLIAgentExecutor
+    from config import RuntimeConfig
+    executor = CLIAgentExecutor("claude-code", RuntimeConfig(), config_path=str(tmp_path))
+
+    results_file = tmp_path / "delegation_results.jsonl"
+    results_file.write_text(json.dumps({
+        "delegation_id": "d-1", "status": "completed",
+        "summary": "Task done", "response_preview": "Result here"
+    }) + "\n")
+
+    import os
+    os.environ["DELEGATION_RESULTS_FILE"] = str(results_file)
+    result = executor._read_delegation_results()
+
+    assert "[completed]" in result
+    assert "Task done" in result
+    assert "Result here" in result
+    # File should be consumed
+    assert not results_file.exists()
+
+
+def test_read_delegation_results_handles_bad_json(tmp_path):
+    """Malformed JSON lines are skipped gracefully."""
+    from cli_executor import CLIAgentExecutor
+    from config import RuntimeConfig
+    executor = CLIAgentExecutor("claude-code", RuntimeConfig(), config_path=str(tmp_path))
+
+    results_file = tmp_path / "delegation_results.jsonl"
+    results_file.write_text("not json\n{bad\n")
+
+    import os
+    os.environ["DELEGATION_RESULTS_FILE"] = str(results_file)
+    result = executor._read_delegation_results()
+
+    assert result == ""

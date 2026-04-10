@@ -168,3 +168,175 @@ async def test_heartbeat_loop_continues_after_exception(capsys):
     # The loop ran at least once and logged the failure (via logger, not print)
     # The loop continued (call_count reached at least 1)
     assert call_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Delegation checking tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_check_delegations_writes_results_file(tmp_path):
+    """When completed delegations are found, results are written to file."""
+    import json
+    results_file = tmp_path / "delegation_results.jsonl"
+
+    hb = HeartbeatLoop("http://platform:8080", "ws-abc")
+
+    delegations = [
+        {"delegation_id": "d-1", "status": "completed", "target_id": "ws-t",
+         "summary": "Done", "response_preview": "Result here", "error": ""},
+    ]
+
+    mock_client = AsyncMock()
+    # GET /delegations returns completed delegation
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json = MagicMock(return_value=delegations)
+    mock_client.get = AsyncMock(return_value=get_resp)
+    # POST for self-message and notify — just succeed
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+    mock_client.post = AsyncMock(return_value=post_resp)
+
+    with patch("heartbeat.DELEGATION_RESULTS_FILE", str(results_file)):
+        await hb._check_delegations(mock_client)
+
+    # Verify file was written
+    assert results_file.exists()
+    lines = results_file.read_text().strip().split("\n")
+    assert len(lines) == 1
+    data = json.loads(lines[0])
+    assert data["delegation_id"] == "d-1"
+    assert data["status"] == "completed"
+    assert data["response_preview"] == "Result here"
+
+
+@pytest.mark.asyncio
+async def test_check_delegations_deduplicates():
+    """Same delegation_id is not processed twice."""
+    hb = HeartbeatLoop("http://platform:8080", "ws-abc")
+    hb._seen_delegation_ids.add("d-1")  # Already seen
+
+    delegations = [
+        {"delegation_id": "d-1", "status": "completed", "target_id": "ws-t",
+         "summary": "Done", "response_preview": "old"},
+    ]
+
+    mock_client = AsyncMock()
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json = MagicMock(return_value=delegations)
+    mock_client.get = AsyncMock(return_value=get_resp)
+    mock_client.post = AsyncMock()
+
+    with patch("heartbeat.DELEGATION_RESULTS_FILE", "/tmp/test_dedup.jsonl"):
+        await hb._check_delegations(mock_client)
+
+    # No self-message should be sent (delegation already seen)
+    # Only the GET call, no POST
+    mock_client.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_delegations_sends_self_message(tmp_path):
+    """Self-message A2A is sent when new completed delegations found."""
+    results_file = tmp_path / "results.jsonl"
+    hb = HeartbeatLoop("http://platform:8080", "ws-abc")
+
+    delegations = [
+        {"delegation_id": "d-new", "status": "completed", "target_id": "ws-t",
+         "summary": "Task done", "response_preview": "All good", "error": ""},
+    ]
+
+    mock_client = AsyncMock()
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json = MagicMock(return_value=delegations)
+    mock_client.get = AsyncMock(return_value=get_resp)
+    post_resp = MagicMock()
+    post_resp.status_code = 200
+    mock_client.post = AsyncMock(return_value=post_resp)
+
+    with patch("heartbeat.DELEGATION_RESULTS_FILE", str(results_file)):
+        await hb._check_delegations(mock_client)
+
+    # Should have sent self-message (A2A to own workspace) + notify
+    post_calls = mock_client.post.call_args_list
+    assert len(post_calls) >= 1
+    # First POST should be the self-message A2A
+    a2a_call = post_calls[0]
+    assert "/a2a" in str(a2a_call)
+
+
+@pytest.mark.asyncio
+async def test_check_delegations_cooldown():
+    """Self-message respects cooldown — no second message within 5 min."""
+    import time
+    hb = HeartbeatLoop("http://platform:8080", "ws-abc")
+    hb._last_self_message_time = time.time()  # Just sent one
+
+    delegations = [
+        {"delegation_id": "d-cool", "status": "completed", "target_id": "ws-t",
+         "summary": "Done", "response_preview": "ok", "error": ""},
+    ]
+
+    mock_client = AsyncMock()
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json = MagicMock(return_value=delegations)
+    mock_client.get = AsyncMock(return_value=get_resp)
+    mock_client.post = AsyncMock()
+
+    with patch("heartbeat.DELEGATION_RESULTS_FILE", "/tmp/test_cooldown.jsonl"):
+        await hb._check_delegations(mock_client)
+
+    # File should still be written (results stored)
+    # But self-message should NOT be sent (cooldown active)
+    # Only notify POST, no A2A self-message
+    for call in mock_client.post.call_args_list:
+        assert "/a2a" not in str(call[0][0]), "Self-message should be blocked by cooldown"
+
+
+@pytest.mark.asyncio
+async def test_seen_ids_eviction():
+    """Seen delegation IDs are evicted when over MAX limit."""
+    from heartbeat import MAX_SEEN_DELEGATION_IDS
+    hb = HeartbeatLoop("http://platform:8080", "ws-abc")
+
+    # Fill beyond max
+    for i in range(MAX_SEEN_DELEGATION_IDS + 50):
+        hb._seen_delegation_ids.add(f"d-{i}")
+
+    assert len(hb._seen_delegation_ids) > MAX_SEEN_DELEGATION_IDS
+
+    # Trigger eviction via _check_delegations with empty results
+    mock_client = AsyncMock()
+    get_resp = MagicMock()
+    get_resp.status_code = 200
+    get_resp.json = MagicMock(return_value=[])
+    mock_client.get = AsyncMock(return_value=get_resp)
+
+    await hb._check_delegations(mock_client)
+
+    # Should have been trimmed
+    assert len(hb._seen_delegation_ids) <= MAX_SEEN_DELEGATION_IDS
+
+
+def test_on_done_restarts_loop():
+    """_on_done restarts the loop when task has an exception."""
+    hb = HeartbeatLoop("http://platform:8080", "ws-abc")
+
+    # Create a mock failed task
+    mock_task = MagicMock()
+    mock_task.cancelled.return_value = False
+    mock_task.exception.return_value = RuntimeError("boom")
+
+    with patch("asyncio.create_task") as mock_create:
+        mock_new_task = MagicMock()
+        mock_create.return_value = mock_new_task
+        hb._on_done(mock_task)
+
+    # Should have created a new task
+    mock_create.assert_called_once()
+    # New task should have done callback
+    mock_new_task.add_done_callback.assert_called_once()
