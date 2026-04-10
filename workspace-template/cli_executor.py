@@ -478,6 +478,16 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                                            self.runtime, attempt + 1, max_retries, delay)
                             await asyncio.sleep(delay)
                             continue
+                    # Session errors: clear stale session and retry fresh
+                    if "no conversation found" in error_msg.lower() or "session" in error_msg.lower():
+                        self._session_id = None
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning("CLI agent [%s]: stale session (attempt %d/%d), retrying fresh in %ds",
+                                           self.runtime, attempt + 1, max_retries, delay)
+                            await asyncio.sleep(delay)
+                            continue
+
                     # Auth errors: clear session and retry (OAuth tokens can have transient failures)
                     if "auth" in error_msg.lower() or "api_key" in error_msg.lower() or "X-Api-Key" in error_msg:
                         self._session_id = None
