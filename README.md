@@ -18,7 +18,7 @@
 <h3>The Org-Native Control Plane For Heterogeneous AI Agent Teams</h3>
 
 <p>
-  Build AI organizations, not fragile agent demos.
+  The world's most powerful governance platform for AI agent teams.
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -47,23 +47,20 @@
 
 ## The Pitch
 
-Starfire is the missing layer between **agent frameworks** and **production operations**.
+Starfire is the most powerful way to govern an AI agent organization in production.
 
-Most teams today can do one of these well:
+It combines the parts that are usually scattered across demos, internal glue code, and framework-specific tooling into one product:
 
-- build a workflow
-- build a single strong agent
-- build a custom multi-agent graph
-- run a coding agent locally
+- one org-native control plane for teams, roles, hierarchy, and lifecycle
+- one runtime layer that lets LangGraph, DeepAgents, Claude Code, CrewAI, AutoGen, and OpenClaw run side by side
+- one memory model that keeps recall, sharing, and skill evolution aligned with organizational boundaries
+- one operational surface for observing, pausing, restarting, inspecting, and improving live workspaces
 
-Very few teams can do all of this at once:
+Most teams can build a workflow, a strong single agent, a coding agent, or a custom multi-agent graph.
 
-- run multiple agent architectures side by side
-- organize them as real roles and teams
-- keep memory boundaries aligned with the org chart
-- observe, restart, pause, inspect, and govern them from one control plane
+Very few teams can run all of that as a governed organization with clear structure, durable memory boundaries, and production operations.
 
-That is what Starfire is for.
+That is the gap Starfire closes.
 
 ## Why Starfire Feels Different
 
