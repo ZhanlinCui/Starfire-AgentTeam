@@ -22,6 +22,13 @@ jobs:
       - run: go build ./cmd/server
       - run: go build -o molecli ./cmd/cli
       - run: go vet ./...
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: platform
+          args: --timeout 3m
+        continue-on-error: true  # Warn but don't block until codebase is clean
       - name: Run tests with race detection and coverage
         run: go test -race -coverprofile=coverage.out ./...
       - name: Check coverage baseline

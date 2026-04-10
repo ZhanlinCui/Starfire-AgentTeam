@@ -7,7 +7,7 @@ import (
 )
 
 func resetKey() {
-	encryptionKey = nil
+	ResetForTesting()
 }
 
 func TestInit_NoEnvVar(t *testing.T) {
