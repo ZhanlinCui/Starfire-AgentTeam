@@ -165,13 +165,49 @@ class HeartbeatLoop:
                 self._seen_delegation_ids = set(list(self._seen_delegation_ids)[MAX_SEEN_DELEGATION_IDS // 2:])
 
             if new_results:
-                # Append to results file for the agent to pick up
+                # Append to results file for context injection on next message
                 with open(DELEGATION_RESULTS_FILE, "a") as f:
                     for r in new_results:
                         f.write(json.dumps(r) + "\n")
-                logger.info("Heartbeat: %d new delegation results stored", len(new_results))
+                logger.info("Heartbeat: %d new delegation results — triggering self-message", len(new_results))
 
-                # Also push notification to user via platform
+                # Build a summary message for the agent
+                summary_lines = []
+                for r in new_results:
+                    line = f"- [{r['status']}] {r['summary'][:80]}"
+                    if r.get("response_preview"):
+                        line += f"\n  Response: {r['response_preview'][:200]}"
+                    if r.get("error"):
+                        line += f"\n  Error: {r['error'][:100]}"
+                    summary_lines.append(line)
+
+                trigger_msg = (
+                    "Delegation results are ready. Review them and take appropriate action:\n"
+                    + "\n".join(summary_lines)
+                    + "\n\nIf you delegated on behalf of someone, report the results back to them. "
+                    "Use send_message_to_user if the user should know."
+                )
+
+                # Send A2A message to self — this wakes the agent
+                try:
+                    await client.post(
+                        f"{self.platform_url}/workspaces/{self.workspace_id}/a2a",
+                        json={
+                            "method": "message/send",
+                            "params": {
+                                "message": {
+                                    "role": "user",
+                                    "parts": [{"type": "text", "text": trigger_msg}],
+                                },
+                            },
+                        },
+                        timeout=120.0,  # Agent might take a while to process
+                    )
+                    logger.info("Heartbeat: self-message sent to process delegation results")
+                except Exception as e:
+                    logger.warning("Heartbeat: failed to send self-message: %s", e)
+
+                # Also push notification to user via canvas
                 for r in new_results:
                     try:
                         msg = f"Delegation {r['status']}: {r['summary'][:100]}"
@@ -182,7 +218,7 @@ class HeartbeatLoop:
                             json={"message": msg, "type": "delegation_result"},
                         )
                     except Exception:
-                        pass  # Best-effort notification
+                        pass
 
         except Exception as e:
             logger.debug("Delegation check error: %s", e)
