@@ -1,4 +1,5 @@
 @import "xterm/css/xterm.css";
+@import "../styles/settings-panel.css";
 
 @tailwind base;
 @tailwind components;
