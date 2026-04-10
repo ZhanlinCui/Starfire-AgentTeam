@@ -154,6 +154,7 @@ class HeartbeatLoop:
                     new_results.append({
                         "delegation_id": did,
                         "target_id": d.get("target_id", ""),
+                        "source_id": d.get("source_id", ""),
                         "status": status,
                         "summary": d.get("summary", ""),
                         "response_preview": d.get("response_preview", ""),
@@ -183,11 +184,40 @@ class HeartbeatLoop:
                         line += f"\n  Error: {r['error'][:100]}"
                     summary_lines.append(line)
 
+                # Look up parent workspace so agent knows who to report to
+                parent_name = ""
+                try:
+                    parent_resp = await client.get(
+                        f"{self.platform_url}/workspaces/{self.workspace_id}"
+                    )
+                    if parent_resp.status_code == 200:
+                        ws_data = parent_resp.json()
+                        parent_id = ws_data.get("parent_id", "")
+                        if parent_id:
+                            parent_info = await client.get(
+                                f"{self.platform_url}/workspaces/{parent_id}"
+                            )
+                            if parent_info.status_code == 200:
+                                parent_name = parent_info.json().get("name", "")
+                except Exception:
+                    pass
+
+                report_instruction = ""
+                if parent_name:
+                    report_instruction = (
+                        f"\n\nIMPORTANT: Report these results back to your parent '{parent_name}' "
+                        f"by delegating a summary to them. Use delegate_task or delegate_task_async "
+                        f"with a concise status report. Also use send_message_to_user to notify the user."
+                    )
+                else:
+                    report_instruction = (
+                        "\n\nReport results using send_message_to_user to notify the user."
+                    )
+
                 trigger_msg = (
                     "Delegation results are ready. Review them and take appropriate action:\n"
                     + "\n".join(summary_lines)
-                    + "\n\nIf you delegated on behalf of someone, report the results back to them. "
-                    "Use send_message_to_user if the user should know."
+                    + report_instruction
                 )
 
                 # Send A2A self-message to wake the agent.
