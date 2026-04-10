@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { api } from "@/lib/api";
 import { showToast } from "./Toaster";
@@ -33,29 +33,37 @@ export function ProvisioningTimeout({
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
   const trackingRef = useRef<Map<string, number>>(new Map());
 
-  // Subscribe to provisioning nodes
-  const provisioningNodes = useCanvasStore(
-    useCallback(
-      (s) =>
-        s.nodes
-          .filter((n) => n.data.status === "provisioning")
-          .map((n) => ({ id: n.id, name: n.data.name })),
-      [],
-    ),
+  // Subscribe to provisioning nodes — use shallow compare to avoid infinite re-render
+  // (filter+map creates new array reference on every store update)
+  const provisioningNodes = useCanvasStore((s) => {
+    const result = s.nodes
+      .filter((n) => n.data.status === "provisioning")
+      .map((n) => `${n.id}:${n.data.name}`);
+    return result.join(",");
+  });
+  const parsedProvisioningNodes = useMemo(
+    () =>
+      provisioningNodes
+        ? provisioningNodes.split(",").map((entry) => {
+            const [id, name] = entry.split(":");
+            return { id, name };
+          })
+        : [],
+    [provisioningNodes],
   );
 
   useEffect(() => {
     const tracking = trackingRef.current;
 
     // Start tracking new provisioning nodes
-    for (const node of provisioningNodes) {
+    for (const node of parsedProvisioningNodes) {
       if (!tracking.has(node.id)) {
         tracking.set(node.id, Date.now());
       }
     }
 
     // Remove tracking for nodes that are no longer provisioning
-    const activeIds = new Set(provisioningNodes.map((n) => n.id));
+    const activeIds = new Set(parsedProvisioningNodes.map((n) => n.id));
     for (const id of tracking.keys()) {
       if (!activeIds.has(id)) {
         tracking.delete(id);
@@ -70,7 +78,7 @@ export function ProvisioningTimeout({
       const now = Date.now();
       const newTimedOut: TimeoutEntry[] = [];
 
-      for (const node of provisioningNodes) {
+      for (const node of parsedProvisioningNodes) {
         const startedAt = tracking.get(node.id);
         if (startedAt && now - startedAt >= timeoutMs) {
           newTimedOut.push({
@@ -93,7 +101,7 @@ export function ProvisioningTimeout({
     }, 5_000); // check every 5s
 
     return () => clearInterval(interval);
-  }, [provisioningNodes, timeoutMs]);
+  }, [parsedProvisioningNodes, timeoutMs]);
 
   const RETRY_COOLDOWN_MS = 5_000;
   const [retryCooldown, setRetryCooldown] = useState<Set<string>>(new Set());
