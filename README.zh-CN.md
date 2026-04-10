@@ -18,7 +18,7 @@
 <h3>面向异构 AI Agent 团队的组织级控制平面</h3>
 
 <p>
-  构建真正的 AI 组织，而不是脆弱的 agent demo。
+  全球最强大的 Agent Team 治理方案。
 </p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -47,23 +47,20 @@
 
 ## 一句话定位
 
-Starfire 是 **agent framework** 和 **生产级运维控制面** 之间缺失的那一层。
+Starfire 是目前最强的 AI Agent 组织治理方案之一，用来把 agent 从“能跑的 demo”推进到“可管理、可协作、可运营的生产系统”。
 
-今天大多数团队通常只能把一件事做得很好：
+它把过去分散在 demo、内部胶水代码和各类 framework 私有工具里的关键能力，收敛成一个产品：
 
-- 搭一个 workflow
-- 做一个很强的单 agent
-- 拼一个自定义 multi-agent graph
-- 在本地跑一个 coding agent
+- 一套组织原生 control plane，管理团队、角色、层级和生命周期
+- 一套 runtime abstraction，让 LangGraph、DeepAgents、Claude Code、CrewAI、AutoGen、OpenClaw 并存运行
+- 一套与组织边界对齐的 memory 模型，把 recall、sharing 和 skill evolution 放进同一体系
+- 一套面向线上 workspace 的运维面，统一完成观测、暂停、重启、检查和持续改进
 
-但很少有团队能同时做到这些：
+今天很多团队能做好 workflow、单 agent、coding agent，或者自定义 multi-agent graph 中的一种。
 
-- 让多种 agent 架构并存
-- 把它们组织成真实角色和团队
-- 让 memory 边界跟组织结构保持一致
-- 在一个控制平面里完成观测、重启、暂停、排障和治理
+但很少有团队能把这些能力一起运行成一个有清晰结构、稳定 memory 边界和生产级运维能力的 Agent 组织。
 
-Starfire 就是为这个场景设计的。
+Starfire 填的就是这个空白。
 
 ## 为什么 Starfire 很不一样
 
