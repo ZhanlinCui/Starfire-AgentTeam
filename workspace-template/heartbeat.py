@@ -41,6 +41,7 @@ class HeartbeatLoop:
         self._consecutive_failures = 0
         self._seen_delegation_ids: set[str] = set()
         self._last_self_message_time = 0.0
+        self._parent_name: str | None = None  # Cached after first lookup
 
     @property
     def error_rate(self) -> float:
@@ -184,23 +185,25 @@ class HeartbeatLoop:
                         line += f"\n  Error: {r['error'][:100]}"
                     summary_lines.append(line)
 
-                # Look up parent workspace so agent knows who to report to
-                parent_name = ""
-                try:
-                    parent_resp = await client.get(
-                        f"{self.platform_url}/workspaces/{self.workspace_id}"
-                    )
-                    if parent_resp.status_code == 200:
-                        ws_data = parent_resp.json()
-                        parent_id = ws_data.get("parent_id", "")
-                        if parent_id:
-                            parent_info = await client.get(
-                                f"{self.platform_url}/workspaces/{parent_id}"
-                            )
-                            if parent_info.status_code == 200:
-                                parent_name = parent_info.json().get("name", "")
-                except Exception:
-                    pass
+                # Look up parent workspace (cached after first call)
+                if self._parent_name is None:
+                    try:
+                        parent_resp = await client.get(
+                            f"{self.platform_url}/workspaces/{self.workspace_id}"
+                        )
+                        if parent_resp.status_code == 200:
+                            parent_id = parent_resp.json().get("parent_id", "")
+                            if parent_id:
+                                parent_info = await client.get(
+                                    f"{self.platform_url}/workspaces/{parent_id}"
+                                )
+                                if parent_info.status_code == 200:
+                                    self._parent_name = parent_info.json().get("name", "")
+                        if self._parent_name is None:
+                            self._parent_name = ""  # No parent — cache empty
+                    except Exception:
+                        pass  # Will retry next cycle
+                parent_name = self._parent_name or ""
 
                 report_instruction = ""
                 if parent_name:
