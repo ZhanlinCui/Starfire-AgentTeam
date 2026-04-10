@@ -24,7 +24,7 @@ export function KeyValueField({
   'aria-label': ariaLabel = 'Secret value',
 }: KeyValueFieldProps) {
   const [revealed, setRevealed] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Auto-hide after 30s of inactivity when revealed
   useEffect(() => {

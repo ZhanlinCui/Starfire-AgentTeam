@@ -35,9 +35,9 @@ export function SecretRow({ secret, workspaceId }: SecretRowProps) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const editBtnRef = useRef<HTMLButtonElement>(null);
-  const revealTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Auto-hide revealed value after 30s
   useEffect(() => {

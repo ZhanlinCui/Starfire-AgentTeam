@@ -41,7 +41,7 @@ export function AddKeyForm({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const service = SERVICES[selectedGroup];
 
   // Auto-fill key name when service changes
