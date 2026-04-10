@@ -22,8 +22,9 @@ export default function Home() {
       if (viewport) {
         useCanvasStore.getState().setViewport(viewport);
       }
-    }).catch(() => {
+    }).catch((err) => {
       // Initial hydration failed — socket reconnect will retry
+      console.error("Canvas: initial hydration failed", err);
     });
 
     return () => {

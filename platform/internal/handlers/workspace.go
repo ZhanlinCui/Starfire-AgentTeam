@@ -97,12 +97,11 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Insert canvas layout
-	_, err = db.DB.ExecContext(ctx, `
+	// Insert canvas layout — non-fatal: workspace can be dragged into position later
+	if _, err := db.DB.ExecContext(ctx, `
 		INSERT INTO canvas_layouts (workspace_id, x, y) VALUES ($1, $2, $3)
-	`, id, payload.Canvas.X, payload.Canvas.Y)
-	if err != nil {
-		log.Printf("Create canvas layout error: %v", err)
+	`, id, payload.Canvas.X, payload.Canvas.Y); err != nil {
+		log.Printf("Create: canvas layout insert failed for %s (workspace will appear at 0,0): %v", id, err)
 	}
 
 	// Broadcast provisioning event
@@ -252,6 +251,11 @@ func (h *WorkspaceHandler) List(c *gin.Context) {
 			continue
 		}
 		workspaces = append(workspaces, ws)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("List rows error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query iteration failed"})
+		return
 	}
 
 	c.JSON(http.StatusOK, workspaces)
@@ -403,6 +407,11 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		if rows.Scan(&childID, &childName) == nil {
 			children = append(children, map[string]string{"id": childID, "name": childName})
 		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Delete: child rows error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check children"})
+		return
 	}
 
 	// If has children and not confirmed, return children list for confirmation

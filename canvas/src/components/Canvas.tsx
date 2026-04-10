@@ -152,6 +152,8 @@ function CanvasInner() {
     };
   }, [setCenter]);
   useEffect(() => {
+    // Imperative event handler: uses getState() to read the freshest store
+    // state at the moment the event fires (not closure-captured stale data).
     const handler = (e: Event) => {
       const { nodeId } = (e as CustomEvent).detail;
       const state = useCanvasStore.getState();

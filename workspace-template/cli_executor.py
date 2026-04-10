@@ -544,11 +544,20 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             except asyncio.TimeoutError:
                 logger.error("CLI agent timeout [%s] after %ds", self.runtime, timeout)
                 if proc:
+                    # Kill and reap the process to prevent zombies
                     try:
                         proc.kill()
-                        await proc.wait()
-                    except Exception:
-                        pass
+                    except ProcessLookupError:
+                        pass  # already exited
+                    except Exception as kill_err:
+                        logger.warning("CLI kill error: %s", kill_err)
+                    # Always await wait() to reap zombie, even if kill failed
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        logger.error("CLI agent: proc.wait() also timed out — possible zombie")
+                    except Exception as wait_err:
+                        logger.warning("CLI wait error: %s", wait_err)
                 await event_queue.enqueue_event(
                     new_agent_text_message(f"Agent timed out after {timeout}s")
                 )

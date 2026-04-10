@@ -191,6 +191,10 @@ function MyChatPanel({ workspaceId, data }: Props) {
     setActivityLog(["Processing with Claude..."]);
 
     const ws = new WebSocket(WS_URL);
+    ws.onerror = () => {
+      // Don't crash — activity feed is non-essential, just log
+      console.warn("ChatTab activity feed WS error");
+    };
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);

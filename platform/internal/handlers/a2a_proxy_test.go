@@ -292,6 +292,14 @@ func TestProxyA2A_CallerIDPropagated(t *testing.T) {
 
 	mr.Set(fmt.Sprintf("ws:%s:url", "ws-target"), agentServer.URL)
 
+	// Access control: caller and target must be siblings (same parent_id)
+	mock.ExpectQuery("SELECT id, parent_id FROM workspaces WHERE id = ").
+		WithArgs("ws-caller").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow("ws-caller", "ws-parent"))
+	mock.ExpectQuery("SELECT id, parent_id FROM workspaces WHERE id = ").
+		WithArgs("ws-target").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow("ws-target", "ws-parent"))
+
 	// Expect activity log with source_id set
 	mock.ExpectExec("INSERT INTO activity_logs").
 		WillReturnResult(sqlmock.NewResult(0, 1))

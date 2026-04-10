@@ -128,10 +128,12 @@ func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID s
 		log.Printf("Delegation %s: failed — %s", delegationID, proxyErr.Error())
 		h.updateDelegationStatus(sourceID, delegationID, "failed", proxyErr.Error())
 
-		db.DB.Exec(`
+		if _, err := db.DB.ExecContext(ctx, `
 			INSERT INTO activity_logs (workspace_id, activity_type, method, source_id, target_id, summary, status, error_detail)
 			VALUES ($1, 'delegation', 'delegate_result', $2, $3, $4, 'failed', $5)
-		`, sourceID, sourceID, targetID, "Delegation failed", proxyErr.Error())
+		`, sourceID, sourceID, targetID, "Delegation failed", proxyErr.Error()); err != nil {
+			log.Printf("Delegation %s: failed to insert error log: %v", delegationID, err)
+		}
 
 		h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_FAILED", sourceID, map[string]interface{}{
 			"delegation_id": delegationID, "target_id": targetID, "error": proxyErr.Error(),
@@ -149,10 +151,12 @@ func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID s
 		"text":          responseText,
 		"delegation_id": delegationID,
 	})
-	db.DB.Exec(`
+	if _, err := db.DB.ExecContext(ctx, `
 		INSERT INTO activity_logs (workspace_id, activity_type, method, source_id, target_id, summary, response_body, status)
 		VALUES ($1, 'delegation', 'delegate_result', $2, $3, $4, $5::jsonb, 'completed')
-	`, sourceID, sourceID, targetID, "Delegation completed ("+truncate(responseText, 80)+")", string(respJSON))
+	`, sourceID, sourceID, targetID, "Delegation completed ("+truncate(responseText, 80)+")", string(respJSON)); err != nil {
+		log.Printf("Delegation %s: failed to insert success log: %v", delegationID, err)
+	}
 
 	h.updateDelegationStatus(sourceID, delegationID, "completed", "")
 	h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_COMPLETE", sourceID, map[string]interface{}{
@@ -164,13 +168,15 @@ func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID s
 
 // updateDelegationStatus updates the status of a delegation record in activity_logs.
 func (h *DelegationHandler) updateDelegationStatus(workspaceID, delegationID, status, errorDetail string) {
-	db.DB.Exec(`
+	if _, err := db.DB.ExecContext(context.Background(), `
 		UPDATE activity_logs
 		SET status = $1, error_detail = CASE WHEN $2 = '' THEN error_detail ELSE $2 END
 		WHERE workspace_id = $3
 		  AND method = 'delegate'
 		  AND request_body->>'delegation_id' = $4
-	`, status, errorDetail, workspaceID, delegationID)
+	`, status, errorDetail, workspaceID, delegationID); err != nil {
+		log.Printf("Delegation %s: status update failed: %v", delegationID, err)
+	}
 }
 
 // ListDelegations handles GET /workspaces/:id/delegations

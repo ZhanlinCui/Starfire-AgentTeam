@@ -87,6 +87,9 @@ export function AgentCommsPanel({ workspaceId }: { workspaceId: string }) {
   // Live updates via WebSocket
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
+    ws.onerror = () => {
+      console.warn("AgentCommsPanel WS error");
+    };
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);

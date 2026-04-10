@@ -8,9 +8,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
+	"github.com/agent-molecule/platform/internal/registry"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -65,6 +67,19 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 }
 
 func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID string, body []byte, callerID string, logActivity bool) (int, []byte, *proxyA2AError) {
+	// Access control: workspace-to-workspace requests must pass CanCommunicate check.
+	// Canvas requests (callerID == "") and system callers (webhook:*, system:*)
+	// are trusted. Self-calls (callerID == workspaceID) are always allowed.
+	if callerID != "" && callerID != workspaceID && !strings.Contains(callerID, ":") {
+		if !registry.CanCommunicate(callerID, workspaceID) {
+			log.Printf("ProxyA2A: access denied %s → %s", callerID, workspaceID)
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusForbidden,
+				Response: gin.H{"error": "access denied: workspaces cannot communicate per hierarchy rules"},
+			}
+		}
+	}
+
 	// Resolve workspace URL (cache first, then DB)
 	agentURL, err := db.GetCachedURL(ctx, workspaceID)
 	if err != nil {
@@ -194,18 +209,22 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 				errWsName = workspaceID
 			}
 			summary := "A2A request to " + errWsName + " failed: " + errMsg
-			go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
-				WorkspaceID:  workspaceID,
-				ActivityType: "a2a_receive",
-				SourceID:     nilIfEmpty(callerID),
-				TargetID:     &workspaceID,
-				Method:       &a2aMethod,
-				Summary:      &summary,
-				RequestBody:  json.RawMessage(body),
-				DurationMs:   &durationMs,
-				Status:       "error",
-				ErrorDetail:  &errMsg,
-			})
+			go func(parent context.Context) {
+				logCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+				defer cancel()
+				LogActivity(logCtx, h.broadcaster, ActivityParams{
+					WorkspaceID:  workspaceID,
+					ActivityType: "a2a_receive",
+					SourceID:     nilIfEmpty(callerID),
+					TargetID:     &workspaceID,
+					Method:       &a2aMethod,
+					Summary:      &summary,
+					RequestBody:  json.RawMessage(body),
+					DurationMs:   &durationMs,
+					Status:       "error",
+					ErrorDetail:  &errMsg,
+				})
+			}(ctx)
 		}
 		if containerDead {
 			return 0, nil, &proxyA2AError{
@@ -242,18 +261,22 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 			wsNameForLog = workspaceID
 		}
 		summary := a2aMethod + " → " + wsNameForLog
-		go LogActivity(context.WithoutCancel(ctx), h.broadcaster, ActivityParams{
-			WorkspaceID:  workspaceID,
-			ActivityType: "a2a_receive",
-			SourceID:     nilIfEmpty(callerID),
-			TargetID:     &workspaceID,
-			Method:       &a2aMethod,
-			Summary:      &summary,
-			RequestBody:  json.RawMessage(body),
-			ResponseBody: json.RawMessage(respBody),
-			DurationMs:   &durationMs,
-			Status:       logStatus,
-		})
+		go func(parent context.Context) {
+			logCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+			defer cancel()
+			LogActivity(logCtx, h.broadcaster, ActivityParams{
+				WorkspaceID:  workspaceID,
+				ActivityType: "a2a_receive",
+				SourceID:     nilIfEmpty(callerID),
+				TargetID:     &workspaceID,
+				Method:       &a2aMethod,
+				Summary:      &summary,
+				RequestBody:  json.RawMessage(body),
+				ResponseBody: json.RawMessage(respBody),
+				DurationMs:   &durationMs,
+				Status:       logStatus,
+			})
+		}(ctx)
 
 		// For canvas-initiated requests, broadcast the response via WebSocket
 		// so the frontend receives it instantly without polling.
