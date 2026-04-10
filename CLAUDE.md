@@ -105,7 +105,7 @@ cd mcp-server
 npm install && npm run build   # Build MCP server
 node dist/index.js             # Run (stdio transport)
 ```
-Exposes 52 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Includes workspace CRUD, plugins (install/uninstall/list), global secrets, pause/resume, org import, A2A chat, approvals, memory, files, config, discovery, bundles, templates, traces, and activity logs. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
+Exposes 54 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Includes workspace CRUD, async delegation, plugins (install/uninstall/list), global secrets, pause/resume, org import, A2A chat, approvals, memory, files, config, discovery, bundles, templates, traces, and activity logs. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
 
 ### CI Pipeline
 GitHub Actions (`.github/workflows/ci.yml`) runs on push to main and PRs:
@@ -205,6 +205,8 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | POST | /workspaces/:id/pause | workspace.go (stops container, status→paused) |
 | POST | /workspaces/:id/resume | workspace.go (re-provisions paused workspace) |
 | POST | /workspaces/:id/a2a | workspace.go |
+| POST | /workspaces/:id/delegate | delegation.go (async fire-and-forget) |
+| GET | /workspaces/:id/delegations | delegation.go (list delegation status) |
 | GET | /workspaces/:id/shared-context | templates.go |
 | GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
 | GET/PUT | /canvas/viewport | viewport.go |

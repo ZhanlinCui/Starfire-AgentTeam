@@ -262,6 +262,15 @@ If error_rate > 0.5, broadcasts `WORKSPACE_DEGRADED`. Recovery broadcasts `WORKS
 
 ---
 
+### Async Delegation
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/workspaces/:id/delegate` | Fire-and-forget delegation (`{target_id, task}`) |
+| `GET` | `/workspaces/:id/delegations` | List delegations with status and results |
+
+---
+
 ### Templates & Files
 
 | Method | Path | Description |
