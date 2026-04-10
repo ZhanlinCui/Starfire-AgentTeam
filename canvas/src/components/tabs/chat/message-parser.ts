@@ -32,6 +32,15 @@ export function extractTextsFromParts(parts: unknown): string | null {
   return texts.length > 0 ? texts.join("\n") : null;
 }
 
+/** Extract user message text from an activity log request_body */
+export function extractRequestText(body: Record<string, unknown> | null): string {
+  if (!body) return "";
+  const params = body.params as Record<string, unknown> | undefined;
+  const msg = params?.message as Record<string, unknown> | undefined;
+  const parts = msg?.parts as Array<Record<string, unknown>> | undefined;
+  return (parts?.[0]?.text as string) || "";
+}
+
 /** Extract text from an activity log response_body (multiple possible formats) */
 export function extractResponseText(body: Record<string, unknown>): string {
   try {

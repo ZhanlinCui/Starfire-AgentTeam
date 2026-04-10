@@ -171,7 +171,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 - Real-time updates: WebSocket events → `applyEvent()` in Zustand store
 - Position persistence: `onNodeDragStop` → `PATCH /workspaces/:id` with `{x, y}`
 - Embedded sub-workspaces: `nestNode` sets `hidden: !!targetId` on child nodes; children render as recursive `TeamMemberChip` components inside parent (up to 3 levels), not as separate canvas nodes. Use `n.data.parentId` (not React Flow's `n.parentId`) for hierarchy lookups.
-- Chat sessions: stored in localStorage per workspace. Conversation history (last 20 messages) sent via `params.metadata.history` in A2A `message/send` requests. Agents reconstruct the full conversation from this metadata.
+- Chat: two sub-tabs — "My Chat" (user↔agent, `source=canvas`) and "Agent Comms" (agent↔agent A2A traffic, `source=agent`). History loaded from `GET /activity` with source filter. Real-time via `A2A_RESPONSE` + `AGENT_MESSAGE` WebSocket events. Conversation history (last 20 messages) sent via `params.metadata.history` in A2A `message/send` requests.
 - Config save: "Save & Restart" writes config.yaml and auto-restarts the workspace. "Save" writes only (shows restart banner). Secrets POST/DELETE auto-restart on the platform side.
 
 ### Initial Prompt

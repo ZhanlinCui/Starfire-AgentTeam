@@ -106,7 +106,7 @@ Selecting a workspace opens the right-side panel. The panel is resizable and cur
 
 | Tab | Current role |
 |---|---|
-| `Chat` | Workspace conversation UI with session persistence, WebSocket response delivery, and recovery polling |
+| `Chat` | Two sub-tabs: **My Chat** (user↔agent, `source=canvas`) and **Agent Comms** (agent↔agent A2A traffic, `source=agent`). WebSocket response delivery, activity-based history |
 | `Activity` | Rich activity feed for A2A send/receive, task updates, logs, skill promotion, and full-trace entry points |
 | `Details` | Basic metadata, runtime/skill summary, restart, peer list, delete |
 | `Skills` | Read-only skill and capability display from the Agent Card |

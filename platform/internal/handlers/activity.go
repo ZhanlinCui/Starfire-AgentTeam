@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -27,6 +27,7 @@ func NewActivityHandler(b *events.Broadcaster) *ActivityHandler {
 func (h *ActivityHandler) List(c *gin.Context) {
 	workspaceID := c.Param("id")
 	activityType := c.Query("type")
+	source := c.Query("source") // "canvas" = source_id IS NULL, "agent" = source_id IS NOT NULL
 	limitStr := c.DefaultQuery("limit", "100")
 
 	limit := 100
@@ -37,28 +38,31 @@ func (h *ActivityHandler) List(c *gin.Context) {
 		}
 	}
 
-	var rows *sql.Rows
-	var err error
+	// Build query with optional filters
+	query := `SELECT id, workspace_id, activity_type, source_id, target_id, method,
+			   summary, request_body, response_body, duration_ms, status, error_detail, created_at
+		FROM activity_logs WHERE workspace_id = $1`
+	args := []interface{}{workspaceID}
+	argIdx := 2
 
 	if activityType != "" {
-		rows, err = db.DB.QueryContext(c.Request.Context(), `
-			SELECT id, workspace_id, activity_type, source_id, target_id, method,
-				   summary, request_body, response_body, duration_ms, status, error_detail, created_at
-			FROM activity_logs
-			WHERE workspace_id = $1 AND activity_type = $2
-			ORDER BY created_at DESC
-			LIMIT $3
-		`, workspaceID, activityType, limit)
-	} else {
-		rows, err = db.DB.QueryContext(c.Request.Context(), `
-			SELECT id, workspace_id, activity_type, source_id, target_id, method,
-				   summary, request_body, response_body, duration_ms, status, error_detail, created_at
-			FROM activity_logs
-			WHERE workspace_id = $1
-			ORDER BY created_at DESC
-			LIMIT $2
-		`, workspaceID, limit)
+		query += fmt.Sprintf(" AND activity_type = $%d", argIdx)
+		args = append(args, activityType)
+		argIdx++
 	}
+	if source == "canvas" {
+		query += " AND source_id IS NULL"
+	} else if source == "agent" {
+		query += " AND source_id IS NOT NULL"
+	} else if source != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source must be 'canvas' or 'agent'"})
+		return
+	}
+
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", argIdx)
+	args = append(args, limit)
+
+	rows, err := db.DB.QueryContext(c.Request.Context(), query, args...)
 
 	if err != nil {
 		log.Printf("Activity list error for %s: %v", workspaceID, err)

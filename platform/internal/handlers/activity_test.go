@@ -56,3 +56,108 @@ func TestSessionSearchReturnsActivityAndMemory(t *testing.T) {
 		t.Fatalf("unmet sqlmock expectations: %v", err)
 	}
 }
+
+// ---------- Activity List source filter ----------
+
+func TestActivityList_SourceCanvas(t *testing.T) {
+	mock := setupTestDB(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	// Expect query with "source_id IS NULL"
+	mock.ExpectQuery(`SELECT .+ FROM activity_logs WHERE workspace_id = .+ AND source_id IS NULL`).
+		WithArgs("ws-1", 100).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "workspace_id", "activity_type", "source_id", "target_id",
+			"method", "summary", "request_body", "response_body",
+			"duration_ms", "status", "error_detail", "created_at",
+		}))
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity?source=canvas", nil)
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestActivityList_SourceAgent(t *testing.T) {
+	mock := setupTestDB(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	// Expect query with "source_id IS NOT NULL"
+	mock.ExpectQuery(`SELECT .+ FROM activity_logs WHERE workspace_id = .+ AND source_id IS NOT NULL`).
+		WithArgs("ws-1", 100).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "workspace_id", "activity_type", "source_id", "target_id",
+			"method", "summary", "request_body", "response_body",
+			"duration_ms", "status", "error_detail", "created_at",
+		}))
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity?source=agent", nil)
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestActivityList_SourceInvalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity?source=bogus", nil)
+	handler.List(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid source, got %d", w.Code)
+	}
+}
+
+func TestActivityList_SourceWithType(t *testing.T) {
+	mock := setupTestDB(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	// Both type and source filters
+	mock.ExpectQuery(`SELECT .+ FROM activity_logs WHERE workspace_id = .+ AND activity_type = .+ AND source_id IS NULL`).
+		WithArgs("ws-1", "a2a_receive", 100).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "workspace_id", "activity_type", "source_id", "target_id",
+			"method", "summary", "request_body", "response_body",
+			"duration_ms", "status", "error_detail", "created_at",
+		}))
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-1/activity?type=a2a_receive&source=canvas", nil)
+	handler.List(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
