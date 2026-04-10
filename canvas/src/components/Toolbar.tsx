@@ -59,9 +59,7 @@ export function Toolbar() {
     <div className="fixed top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-zinc-900/80 backdrop-blur-md border border-zinc-800/60 rounded-xl px-4 py-2 shadow-xl shadow-black/20">
       {/* Logo / Title */}
       <div className="flex items-center gap-2 pr-3 border-r border-zinc-800/60">
-        <div className="w-5 h-5 rounded-md bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center">
-          <span className="text-[9px] font-bold text-white">S</span>
-        </div>
+        <img src="/starfire-icon.png" alt="Starfire" className="w-5 h-5" />
         <span className="text-[11px] font-semibold text-zinc-300 tracking-wide">Starfire</span>
       </div>
 
