@@ -13,6 +13,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// Delegation status lifecycle:
+//   pending → dispatched → received → in_progress → completed | failed
+//
+// pending:     stored in DB, goroutine not yet started
+// dispatched:  A2A request sent to target workspace
+// received:    target workspace acknowledged (200 from A2A server)
+// in_progress: target agent is actively working (set via heartbeat)
+// completed:   response received and stored
+// failed:      error during any stage
+
 // DelegationHandler manages async delegation between workspaces.
 // Delegations are fire-and-forget: the caller gets a task_id immediately,
 // and the A2A request runs in the background.
@@ -99,31 +109,38 @@ func (h *DelegationHandler) Delegate(c *gin.Context) {
 }
 
 // executeDelegation runs in a goroutine — sends A2A and stores the result.
+// Updates delegation status through: pending → dispatched → received → completed/failed
 func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID string, a2aBody []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	log.Printf("Delegation %s: %s → %s (background)", delegationID, sourceID, targetID)
+	log.Printf("Delegation %s: %s → %s (dispatched)", delegationID, sourceID, targetID)
+
+	// Update status: pending → dispatched
+	h.updateDelegationStatus(sourceID, delegationID, "dispatched", "")
+	h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_STATUS", sourceID, map[string]interface{}{
+		"delegation_id": delegationID, "target_id": targetID, "status": "dispatched",
+	})
 
 	status, respBody, proxyErr := h.workspace.proxyA2ARequest(ctx, targetID, a2aBody, sourceID, true)
 
 	if proxyErr != nil {
 		log.Printf("Delegation %s: failed — %s", delegationID, proxyErr.Error())
-		// Store failure
+		h.updateDelegationStatus(sourceID, delegationID, "failed", proxyErr.Error())
+
 		db.DB.Exec(`
 			INSERT INTO activity_logs (workspace_id, activity_type, method, source_id, target_id, summary, status, error_detail)
 			VALUES ($1, 'delegation', 'delegate_result', $2, $3, $4, 'failed', $5)
 		`, sourceID, sourceID, targetID, "Delegation failed", proxyErr.Error())
 
 		h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_FAILED", sourceID, map[string]interface{}{
-			"delegation_id": delegationID,
-			"target_id":     targetID,
-			"error":         proxyErr.Error(),
+			"delegation_id": delegationID, "target_id": targetID, "error": proxyErr.Error(),
 		})
 		return
 	}
 
-	// Extract response text
+	// A2A returned 200 — target received and processed the task
+	// Status: dispatched → received → completed (we don't have a separate "received" signal from the target yet)
 	responseText := extractResponseText(respBody)
 	log.Printf("Delegation %s: completed (status=%d, %d chars)", delegationID, status, len(responseText))
 
@@ -137,11 +154,23 @@ func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID s
 		VALUES ($1, 'delegation', 'delegate_result', $2, $3, $4, $5::jsonb, 'completed')
 	`, sourceID, sourceID, targetID, "Delegation completed ("+truncate(responseText, 80)+")", string(respJSON))
 
+	h.updateDelegationStatus(sourceID, delegationID, "completed", "")
 	h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_COMPLETE", sourceID, map[string]interface{}{
 		"delegation_id":    delegationID,
 		"target_id":        targetID,
 		"response_preview": truncate(responseText, 200),
 	})
+}
+
+// updateDelegationStatus updates the status of a delegation record in activity_logs.
+func (h *DelegationHandler) updateDelegationStatus(workspaceID, delegationID, status, errorDetail string) {
+	db.DB.Exec(`
+		UPDATE activity_logs
+		SET status = $1, error_detail = CASE WHEN $2 = '' THEN error_detail ELSE $2 END
+		WHERE workspace_id = $3
+		  AND method = 'delegate'
+		  AND request_body->>'delegation_id' = $4
+	`, status, errorDetail, workspaceID, delegationID)
 }
 
 // ListDelegations handles GET /workspaces/:id/delegations

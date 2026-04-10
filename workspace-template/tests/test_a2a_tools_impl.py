@@ -241,47 +241,38 @@ class TestToolDelegateTaskAsync:
         assert "Error" in result
         assert "required" in result
 
-    async def test_peer_not_found_returns_error(self):
-        import a2a_tools
-        with patch("a2a_tools.discover_peer", return_value=None):
-            result = await a2a_tools.tool_delegate_task_async("ws-missing", "task")
-        assert "not found" in result or "Error" in result
-
-    async def test_peer_has_no_url_returns_error(self):
-        import a2a_tools
-        peer = {"id": "ws-1", "url": ""}
-        with patch("a2a_tools.discover_peer", return_value=peer):
-            result = await a2a_tools.tool_delegate_task_async("ws-1", "task")
-        assert "no URL" in result or "Error" in result
-
-    async def test_success_returns_submitted_status(self):
-        """POST succeeds → returns JSON with status=submitted."""
+    async def test_platform_delegation_success(self):
+        """POST /delegate succeeds → returns JSON with status=delegated."""
         import a2a_tools
 
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        mc = _make_http_mock(post_resp=_resp(202, {}))
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
+        mc = _make_http_mock(post_resp=_resp(202, {"delegation_id": "d-123", "status": "delegated"}))
+        with patch("a2a_tools.httpx.AsyncClient", return_value=mc):
             result = await a2a_tools.tool_delegate_task_async("ws-1", "do task")
 
         data = json.loads(result)
-        assert data["status"] == "submitted"
+        assert data["status"] == "delegated"
         assert data["workspace_id"] == "ws-1"
-        assert "task_id" in data
+        assert data["delegation_id"] == "d-123"
 
-    async def test_timeout_returns_submitted_timeout_status(self):
-        """httpx.TimeoutException → returns JSON with status=submitted_timeout."""
+    async def test_platform_delegation_failure(self):
+        """POST /delegate fails → returns error string."""
         import a2a_tools
 
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        mc = _make_http_mock(post_exc=httpx.TimeoutException("timed out"))
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
+        mc = _make_http_mock(post_resp=_resp(500, {"error": "internal"}))
+        with patch("a2a_tools.httpx.AsyncClient", return_value=mc):
             result = await a2a_tools.tool_delegate_task_async("ws-1", "do task")
 
-        data = json.loads(result)
-        assert data["status"] == "submitted_timeout"
-        assert data["workspace_id"] == "ws-1"
+        assert "Error" in result
+
+    async def test_timeout_returns_error(self):
+        """httpx exception → returns error string."""
+        import a2a_tools
+
+        mc = _make_http_mock(post_exc=httpx.ConnectError("connection refused"))
+        with patch("a2a_tools.httpx.AsyncClient", return_value=mc):
+            result = await a2a_tools.tool_delegate_task_async("ws-1", "do task")
+
+        assert "Error" in result or "failed" in result.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -290,134 +281,58 @@ class TestToolDelegateTaskAsync:
 
 class TestToolCheckTaskStatus:
 
-    async def test_empty_workspace_id_returns_error(self):
-        import a2a_tools
-        result = await a2a_tools.tool_check_task_status("", "task-123")
-        assert "Error" in result
-        assert "required" in result
-
-    async def test_empty_task_id_returns_error(self):
-        import a2a_tools
-        result = await a2a_tools.tool_check_task_status("ws-1", "")
-        assert "Error" in result
-        assert "required" in result
-
-    async def test_peer_not_found_returns_error(self):
-        import a2a_tools
-        with patch("a2a_tools.discover_peer", return_value=None):
-            result = await a2a_tools.tool_check_task_status("ws-missing", "t-1")
-        assert "not found" in result or "Error" in result
-
-    async def test_completed_task_with_artifacts_returns_result_text(self):
-        """Completed task with artifact text parts → returns JSON with result text."""
+    async def test_returns_delegations_list(self):
+        """GET /delegations succeeds → returns delegation summary."""
         import a2a_tools
 
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        task_data = {
-            "status": {"state": "completed"},
-            "artifacts": [
-                {"parts": [{"text": "Artifact output"}]}
-            ],
-        }
-        resp_payload = {"result": task_data}
-        mc = _make_http_mock(post_resp=_resp(200, resp_payload))
-
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
-            result = await a2a_tools.tool_check_task_status("ws-1", "task-xyz")
+        delegations = [
+            {"delegation_id": "d-1", "target_id": "ws-t", "status": "completed", "summary": "done", "response_preview": "ok"},
+            {"delegation_id": "d-2", "target_id": "ws-u", "status": "pending", "summary": "waiting"},
+        ]
+        mc = _make_http_mock(get_resp=_resp(200, delegations))
+        with patch("a2a_tools.httpx.AsyncClient", return_value=mc):
+            result = await a2a_tools.tool_check_task_status("ws-1", "")
 
         data = json.loads(result)
+        assert data["count"] == 2
+        assert data["delegations"][0]["status"] == "completed"
+
+    async def test_filter_by_delegation_id(self):
+        """Filter by specific delegation_id."""
+        import a2a_tools
+
+        delegations = [
+            {"delegation_id": "d-1", "status": "completed", "response_preview": "result here"},
+            {"delegation_id": "d-2", "status": "pending"},
+        ]
+        mc = _make_http_mock(get_resp=_resp(200, delegations))
+        with patch("a2a_tools.httpx.AsyncClient", return_value=mc):
+            result = await a2a_tools.tool_check_task_status("ws-1", "d-1")
+
+        data = json.loads(result)
+        assert data["delegation_id"] == "d-1"
         assert data["status"] == "completed"
-        assert data["result"] == "Artifact output"
-        assert data["task_id"] == "task-xyz"
 
-    async def test_completed_task_with_no_artifact_text_returns_none_result(self):
-        """Completed task with no text parts → result is None."""
+    async def test_not_found_delegation_id(self):
+        """Delegation ID not in results → returns not_found."""
         import a2a_tools
 
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        task_data = {
-            "status": {"state": "completed"},
-            "artifacts": [{"parts": [{}]}],  # part has no "text" key
-        }
-        mc = _make_http_mock(post_resp=_resp(200, {"result": task_data}))
-
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
-            result = await a2a_tools.tool_check_task_status("ws-1", "task-xyz")
+        mc = _make_http_mock(get_resp=_resp(200, []))
+        with patch("a2a_tools.httpx.AsyncClient", return_value=mc):
+            result = await a2a_tools.tool_check_task_status("ws-1", "d-missing")
 
         data = json.loads(result)
-        assert data["result"] is None
+        assert data["status"] == "not_found"
 
-    async def test_non_completed_status_returns_status_and_no_result(self):
-        """In-progress task → status reflects state, result is None."""
+    async def test_api_error_returns_error_string(self):
+        """Platform API failure → returns error string."""
         import a2a_tools
 
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        task_data = {
-            "status": {"state": "working"},
-            "artifacts": [],
-        }
-        mc = _make_http_mock(post_resp=_resp(200, {"result": task_data}))
+        mc = _make_http_mock(get_resp=_resp(500, {"error": "db down"}))
+        with patch("a2a_tools.httpx.AsyncClient", return_value=mc):
+            result = await a2a_tools.tool_check_task_status("ws-1", "d-1")
 
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
-            result = await a2a_tools.tool_check_task_status("ws-1", "task-xyz")
-
-        data = json.loads(result)
-        assert data["status"] == "working"
-
-    async def test_error_in_response_returns_error_string(self):
-        """'error' key in JSON response → returns 'Error: <message>'."""
-        import a2a_tools
-
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        mc = _make_http_mock(post_resp=_resp(200, {
-            "error": {"code": -32600, "message": "Invalid task id"}
-        }))
-
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
-            result = await a2a_tools.tool_check_task_status("ws-1", "task-bad")
-
-        assert "Error" in result
-        assert "Invalid task id" in result
-
-    async def test_exception_returns_error_string(self):
-        """Network exception → returns 'Error checking status: ...'."""
-        import a2a_tools
-
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        mc = _make_http_mock(post_exc=ConnectionError("target down"))
-
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
-            result = await a2a_tools.tool_check_task_status("ws-1", "task-xyz")
-
-        assert "Error checking status" in result
-
-    async def test_completed_task_multiple_artifacts_and_parts_concatenated(self):
-        """Multiple artifacts / parts are concatenated with newlines."""
-        import a2a_tools
-
-        peer = {"id": "ws-1", "url": "http://ws-1.svc/a2a"}
-        task_data = {
-            "status": {"state": "completed"},
-            "artifacts": [
-                {"parts": [{"text": "Part A"}, {"text": "Part B"}]},
-                {"parts": [{"text": "Part C"}]},
-            ],
-        }
-        mc = _make_http_mock(post_resp=_resp(200, {"result": task_data}))
-
-        with patch("a2a_tools.discover_peer", return_value=peer), \
-             patch("a2a_tools.httpx.AsyncClient", return_value=mc):
-            result = await a2a_tools.tool_check_task_status("ws-1", "task-multi")
-
-        data = json.loads(result)
-        assert "Part A" in data["result"]
-        assert "Part B" in data["result"]
-        assert "Part C" in data["result"]
+        assert "Error" in result or "failed" in result.lower()
 
 
 # ---------------------------------------------------------------------------

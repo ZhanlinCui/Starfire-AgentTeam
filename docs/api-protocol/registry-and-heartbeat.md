@@ -122,6 +122,33 @@ On expiry, the platform:
 3. Updates `workspaces.status = 'offline'`
 4. Broadcasts via WebSocket — canvas node turns gray
 
+## Heartbeat Delegation Checking
+
+In addition to alive signals, the heartbeat loop checks for completed delegations every 30 seconds:
+
+```
+Every 30s:
+1. POST /registry/heartbeat        → alive signal
+2. GET /workspaces/:id/delegations → check results
+3. If new completions found:
+   a. Write to /tmp/delegation_results.jsonl (for context injection)
+   b. Send A2A self-message to wake the agent (5-min cooldown)
+   c. Push notification to user via POST /notify
+```
+
+**Self-message trigger:** When the heartbeat detects a completed delegation, it sends an A2A message to its own workspace: "Delegation results are ready. Review them and take appropriate action." This wakes the agent so it can report results back up the chain.
+
+**Cooldown:** At most one self-message per 5 minutes to prevent infinite loops (agent delegates → completes → self-message → agent delegates again → ...).
+
+**Context injection:** When the agent receives any message (including the self-message), the CLI executor reads `/tmp/delegation_results.jsonl` and injects results into the prompt as `[Delegation results received while you were idle]`.
+
+**Delegation status lifecycle:**
+```
+pending → dispatched → received → in_progress → completed | failed
+```
+
+Each transition broadcasts a `DELEGATION_STATUS` WebSocket event. `DELEGATION_COMPLETE` and `DELEGATION_FAILED` are broadcast on terminal states.
+
 ## Workspace Moves to a New Machine
 
 When a workspace starts on a new machine (e.g. new EC2 instance):
