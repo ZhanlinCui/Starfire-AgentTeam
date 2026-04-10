@@ -29,6 +29,7 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: "System Architecture", link: "/architecture/architecture" },
+          { text: "Technical Documentation", link: "/architecture/starfire-technical-doc" },
           { text: "Database Schema", link: "/architecture/database-schema" },
           { text: "Workspace Tiers", link: "/architecture/workspace-tiers" },
           { text: "Provisioner", link: "/architecture/provisioner" },
@@ -84,6 +85,8 @@ export default defineConfig({
         text: "Product",
         collapsed: true,
         items: [
+          { text: "Product Narrative", link: "/product/starfire-product-doc" },
+          { text: "Landing Messaging Report", link: "/product/landing-messaging-report" },
           { text: "PRD", link: "/product/PRD" },
           { text: "SaaS Upgrade Path", link: "/product/saas-upgrade" },
         ],

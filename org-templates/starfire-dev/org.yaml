@@ -65,3 +65,8 @@ workspaces:
             tier: 3
             model: opus
             files_dir: qa-engineer
+          - name: UIUX Designer
+            role: User flow design, visual design review, interaction patterns, accessibility
+            tier: 3
+            model: opus
+            files_dir: uiux-designer

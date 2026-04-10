@@ -10,13 +10,28 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync"
 )
 
-var encryptionKey []byte
+var (
+	encryptionKey []byte
+	initOnce      sync.Once
+)
 
 // Init loads the encryption key from SECRETS_ENCRYPTION_KEY env var.
-// If not set, encryption is disabled (plaintext mode for development).
+// Safe to call multiple times — only executes once in production.
 func Init() {
+	initOnce.Do(initKey)
+}
+
+// ResetForTesting clears the encryption key and allows re-initialization.
+// Only for tests — not safe for concurrent use.
+func ResetForTesting() {
+	encryptionKey = nil
+	initOnce = sync.Once{}
+}
+
+func initKey() {
 	key := os.Getenv("SECRETS_ENCRYPTION_KEY")
 	if key == "" {
 		return

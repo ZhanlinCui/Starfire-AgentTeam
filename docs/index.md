@@ -58,7 +58,9 @@ features:
 
 - [Quickstart](/quickstart)
 - [Product Overview](/product/overview)
+- [Product Narrative](/product/starfire-product-doc)
 - [System Architecture](/architecture/architecture)
+- [Comprehensive Technical Documentation](/architecture/starfire-technical-doc)
 - [Memory Architecture](/architecture/memory)
 - [Workspace Runtime](/agent-runtime/workspace-runtime)
 - [Canvas UI](/frontend/canvas)

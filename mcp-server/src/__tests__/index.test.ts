@@ -61,6 +61,17 @@ import {
   handleGetModel,
   handleCreateApproval,
   handleGetWorkspaceApprovals,
+  handleListPluginRegistry,
+  handleListInstalledPlugins,
+  handleInstallPlugin,
+  handleUninstallPlugin,
+  handleListGlobalSecrets,
+  handleSetGlobalSecret,
+  handleDeleteGlobalSecret,
+  handlePauseWorkspace,
+  handleResumeWorkspace,
+  handleListOrgTemplates,
+  handleImportOrg,
   createServer,
 } from "../index.js";
 
@@ -855,6 +866,18 @@ describe("Response format invariants", () => {
     ["handleGetConfig", () => handleGetConfig({ workspace_id: "x" })],
     ["handleListPeers", () => handleListPeers({ workspace_id: "x" })],
     ["handleExportBundle", () => handleExportBundle({ workspace_id: "x" })],
+    // New tools — plugins, global secrets, pause/resume, org
+    ["handleListPluginRegistry", () => handleListPluginRegistry()],
+    ["handleListInstalledPlugins", () => handleListInstalledPlugins({ workspace_id: "x" })],
+    ["handleInstallPlugin", () => handleInstallPlugin({ workspace_id: "x", name: "ecc" })],
+    ["handleUninstallPlugin", () => handleUninstallPlugin({ workspace_id: "x", name: "ecc" })],
+    ["handleListGlobalSecrets", () => handleListGlobalSecrets()],
+    ["handleSetGlobalSecret", () => handleSetGlobalSecret({ key: "K", value: "V" })],
+    ["handleDeleteGlobalSecret", () => handleDeleteGlobalSecret({ key: "K" })],
+    ["handlePauseWorkspace", () => handlePauseWorkspace({ workspace_id: "x" })],
+    ["handleResumeWorkspace", () => handleResumeWorkspace({ workspace_id: "x" })],
+    ["handleListOrgTemplates", () => handleListOrgTemplates()],
+    ["handleImportOrg", () => handleImportOrg({ dir: "starfire-dev" })],
   ];
 
   test.each(cases)("%s returns content array with type=text", async (_name, fn) => {
@@ -863,5 +886,127 @@ describe("Response format invariants", () => {
     expect(result.content.length).toBeGreaterThan(0);
     expect(result.content[0].type).toBe("text");
     expect(typeof result.content[0].text).toBe("string");
+  });
+});
+
+// ============================================================
+// Plugin handler tests
+// ============================================================
+
+describe("Plugin handlers", () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    global.fetch = mockFetch([{ name: "ecc", version: "1.0.0", skills: ["coding-standards"] }]);
+  });
+
+  test("handleListPluginRegistry calls GET /plugins", async () => {
+    const result = await handleListPluginRegistry();
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/plugins`,
+      expect.objectContaining({ method: "GET" })
+    );
+    expectJsonContent(result, [{ name: "ecc", version: "1.0.0", skills: ["coding-standards"] }]);
+  });
+
+  test("handleInstallPlugin calls POST /workspaces/:id/plugins", async () => {
+    global.fetch = mockFetch({ status: "installed", plugin: "ecc" });
+    const result = await handleInstallPlugin({ workspace_id: "ws-1", name: "ecc" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/workspaces/ws-1/plugins`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "ecc" }),
+      })
+    );
+    expectJsonContent(result, { status: "installed", plugin: "ecc" });
+  });
+
+  test("handleUninstallPlugin calls DELETE /workspaces/:id/plugins/:name", async () => {
+    global.fetch = mockFetch({ status: "uninstalled", plugin: "ecc" });
+    await handleUninstallPlugin({ workspace_id: "ws-1", name: "ecc" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/workspaces/ws-1/plugins/ecc`,
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+});
+
+// ============================================================
+// Global secrets handler tests
+// ============================================================
+
+describe("Global secrets handlers", () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    global.fetch = mockFetch([{ key: "GITHUB_TOKEN", scope: "global" }]);
+  });
+
+  test("handleListGlobalSecrets calls GET /settings/secrets", async () => {
+    await handleListGlobalSecrets();
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/settings/secrets`,
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
+  test("handleSetGlobalSecret calls PUT /settings/secrets", async () => {
+    global.fetch = mockFetch({ status: "saved" });
+    await handleSetGlobalSecret({ key: "MY_KEY", value: "secret" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/settings/secrets`,
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ key: "MY_KEY", value: "secret" }),
+      })
+    );
+  });
+
+  test("handleDeleteGlobalSecret calls DELETE /settings/secrets/:key", async () => {
+    global.fetch = mockFetch({ status: "deleted" });
+    await handleDeleteGlobalSecret({ key: "OLD_KEY" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/settings/secrets/OLD_KEY`,
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+});
+
+// ============================================================
+// Pause/resume and org handler tests
+// ============================================================
+
+describe("Pause/resume and org handlers", () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    global.fetch = mockFetch({ status: "paused" });
+  });
+
+  test("handlePauseWorkspace calls POST /workspaces/:id/pause", async () => {
+    await handlePauseWorkspace({ workspace_id: "ws-1" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/workspaces/ws-1/pause`,
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  test("handleResumeWorkspace calls POST /workspaces/:id/resume", async () => {
+    global.fetch = mockFetch({ status: "provisioning" });
+    await handleResumeWorkspace({ workspace_id: "ws-1" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/workspaces/ws-1/resume`,
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  test("handleImportOrg calls POST /org/import with dir", async () => {
+    global.fetch = mockFetch({ org: "test", count: 5 });
+    await handleImportOrg({ dir: "starfire-dev" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/org/import`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ dir: "starfire-dev" }),
+      })
+    );
   });
 });

@@ -60,8 +60,9 @@ def _brief_summary(text: str, max_len: int = 80) -> str:
 RUNTIME_PRESETS: dict[str, dict] = {
     "claude-code": {
         "command": "claude",
-        # Required for unattended agent operation — workspace tier controls access at the platform level
-        "base_args": ["--print", "--dangerously-skip-permissions", "--allowed-tools", "Bash"],
+        # Full agentic mode — all tools enabled, dangerously-skip-permissions for unattended operation
+        # Workspace tier controls access at the platform level
+        "base_args": ["--print", "--dangerously-skip-permissions"],
         "prompt_flag": "-p",
         "model_flag": "--model",
         "system_prompt_flag": "--system-prompt",
@@ -289,6 +290,38 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         except Exception:
             pass
 
+    def _read_delegation_results(self) -> str:
+        """Read and consume delegation results written by heartbeat loop."""
+        results_file = Path(os.environ.get("DELEGATION_RESULTS_FILE", "/tmp/delegation_results.jsonl"))
+        if not results_file.exists():
+            return ""
+        try:
+            # Atomic consume: rename first to prevent race with heartbeat writer
+            consumed = results_file.with_suffix(".consumed")
+            try:
+                results_file.rename(consumed)
+            except OSError:
+                return ""  # File disappeared between exists() and rename()
+            lines = consumed.read_text().strip().split("\n")
+            consumed.unlink(missing_ok=True)
+            parts = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                    status = r.get("status", "?")
+                    summary = r.get("summary", "")
+                    preview = r.get("response_preview", "")
+                    parts.append(f"- [{status}] {summary}")
+                    if preview:
+                        parts.append(f"  Response: {preview[:200]}")
+                except json.JSONDecodeError:
+                    continue
+            return "\n".join(parts) if parts else ""
+        except Exception:
+            return ""
+
     def _get_system_prompt(self) -> str | None:
         """Get system prompt — re-read from file each time (supports hot-reload)."""
         prompt_file = Path(self.config_path) / "system-prompt.md"
@@ -375,12 +408,17 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
         logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
 
+        # Inject delegation results that arrived since last message
+        delegation_context = self._read_delegation_results()
+        if delegation_context:
+            user_input = f"[Delegation results received while you were idle]\n{delegation_context}\n\n[New message]\n{user_input}"
+
         # Auto-recall: inject prior memories into the prompt on first message (no session yet)
         original_input = user_input  # Keep clean copy for memory
         if not self._session_id:
             memories = await self._recall_memories()
             if memories:
-                user_input = f"[Prior context from memory]\n{memories}\n\n[Current request]\n{user_input}"
+                user_input = f"[Prior context from memory]\n{memories}\n\n{user_input}"
 
         try:
             await self._run_cli(user_input, event_queue)
@@ -406,11 +444,16 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         for attempt in range(max_retries):
             proc = None
             try:
+                # Run in /workspace if it exists and has content (cloned repo),
+                # otherwise /configs (agent config files)
+                cwd = "/workspace" if os.path.isdir("/workspace") and os.listdir("/workspace") else "/configs"
+
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
+                    cwd=cwd,
                 )
                 if timeout:
                     stdout, stderr = await asyncio.wait_for(
@@ -472,6 +515,16 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                                            self.runtime, attempt + 1, max_retries, delay)
                             await asyncio.sleep(delay)
                             continue
+                    # Session errors: clear stale session and retry fresh
+                    if "no conversation found" in error_msg.lower() or "session" in error_msg.lower():
+                        self._session_id = None
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning("CLI agent [%s]: stale session (attempt %d/%d), retrying fresh in %ds",
+                                           self.runtime, attempt + 1, max_retries, delay)
+                            await asyncio.sleep(delay)
+                            continue
+
                     # Auth errors: clear session and retry (OAuth tokens can have transient failures)
                     if "auth" in error_msg.lower() or "api_key" in error_msg.lower() or "X-Api-Key" in error_msg:
                         self._session_id = None

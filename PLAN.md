@@ -22,6 +22,11 @@
 | 11 | Canvas Polish & UX | `docs/frontend/canvas.md` |
 | 13 | Runtime Enhancements | `docs/agent-runtime/workspace-runtime.md` |
 | 14 | Production Hardening | `docs/architecture/provisioner.md`, `CLAUDE.md` |
+| 15 | Per-Workspace Dir | PR #38 — `workspace_dir` per workspace |
+| 16 | Plugin System | PR #39 — per-workspace plugins with registry |
+| 17 | Agent GitHub Access | PR #40 — git/gh in images, GITHUB_TOKEN env |
+| 18 | File Browser Lazy Loading | PR #37 — depth=1, path traversal protection |
+| 19 | MCP Full Coverage | PR #40 — 52 tools (plugins, global secrets, pause/resume, org) |
 
 ---
 
@@ -37,34 +42,94 @@
 
 ---
 
-## Operational Features — DONE (recent)
+## Phase 20: Canvas UX Sprint — IN PROGRESS
 
-- [x] **Container health detection** — 3-layer: passive (Redis TTL 60s), proactive (Docker health sweep 15s), reactive (A2A proxy check)
-- [x] **Auto-restart on offline** — liveness monitor + health sweep trigger `RestartByID`
-- [x] **Workspace pause/resume** — `POST /pause` / `POST /resume` with cascade to children, parent-paused guard
-- [x] **Agent push messaging** — `send_message_to_user` MCP tool → `POST /notify` → WebSocket AGENT_MESSAGE
-- [x] **Tier system** — T1 (sandboxed), T2 (standard), T3 (privileged), T4 (full host) via `ApplyTierConfig()`
-- [x] **Config persistence** — restart preserves config volume; `apply_template` flag for runtime changes
-- [x] **Skills system** — agents create persistent skills in `/configs/skills/` that auto-inject into prompts
-- [x] **Build script** — `workspace-template/build-all.sh` builds base + all 6 runtime images
-- [x] **Graceful delegation errors** — `[A2A_ERROR]` sentinel, coordinator rules, retry with backoff
+> UX specs created by UIUX Designer agent. See `docs/ux-specs/` for full specs.
+
+### 20.1 Settings Panel (Global Secrets UI)
+**Spec**: `docs/ux-specs/ux-spec-settings-panel.md`
+**Owner**: Frontend Engineer
+**Status**: Spec complete, implementation pending
+
+- [ ] Gear icon in canvas top bar (Cmd+, shortcut)
+- [ ] Slide-over drawer (480px, right-anchored)
+- [ ] Service groups (GitHub, Anthropic, OpenRouter, Custom)
+- [ ] CRUD: add, view (masked), edit, delete secrets
+- [ ] Empty state with guided setup
+- [ ] Format validation + test connection button
+- [ ] Unsaved changes guard on close
+
+### 20.2 Onboarding / Deploy Interception
+**Spec**: `docs/ux-specs/ux-spec-onboarding-interception.md`
+**Owner**: Frontend Engineer
+**Status**: Spec complete, implementation pending
+
+- [ ] Pre-deploy secret check — detect missing API keys per runtime
+- [ ] Missing Keys Modal — inline form, only asks for what's needed
+- [ ] Provisioning timeout (30s) → named error state with recovery actions
+- [ ] No dead ends — every error has a fix action
+
+### 20.3 Canvas UI Improvements
+**Spec**: `docs/ux-specs/ux-spec-canvas-improvements.md`
+**Owner**: Frontend Engineer
+**Status**: Spec complete, implementation pending
+
+- [ ] Plugins install/uninstall in Skills tab (DONE — PR #39)
+- [ ] Org template import from canvas
+- [ ] Pause/resume from context menu
+- [ ] Workspace search (Cmd+K)
+- [ ] Batch operations
 
 ---
 
-## Backlog (prioritized by PM)
+## PR Workflow Rules
 
-1. **Test coverage gaps** — 18 of 26 Go handler files have zero unit tests (a2a_proxy, workspace, templates, registry, discovery, secrets, etc.)
-2. **Silent ExecContext failures** — 6+ locations where DB writes are fire-and-forget
-3. **Python tool JSON decode** — tools call `resp.json()` without catching decode errors
-4. **NemoClaw adapter** — PR #5 open (new runtime, NVIDIA support)
-5. **Canvas improvements** — search, batch operations, keyboard shortcuts
-6. **Documentation gaps** — some docs reference T4/EC2 (removed), inconsistent API docs
+All PRs must follow this checklist:
+
+1. **Branch**: Never push to main. Always create a feature/fix branch.
+2. **Code Review**: Run `/code-review` skill and fix all issues before requesting merge.
+3. **Tests**: All existing tests must pass. New features require new tests.
+4. **Documentation**: Run `/update-docs` skill. Every PR must update:
+   - `docs/edit-history/` session log
+   - Relevant docs in `docs/` (API, architecture, frontend, etc.)
+   - `CLAUDE.md` if routes, env vars, or commands changed
+   - `PLAN.md` if the work completes a phase or adds new items
+5. **E2E Test**: Rebuild, restart service, and manually verify before reporting done.
+6. **QA Review**: QA Engineer reviews for edge cases, plan compliance, and documentation completeness before CEO merge approval.
+7. **CEO Approval**: Only the CEO approves merges. Never merge without explicit approval.
+
+---
+
+## Backlog (prioritized)
+
+1. **Settings Panel implementation** — Phase 20.1 (spec ready)
+2. **Onboarding interception** — Phase 20.2 (spec ready)
+3. **Canvas UI improvements** — Phase 20.3 (spec ready)
+4. **Test coverage gaps** — many handlers still lack unit tests
+5. **NemoClaw adapter** — PR #5 open (NVIDIA runtime support)
+6. **Remote plugin registry** — future: install plugins from npm/git (currently local only)
+7. **Agent git worktrees** — per-agent branches without full clone
+
+---
+
+## Team Assignments
+
+| Agent | Current Focus |
+|-------|--------------|
+| PM | Sprint coordination, backlog prioritization |
+| Dev Lead | Engineering planning, PR review |
+| UIUX Designer | UX specs for Phase 20 (DONE — 5 specs delivered) |
+| Frontend Engineer | Phase 20.1 Settings Panel implementation |
+| Backend Engineer | API completeness verification |
+| QA Engineer | **Review every PR for docs + plan compliance** |
+| DevOps Engineer | CI/CD, Docker image optimization |
+| Security Auditor | API key handling, path traversal, auth review |
 
 ---
 
 ## Next Steps
 
-- PM agent owns the backlog and assigns sprint work to Dev team
-- All work on branches (never push to main)
-- Dev team runs code-review + update-docs skills after implementation
-- QA reviews for edge cases + plan compliance before merge
+- Frontend Engineer implements Settings Panel (Phase 20.1) based on UX spec
+- QA Engineer reviews PR for docs compliance before merge
+- PM tracks sprint progress and reports to CEO
+- All agents use `GITHUB_TOKEN` env var to clone repo, branch, and create PRs

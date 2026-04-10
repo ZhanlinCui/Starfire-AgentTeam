@@ -41,7 +41,24 @@ The platform uses the caller identity to enforce hierarchy-based access rules.
 | `POST` | `/workspaces/:id/restart` | Restart workspace |
 | `POST` | `/workspaces/:id/pause` | Pause workspace |
 | `POST` | `/workspaces/:id/resume` | Resume workspace |
-| `POST` | `/workspaces/:id/a2a` | Proxy A2A request to the target workspace |
+| `POST` | `/workspaces/:id/a2a` | Proxy A2A request to the target workspace (synchronous) |
+| `POST` | `/workspaces/:id/delegate` | Async delegation — fire-and-forget, returns delegation_id |
+| `GET` | `/workspaces/:id/delegations` | List delegation status (pending/completed/failed) |
+
+### Async Delegation
+
+`POST /workspaces/:id/delegate` sends a task to another workspace without blocking. The platform runs the A2A request in a background goroutine and returns immediately.
+
+```json
+POST /workspaces/:id/delegate
+{"target_id": "<workspace-uuid>", "task": "Review the PLAN.md"}
+
+→ 202 {"delegation_id": "...", "status": "delegated", "target_id": "..."}
+```
+
+Poll `GET /workspaces/:id/delegations` to check results. Each entry includes `delegation_id`, `status` (pending/completed/failed), and `response_preview`. WebSocket events `DELEGATION_COMPLETE` and `DELEGATION_FAILED` are broadcast on completion.
+
+This is the recommended way for agents to delegate work — it works for all runtimes (Claude Code, LangGraph, etc.) since it operates at the platform level.
 
 Workspace creation also assigns an `awareness_namespace` on the workspace row. That namespace is later injected into the provisioned runtime.
 

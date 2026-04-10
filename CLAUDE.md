@@ -81,9 +81,9 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 
 ### Unit Tests
 ```bash
-cd platform && go test -race ./...               # 358 Go tests (handlers, registry, provisioner, CLI — sqlmock + miniredis)
+cd platform && go test -race ./...               # 365+ Go tests (handlers, registry, provisioner, CLI, delegation — sqlmock + miniredis)
 cd canvas && npm test                            # 203 Vitest tests (store, components, hydration, buildTree)
-cd workspace-template && python -m pytest -v     # 148 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli)
+cd workspace-template && python -m pytest -v     # 869 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli, delegation)
 ```
 
 ### Integration Tests
@@ -105,7 +105,7 @@ cd mcp-server
 npm install && npm run build   # Build MCP server
 node dist/index.js             # Run (stdio transport)
 ```
-Exposes 20 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
+Exposes 54 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Includes workspace CRUD, async delegation, plugins (install/uninstall/list), global secrets, pause/resume, org import, A2A chat, approvals, memory, files, config, discovery, bundles, templates, traces, and activity logs. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
 
 ### CI Pipeline
 GitHub Actions (`.github/workflows/ci.yml`) runs on push to main and PRs:
@@ -209,6 +209,8 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | POST | /workspaces/:id/pause | workspace.go (stops container, status→paused) |
 | POST | /workspaces/:id/resume | workspace.go (re-provisions paused workspace) |
 | POST | /workspaces/:id/a2a | workspace.go |
+| POST | /workspaces/:id/delegate | delegation.go (async fire-and-forget) |
+| GET | /workspaces/:id/delegations | delegation.go (list delegation status) |
 | GET | /workspaces/:id/shared-context | templates.go |
 | GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
 | GET/PUT | /canvas/viewport | viewport.go |
@@ -230,7 +232,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 
 ## Database
 
-13 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
+14 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
 
