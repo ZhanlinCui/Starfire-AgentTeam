@@ -191,6 +191,18 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		},
 	}
 
+	// Ensure no stale container exists with the same name (race with restart policy)
+	_ = p.cli.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
+
+	// Log image resolution for debugging stale-image issues
+	imgInspect, _, imgErr := p.cli.ImageInspectWithRaw(ctx, image)
+	if imgErr == nil {
+		log.Printf("Provisioner: creating %s from image %s (ID: %s, created: %s)",
+			name, image, imgInspect.ID[:19], imgInspect.Created[:19])
+	} else {
+		log.Printf("Provisioner: creating %s from image %s (inspect failed: %v)", name, image, imgErr)
+	}
+
 	// Create and start container
 	resp, err := p.cli.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, name)
 	if err != nil {
@@ -201,6 +213,11 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		// Clean up created container on start failure
 		_ = p.cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return "", fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// Verify the started container uses the expected image
+	if startedInfo, siErr := p.cli.ContainerInspect(ctx, resp.ID); siErr == nil {
+		log.Printf("Provisioner: started container %s (image: %s)", name, startedInfo.Image[:19])
 	}
 
 	// Copy template files into /configs if TemplatePath is set
