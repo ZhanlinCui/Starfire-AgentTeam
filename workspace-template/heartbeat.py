@@ -39,6 +39,8 @@ class HeartbeatLoop:
         self._task = None
         self._consecutive_failures = 0
         self._seen_delegation_ids: set[str] = set()
+        self._last_self_message_time = 0.0
+        self._self_message_cooldown = 300  # 5 minutes between self-messages
 
     @property
     def error_rate(self) -> float:
@@ -188,24 +190,30 @@ class HeartbeatLoop:
                     "Use send_message_to_user if the user should know."
                 )
 
-                # Send A2A message to self — this wakes the agent
-                try:
-                    await client.post(
-                        f"{self.platform_url}/workspaces/{self.workspace_id}/a2a",
-                        json={
-                            "method": "message/send",
-                            "params": {
-                                "message": {
-                                    "role": "user",
-                                    "parts": [{"type": "text", "text": trigger_msg}],
+                # Send A2A message to self — this wakes the agent (cooldown to prevent loops)
+                now = time.time()
+                if now - self._last_self_message_time < self._self_message_cooldown:
+                    logger.info("Heartbeat: skipping self-message (cooldown %ds remaining)",
+                                int(self._self_message_cooldown - (now - self._last_self_message_time)))
+                else:
+                    self._last_self_message_time = now
+                    try:
+                        await client.post(
+                            f"{self.platform_url}/workspaces/{self.workspace_id}/a2a",
+                            json={
+                                "method": "message/send",
+                                "params": {
+                                    "message": {
+                                        "role": "user",
+                                        "parts": [{"type": "text", "text": trigger_msg}],
+                                    },
                                 },
                             },
-                        },
-                        timeout=120.0,  # Agent might take a while to process
-                    )
-                    logger.info("Heartbeat: self-message sent to process delegation results")
-                except Exception as e:
-                    logger.warning("Heartbeat: failed to send self-message: %s", e)
+                            timeout=120.0,
+                        )
+                        logger.info("Heartbeat: self-message sent to process delegation results")
+                    except Exception as e:
+                        logger.warning("Heartbeat: failed to send self-message: %s", e)
 
                 # Also push notification to user via canvas
                 for r in new_results:
