@@ -251,7 +251,11 @@ async def main():  # pragma: no cover
     # 10b. Schedule initial_prompt self-message after server is ready.
     # Only runs on first boot — creates a marker file to prevent re-execution on restart.
     initial_prompt_task = None
+    # Marker file to prevent re-execution on restart. Try /configs first (persists),
+    # fall back to /workspace (also persists as a Docker volume).
     initial_prompt_marker = os.path.join(config_path, ".initial_prompt_done")
+    if not os.access(config_path, os.W_OK):
+        initial_prompt_marker = "/workspace/.initial_prompt_done"
     if config.initial_prompt and not os.path.exists(initial_prompt_marker):
         async def _send_initial_prompt():
             """Wait for server to be ready, then send initial_prompt as self-message."""
@@ -269,39 +273,84 @@ async def main():  # pragma: no cover
                     continue
 
             if not ready:
-                print("Initial prompt: server not ready after 30s, skipping")
+                print("Initial prompt: server not ready after 30s, skipping", flush=True)
                 return
 
-            # Send initial prompt as A2A message/send to self
-            try:
-                async with httpx.AsyncClient(timeout=300.0) as client:
-                    print("Initial prompt: sending to self...")
-                    resp = await client.post(
-                        f"http://127.0.0.1:{port}/",
-                        json={
-                            "jsonrpc": "2.0",
-                            "id": f"initial-prompt-{_uuid.uuid4().hex[:8]}",
-                            "method": "message/send",
-                            "params": {
-                                "message": {
-                                    "role": "user",
-                                    "messageId": f"initial-{_uuid.uuid4().hex[:8]}",
-                                    "parts": [{"kind": "text", "text": config.initial_prompt}],
-                                },
+            # Send initial prompt to self in a thread (avoids asyncio/httpx streaming hang).
+            # Then push the response to the canvas via /notify.
+            import json as _json
+            import urllib.request
+            import urllib.error
+
+            def _do_send_sync():
+                try:
+                    payload = _json.dumps({
+                        "jsonrpc": "2.0",
+                        "id": f"initial-prompt-{_uuid.uuid4().hex[:8]}",
+                        "method": "message/send",
+                        "params": {
+                            "message": {
+                                "role": "user",
+                                "messageId": f"initial-{_uuid.uuid4().hex[:8]}",
+                                "parts": [{"kind": "text", "text": config.initial_prompt}],
                             },
                         },
+                    }).encode()
+
+                    req = urllib.request.Request(
+                        f"http://127.0.0.1:{port}/",
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
                     )
-                    print(f"Initial prompt: completed (status={resp.status_code})")
-                    # Write marker so restarts don't re-execute
-                    try:
-                        with open(initial_prompt_marker, "w") as f:
-                            f.write("done")
-                    except OSError:
-                        pass
-            except asyncio.CancelledError:
-                print("Initial prompt: cancelled (server shutting down)")
-            except Exception as e:
-                print(f"Initial prompt: failed — {e}")
+                    with urllib.request.urlopen(req, timeout=600) as resp:
+                        body = _json.loads(resp.read())
+                    print(f"Initial prompt: completed (status={resp.status})", flush=True)
+
+                    # Extract response text from A2A JSON-RPC result
+                    reply_text = ""
+                    result = body.get("result", {})
+                    # Direct parts (result.parts[].text)
+                    for part in result.get("parts", []):
+                        if part.get("kind") == "text" and part.get("text"):
+                            reply_text = part["text"]
+                            break
+                    # Fallback: artifacts[].parts[].text
+                    if not reply_text:
+                        for artifact in result.get("artifacts", []):
+                            for part in artifact.get("parts", []):
+                                if part.get("kind") == "text" and part.get("text"):
+                                    reply_text = part["text"]
+                                    break
+                            if reply_text:
+                                break
+
+                    # Push to canvas chat
+                    if reply_text:
+                        try:
+                            notify_req = urllib.request.Request(
+                                f"{platform_url}/workspaces/{workspace_id}/notify",
+                                data=_json.dumps({"message": reply_text}).encode(),
+                                headers={"Content-Type": "application/json"},
+                            )
+                            urllib.request.urlopen(notify_req, timeout=10)
+                            print("Initial prompt: pushed to canvas chat", flush=True)
+                        except Exception as ne:
+                            print(f"Initial prompt: notify failed — {ne}", flush=True)
+
+                except Exception as e:
+                    print(f"Initial prompt: failed — {e}", flush=True)
+                    return
+
+                # Write marker
+                try:
+                    with open(initial_prompt_marker, "w") as f:
+                        f.write("done")
+                except OSError:
+                    pass
+
+            print("Initial prompt: sending to self...", flush=True)
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, _do_send_sync)
 
         initial_prompt_task = asyncio.create_task(_send_initial_prompt())
 
