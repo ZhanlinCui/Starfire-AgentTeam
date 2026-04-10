@@ -190,7 +190,7 @@ export function MissingKeysModal({
                 <div className="flex gap-2 mt-2">
                   <input
                     value={entry.value}
-                    onChange={(e) => updateEntry(index, { value: e.target.value })}
+                    onChange={(e) => updateEntry(index, { value: e.target.value.trimStart() })}
                     placeholder={entry.key.includes("API_KEY") ? "sk-..." : "Enter value"}
                     type="password"
                     autoFocus={index === 0}

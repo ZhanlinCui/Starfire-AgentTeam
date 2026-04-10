@@ -168,7 +168,7 @@ export function ProvisioningTimeout({
   if (timedOut.length === 0) return null;
 
   return (
-    <div className="fixed top-14 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-2 max-w-[480px] w-full px-4">
+    <div role="alert" aria-live="assertive" className="fixed top-14 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-2 max-w-[480px] w-full px-4">
       {timedOut.map((entry) => {
         const elapsed = Math.round((Date.now() - entry.startedAt) / 1000);
         const isRetrying = retrying.has(entry.workspaceId);
