@@ -8,15 +8,18 @@ import { useCanvasStore, type WorkspaceNodeData } from "@/store/canvas";
 import { WS_URL } from "@/store/socket";
 import { type ChatMessage, createMessage } from "./chat/types";
 import { extractResponseText } from "./chat/message-parser";
+import { AgentCommsPanel } from "./chat/AgentCommsPanel";
 
 interface Props {
   workspaceId: string;
   data: WorkspaceNodeData;
 }
 
+type ChatSubTab = "my-chat" | "agent-comms";
+
 /**
  * Load chat history from the activity_logs database via the platform API.
- * Each a2a_receive entry has the user message (request_body) and agent response (response_body).
+ * Uses source=canvas to only get user-initiated messages (not agent-to-agent).
  */
 async function loadMessagesFromDB(workspaceId: string): Promise<ChatMessage[]> {
   try {
@@ -26,7 +29,7 @@ async function loadMessagesFromDB(workspaceId: string): Promise<ChatMessage[]> {
       created_at: string;
       request_body: Record<string, unknown> | null;
       response_body: Record<string, unknown> | null;
-    }>>(`/workspaces/${workspaceId}/activity?type=a2a_receive&limit=50`);
+    }>>(`/workspaces/${workspaceId}/activity?type=a2a_receive&source=canvas&limit=50`);
 
     const messages: ChatMessage[] = [];
     // Activities are newest-first, reverse for chronological order
@@ -55,7 +58,53 @@ async function loadMessagesFromDB(workspaceId: string): Promise<ChatMessage[]> {
   }
 }
 
+/**
+ * ChatTab container — renders sub-tab bar + My Chat or Agent Comms panel.
+ */
 export function ChatTab({ workspaceId, data }: Props) {
+  const [subTab, setSubTab] = useState<ChatSubTab>("my-chat");
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Sub-tab bar */}
+      <div className="flex border-b border-zinc-800/40 bg-zinc-900/30 px-2 shrink-0">
+        <button
+          onClick={() => setSubTab("my-chat")}
+          className={`px-3 py-1.5 text-[10px] font-medium transition-colors ${
+            subTab === "my-chat"
+              ? "text-zinc-200 border-b-2 border-blue-500"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          My Chat
+        </button>
+        <button
+          onClick={() => setSubTab("agent-comms")}
+          className={`px-3 py-1.5 text-[10px] font-medium transition-colors ${
+            subTab === "agent-comms"
+              ? "text-zinc-200 border-b-2 border-blue-500"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          Agent Comms
+        </button>
+      </div>
+      {/* Content */}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {subTab === "my-chat" ? (
+          <MyChatPanel workspaceId={workspaceId} data={data} />
+        ) : (
+          <AgentCommsPanel workspaceId={workspaceId} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * MyChatPanel — user↔agent conversation (extracted from original ChatTab).
+ */
+function MyChatPanel({ workspaceId, data }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(!!data.currentTask);

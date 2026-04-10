@@ -276,17 +276,17 @@ async def main():  # pragma: no cover
                 print("Initial prompt: server not ready after 30s, skipping", flush=True)
                 return
 
-            # Send initial prompt to self in a thread (avoids asyncio/httpx streaming hang).
-            # Then push the response to the canvas via /notify.
+            # Send initial prompt through the platform A2A proxy (not directly to self).
+            # The proxy logs an a2a_receive with source_id=NULL (canvas-style),
+            # broadcasts A2A_RESPONSE via WebSocket so the chat shows both the
+            # prompt (as user message) and the response (as agent message).
+            # Uses urllib in a thread to avoid asyncio/httpx streaming hangs.
             import json as _json
             import urllib.request
-            import urllib.error
 
             def _do_send_sync():
                 try:
                     payload = _json.dumps({
-                        "jsonrpc": "2.0",
-                        "id": f"initial-prompt-{_uuid.uuid4().hex[:8]}",
                         "method": "message/send",
                         "params": {
                             "message": {
@@ -298,44 +298,13 @@ async def main():  # pragma: no cover
                     }).encode()
 
                     req = urllib.request.Request(
-                        f"http://127.0.0.1:{port}/",
+                        f"{platform_url}/workspaces/{workspace_id}/a2a",
                         data=payload,
                         headers={"Content-Type": "application/json"},
                     )
                     with urllib.request.urlopen(req, timeout=600) as resp:
-                        body = _json.loads(resp.read())
+                        resp.read()  # consume body
                     print(f"Initial prompt: completed (status={resp.status})", flush=True)
-
-                    # Extract response text from A2A JSON-RPC result
-                    reply_text = ""
-                    result = body.get("result", {})
-                    # Direct parts (result.parts[].text)
-                    for part in result.get("parts", []):
-                        if part.get("kind") == "text" and part.get("text"):
-                            reply_text = part["text"]
-                            break
-                    # Fallback: artifacts[].parts[].text
-                    if not reply_text:
-                        for artifact in result.get("artifacts", []):
-                            for part in artifact.get("parts", []):
-                                if part.get("kind") == "text" and part.get("text"):
-                                    reply_text = part["text"]
-                                    break
-                            if reply_text:
-                                break
-
-                    # Push to canvas chat
-                    if reply_text:
-                        try:
-                            notify_req = urllib.request.Request(
-                                f"{platform_url}/workspaces/{workspace_id}/notify",
-                                data=_json.dumps({"message": reply_text}).encode(),
-                                headers={"Content-Type": "application/json"},
-                            )
-                            urllib.request.urlopen(notify_req, timeout=10)
-                            print("Initial prompt: pushed to canvas chat", flush=True)
-                        except Exception as ne:
-                            print(f"Initial prompt: notify failed — {ne}", flush=True)
 
                 except Exception as e:
                     print(f"Initial prompt: failed — {e}", flush=True)
