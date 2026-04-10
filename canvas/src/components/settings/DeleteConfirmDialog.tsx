@@ -28,10 +28,14 @@ export function DeleteConfirmDialog({ workspaceId }: DeleteConfirmDialogProps) {
 
   const deleteSecret = useSecretsStore((s) => s.deleteSecret);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const abortRef = useRef<AbortController | null>(null);
 
-  // Clean up timer on unmount
+  // Clean up timer + abort fetch on unmount
   useEffect(() => {
-    return () => clearTimeout(confirmTimerRef.current);
+    return () => {
+      clearTimeout(confirmTimerRef.current);
+      abortRef.current?.abort();
+    };
   }, []);
 
   // Listen for delete requests from SecretRow
@@ -43,12 +47,15 @@ export function DeleteConfirmDialog({ workspaceId }: DeleteConfirmDialogProps) {
       setDeleteError(null);
       setDependents([]);
 
-      // Fetch dependents
+      // Fetch dependents (cancel previous if any)
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       setIsLoadingDependents(true);
       fetchDependents(workspaceId, name)
-        .then(setDependents)
-        .catch(() => setDependents([]))
-        .finally(() => setIsLoadingDependents(false));
+        .then((deps) => { if (!controller.signal.aborted) setDependents(deps); })
+        .catch(() => { if (!controller.signal.aborted) setDependents([]); })
+        .finally(() => { if (!controller.signal.aborted) setIsLoadingDependents(false); });
 
       // Enable confirm after 1s delay
       clearTimeout(confirmTimerRef.current);
