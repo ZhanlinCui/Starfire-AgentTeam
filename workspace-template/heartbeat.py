@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL = 30  # seconds
 MAX_CONSECUTIVE_FAILURES = 10
 MAX_SEEN_DELEGATION_IDS = 200
+SELF_MESSAGE_COOLDOWN = 60  # seconds — minimum between self-messages to prevent loops
 # Shared path — also used by cli_executor._read_delegation_results()
 DELEGATION_RESULTS_FILE = os.environ.get("DELEGATION_RESULTS_FILE", "/tmp/delegation_results.jsonl")
 
@@ -40,7 +41,6 @@ class HeartbeatLoop:
         self._consecutive_failures = 0
         self._seen_delegation_ids: set[str] = set()
         self._last_self_message_time = 0.0
-        self._self_message_cooldown = 300  # 5 minutes between self-messages
 
     @property
     def error_rate(self) -> float:
@@ -194,7 +194,7 @@ class HeartbeatLoop:
                 # Minimum 60s between self-messages to avoid spam, but always send
                 # when there are genuinely NEW results to process.
                 now = time.time()
-                if now - self._last_self_message_time < 60:
+                if now - self._last_self_message_time < SELF_MESSAGE_COOLDOWN:
                     logger.debug("Heartbeat: self-message cooldown (60s), will retry next cycle")
                 else:
                     self._last_self_message_time = now
