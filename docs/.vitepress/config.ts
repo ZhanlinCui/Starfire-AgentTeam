@@ -86,6 +86,7 @@ export default defineConfig({
         collapsed: true,
         items: [
           { text: "Product Narrative", link: "/product/starfire-product-doc" },
+          { text: "Landing Messaging Report", link: "/product/landing-messaging-report" },
           { text: "PRD", link: "/product/PRD" },
           { text: "SaaS Upgrade Path", link: "/product/saas-upgrade" },
         ],

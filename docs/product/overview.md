@@ -69,6 +69,7 @@ This separation is one of the reasons Starfire scales better than “just add an
 ## Related Docs
 
 - [Product Narrative](./starfire-product-doc.md)
+- [Landing Messaging Report](./landing-messaging-report.md)
 - [Quickstart](../quickstart.md)
 - [System Architecture](../architecture/architecture.md)
 - [Comprehensive Technical Documentation](../architecture/starfire-technical-doc.md)
