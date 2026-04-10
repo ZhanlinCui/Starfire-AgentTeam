@@ -102,92 +102,67 @@ async def tool_delegate_task(workspace_id: str, task: str) -> str:
 
 
 async def tool_delegate_task_async(workspace_id: str, task: str) -> str:
-    """Send a task to another workspace with a short timeout (fire-and-forget)."""
+    """Delegate a task via the platform's async delegation API (fire-and-forget).
+
+    Uses POST /workspaces/:id/delegate which runs the A2A request in the background.
+    Results are tracked in the platform DB and broadcast via WebSocket.
+    Use check_task_status to poll for results.
+    """
     if not workspace_id or not task:
         return "Error: workspace_id and task are required"
 
-    peer = await discover_peer(workspace_id)
-    if not peer:
-        return f"Error: workspace {workspace_id} not found or not accessible"
-
-    target_url = peer.get("url", "")
-    if not target_url:
-        return f"Error: workspace {workspace_id} has no URL (may be offline)"
-
-    # Send with short timeout — just confirm receipt
-    task_id = str(uuid.uuid4())
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            await client.post(
-                target_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": task_id,
-                    "method": "message/send",
-                    "params": {
-                        "message": {
-                            "role": "user",
-                            "messageId": str(uuid.uuid4()),
-                            "parts": [{"kind": "text", "text": task}],
-                        }
-                    },
-                },
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/delegate",
+                json={"target_id": workspace_id, "task": task},
             )
-            return json.dumps({
-                "task_id": task_id,
-                "workspace_id": workspace_id,
-                "status": "submitted",
-                "note": "Task submitted. Use check_task_status to poll for results.",
-            })
-        except httpx.TimeoutException:
-            return json.dumps({
-                "task_id": task_id,
-                "workspace_id": workspace_id,
-                "status": "submitted_timeout",
-                "note": "Task sent but confirmation timed out. The target may still be processing. Check status later.",
-            })
+            if resp.status_code == 202:
+                data = resp.json()
+                return json.dumps({
+                    "delegation_id": data.get("delegation_id", ""),
+                    "workspace_id": workspace_id,
+                    "status": "delegated",
+                    "note": "Task delegated. The platform runs it in the background. Use check_task_status to poll for results.",
+                })
+            else:
+                return f"Error: delegation failed with status {resp.status_code}: {resp.text[:200]}"
+    except Exception as e:
+        return f"Error: delegation failed — {e}"
 
 
 async def tool_check_task_status(workspace_id: str, task_id: str) -> str:
-    """Check the status of a previously submitted async task via tasks/get."""
-    if not workspace_id or not task_id:
-        return "Error: workspace_id and task_id are required"
+    """Check delegations for this workspace via the platform API.
 
-    peer = await discover_peer(workspace_id)
-    if not peer:
-        return f"Error: workspace {workspace_id} not found"
-
-    target_url = peer.get("url", "")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.post(
-                target_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": str(uuid.uuid4()),
-                    "method": "tasks/get",
-                    "params": {"id": task_id},
-                },
-            )
-            data = resp.json()
-            if "result" in data:
-                task_data = data["result"]
-                status = task_data.get("status", {}).get("state", "unknown")
-                result_text = ""
-                if status == "completed":
-                    for artifact in task_data.get("artifacts", []):
-                        for part in artifact.get("parts", []):
-                            if part.get("text"):
-                                result_text += part["text"] + "\n"
-                return json.dumps({
-                    "task_id": task_id,
-                    "status": status,
-                    "result": result_text.strip() if result_text else None,
+    Args:
+        workspace_id: Ignored (kept for backward compat). Checks this workspace's delegations.
+        task_id: Optional delegation_id to filter. If empty, returns all recent delegations.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/delegations")
+            if resp.status_code != 200:
+                return f"Error: failed to check delegations ({resp.status_code})"
+            delegations = resp.json()
+            if task_id:
+                # Filter by delegation_id
+                matching = [d for d in delegations if d.get("delegation_id") == task_id]
+                if matching:
+                    return json.dumps(matching[0])
+                return json.dumps({"status": "not_found", "delegation_id": task_id})
+            # Return all recent delegations
+            summary = []
+            for d in delegations[:10]:
+                summary.append({
+                    "delegation_id": d.get("delegation_id", ""),
+                    "target_id": d.get("target_id", ""),
+                    "status": d.get("status", ""),
+                    "summary": d.get("summary", ""),
+                    "response_preview": d.get("response_preview", ""),
                 })
-            elif "error" in data:
-                return f"Error: {data['error'].get('message', 'unknown')}"
-        except Exception as e:
-            return f"Error checking status: {e}"
+            return json.dumps({"delegations": summary, "count": len(delegations)})
+    except Exception as e:
+        return f"Error checking delegations: {e}"
 
 
 async def tool_send_message_to_user(message: str) -> str:
