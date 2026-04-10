@@ -50,6 +50,8 @@ venv/
 # Test / coverage
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
 
 # Databases (local dev)
 *.db
