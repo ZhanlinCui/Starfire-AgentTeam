@@ -187,9 +187,13 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 | DELETE | /workspaces/:id/memory/:key | workspace.go |
 | POST/PATCH/DELETE | /workspaces/:id/agent | agent.go |
 | POST | /workspaces/:id/agent/move | agent.go |
-| GET/POST | /workspaces/:id/secrets | secrets.go (POST auto-restarts workspace) |
+| GET/POST/PUT | /workspaces/:id/secrets | secrets.go (POST/PUT auto-restarts workspace) |
 | DELETE | /workspaces/:id/secrets/:key | secrets.go (DELETE auto-restarts workspace) |
 | GET | /workspaces/:id/model | secrets.go |
+| GET | /settings/secrets | secrets.go — list global secrets (keys only, values masked) |
+| PUT/POST | /settings/secrets | secrets.go — set a global secret {key, value} |
+| DELETE | /settings/secrets/:key | secrets.go — delete a global secret |
+| GET/POST/DELETE | /admin/secrets[/:key] | secrets.go — legacy aliases for /settings/secrets |
 | WS | /workspaces/:id/terminal | terminal.go |
 | POST | /workspaces/:id/expand | team.go |
 | POST | /workspaces/:id/collapse | team.go |
