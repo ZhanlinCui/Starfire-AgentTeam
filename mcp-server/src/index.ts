@@ -396,6 +396,23 @@ export async function handleImportOrg(params: { dir: string }) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+// === ASYNC DELEGATION ===
+
+export async function handleAsyncDelegate(params: {
+  workspace_id: string;
+  target_id: string;
+  task: string;
+}) {
+  const { workspace_id, target_id, task } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/delegate`, { target_id, task });
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleCheckDelegations(params: { workspace_id: string }) {
+  const data = await apiCall("GET", `/workspaces/${params.workspace_id}/delegations`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
 // ============================================================
 // MCP Server registration
 // ============================================================
@@ -841,6 +858,26 @@ export function createServer() {
     "Import an org template to create an entire workspace hierarchy",
     { dir: z.string().describe("Org template directory name (e.g., 'starfire-dev')") },
     handleImportOrg
+  );
+
+  // === ASYNC DELEGATION ===
+
+  srv.tool(
+    "async_delegate",
+    "Delegate a task to another workspace (non-blocking). Returns immediately with a delegation_id. The target workspace processes the task in the background. Use check_delegations to poll for results.",
+    {
+      workspace_id: z.string().describe("Source workspace ID (the delegator)"),
+      target_id: z.string().describe("Target workspace ID to delegate to"),
+      task: z.string().describe("Task description to send"),
+    },
+    handleAsyncDelegate
+  );
+
+  srv.tool(
+    "check_delegations",
+    "Check status of delegated tasks for a workspace. Returns recent delegations with their status (pending/completed/failed) and results.",
+    { workspace_id: z.string().describe("Workspace ID") },
+    handleCheckDelegations
   );
 
   return srv;
