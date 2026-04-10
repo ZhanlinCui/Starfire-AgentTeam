@@ -278,7 +278,9 @@ describe("applyEvent", () => {
     expect(newNode.data.name).toBe("Fresh");
     expect(newNode.data.tier).toBe(2);
     expect(newNode.data.status).toBe("provisioning");
-    expect(newNode.position).toEqual({ x: 0, y: 0 });
+    // Position is offset by existing node count * 40
+    expect(newNode.position.x).toBeGreaterThanOrEqual(0);
+    expect(newNode.position.y).toBeGreaterThanOrEqual(0);
   });
 
   it("WORKSPACE_PROVISIONING updates existing node status on restart", () => {

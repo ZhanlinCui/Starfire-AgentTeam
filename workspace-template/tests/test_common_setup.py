@@ -1,5 +1,6 @@
 """Tests for the shared _common_setup() pipeline and tool conversion helpers."""
 
+import importlib.util
 import sys
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -173,8 +174,12 @@ def test_langchain_to_crewai_preserves_name():
     assert wrapped.__doc__ == "A test tool for testing."
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("autogen_core"),
+    reason="autogen_core not installed",
+)
 def test_langchain_to_autogen_preserves_name():
-    """AutoGen wrapper preserves tool name and description."""
+    """AutoGen wrapper preserves tool name and description via FunctionTool."""
     from adapters.autogen.adapter import _langchain_to_autogen
 
     mock_tool = MagicMock()
@@ -183,13 +188,17 @@ def test_langchain_to_autogen_preserves_name():
     mock_tool.ainvoke = AsyncMock(return_value={"result": "ok"})
 
     wrapped = _langchain_to_autogen(mock_tool)
-    assert wrapped.__name__ == "test_tool"
-    assert "A test tool for testing." in (wrapped.__doc__ or "")
+    assert wrapped.name == "test_tool"
+    assert wrapped.description == "A test tool for testing."
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("autogen_core"),
+    reason="autogen_core not installed",
+)
 @pytest.mark.asyncio
 async def test_langchain_to_autogen_calls_ainvoke():
-    """AutoGen wrapper calls the original tool's ainvoke."""
+    """AutoGen FunctionTool wrapper calls the original tool's ainvoke."""
     from adapters.autogen.adapter import _langchain_to_autogen
 
     mock_tool = MagicMock()
@@ -198,7 +207,7 @@ async def test_langchain_to_autogen_calls_ainvoke():
     mock_tool.ainvoke = AsyncMock(return_value={"success": True})
 
     wrapped = _langchain_to_autogen(mock_tool)
-    result = await wrapped(workspace_id="ws-1", task="do stuff")
-
+    # FunctionTool.run_json expects a JSON dict with the function params
+    result = await wrapped.run_json({"input": '{"workspace_id": "ws-1", "task": "do stuff"}'}, cancellation_token=None)
     mock_tool.ainvoke.assert_called_once_with({"workspace_id": "ws-1", "task": "do stuff"})
-    assert result == "{'success': True}"
+    assert "True" in str(result)

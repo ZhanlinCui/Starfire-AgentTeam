@@ -575,12 +575,12 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
     def __del__(self):  # pragma: no cover
         """Clean up temp files (fallback — prefer atexit-registered _cleanup_temp_files)."""
-        for f in self._temp_files:
+        for f in getattr(self, "_temp_files", []):
             try:
                 os.unlink(f)
             except OSError:
                 pass
-        if self._auth_helper_path:
+        if getattr(self, "_auth_helper_path", None):
             try:
                 os.unlink(self._auth_helper_path)
             except OSError:

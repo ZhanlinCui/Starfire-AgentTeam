@@ -51,11 +51,12 @@ describe('secrets API client', () => {
   });
 
   describe('listSecrets', () => {
-    it('sends GET to /workspaces/{id}/secrets', async () => {
-      const secrets = [
-        { name: 'KEY', masked_value: '••••', group: 'github', status: 'unverified', updated_at: '' },
+    it('sends GET to /workspaces/{id}/secrets and transforms response', async () => {
+      // Platform returns flat array with { key, scope, has_value }
+      const platformResponse = [
+        { key: 'GITHUB_TOKEN', scope: 'workspace', has_value: true, updated_at: '2026-01-01' },
       ];
-      global.fetch = mockFetch({ secrets });
+      global.fetch = mockFetch(platformResponse);
 
       const result = await listSecrets(WS_ID);
 
@@ -67,7 +68,30 @@ describe('secrets API client', () => {
           }),
         }),
       );
-      expect(result).toEqual(secrets);
+      expect(result).toEqual([
+        {
+          name: 'GITHUB_TOKEN',
+          masked_value: '••••••••',
+          group: 'github',
+          status: 'unverified',
+          updated_at: '2026-01-01',
+        },
+      ]);
+    });
+
+    it('returns empty array for non-array response', async () => {
+      global.fetch = mockFetch({ unexpected: 'data' });
+      const result = await listSecrets(WS_ID);
+      expect(result).toEqual([]);
+    });
+
+    it('routes global workspaceId to /settings/secrets', async () => {
+      global.fetch = mockFetch([]);
+      await listSecrets('global');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://localhost:8080/settings/secrets',
+        expect.anything(),
+      );
     });
 
     it('throws ApiError on non-OK response', async () => {
@@ -79,54 +103,58 @@ describe('secrets API client', () => {
   });
 
   describe('createSecret', () => {
-    it('sends POST with name and value', async () => {
-      const created = { name: 'KEY', masked_value: '••••', group: 'custom', status: 'unverified', updated_at: '' };
-      global.fetch = mockFetch(created);
+    it('sends PUT with key and value', async () => {
+      global.fetch = mockFetch({});
 
-      const result = await createSecret(WS_ID, 'KEY', 'mysecretval');
+      const result = await createSecret(WS_ID, 'MY_KEY', 'mysecretval');
 
       expect(global.fetch).toHaveBeenCalledWith(
         `http://localhost:8080/workspaces/${WS_ID}/secrets`,
         expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ name: 'KEY', value: 'mysecretval' }),
+          method: 'PUT',
+          body: JSON.stringify({ key: 'MY_KEY', value: 'mysecretval' }),
         }),
       );
-      expect(result).toEqual(created);
+      expect(result.name).toBe('MY_KEY');
+      expect(result.masked_value).toBe('••••••••');
+      expect(result.status).toBe('unverified');
     });
   });
 
   describe('updateSecret', () => {
-    it('sends PUT to /workspaces/{id}/secrets/{name}', async () => {
-      const updated = { name: 'KEY', masked_value: '••••new', group: 'custom', status: 'unverified', updated_at: '' };
-      global.fetch = mockFetch(updated);
-
-      const result = await updateSecret(WS_ID, 'KEY', 'newval');
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        `http://localhost:8080/workspaces/${WS_ID}/secrets/KEY`,
-        expect.objectContaining({
-          method: 'PUT',
-          body: JSON.stringify({ value: 'newval' }),
-        }),
-      );
-      expect(result).toEqual(updated);
-    });
-
-    it('encodes special characters in secret name', async () => {
+    it('sends PUT to base secrets URL with key and value', async () => {
       global.fetch = mockFetch({});
 
-      await updateSecret(WS_ID, 'MY KEY/SPECIAL', 'val');
+      const result = await updateSecret(WS_ID, 'MY_KEY', 'newval');
 
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining(encodeURIComponent('MY KEY/SPECIAL')),
-        expect.anything(),
+        `http://localhost:8080/workspaces/${WS_ID}/secrets`,
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ key: 'MY_KEY', value: 'newval' }),
+        }),
       );
+      expect(result.name).toBe('MY_KEY');
+      expect(result.status).toBe('unverified');
+    });
+
+    it('handles special characters in key names', async () => {
+      global.fetch = mockFetch({});
+
+      const result = await updateSecret(WS_ID, 'MY KEY/SPECIAL', 'val');
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        `http://localhost:8080/workspaces/${WS_ID}/secrets`,
+        expect.objectContaining({
+          body: JSON.stringify({ key: 'MY KEY/SPECIAL', value: 'val' }),
+        }),
+      );
+      expect(result.name).toBe('MY KEY/SPECIAL');
     });
   });
 
   describe('deleteSecret', () => {
-    it('sends DELETE and handles 204', async () => {
+    it('sends DELETE with encoded name and handles 204', async () => {
       global.fetch = mockFetch204();
 
       await expect(deleteSecret(WS_ID, 'KEY')).resolves.toBeUndefined();

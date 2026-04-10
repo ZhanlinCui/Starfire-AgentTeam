@@ -120,11 +120,13 @@ export function handleCanvasEvent(
         });
 
         // Pan the canvas to the new node
-        window.dispatchEvent(
-          new CustomEvent("starfire:pan-to-node", {
-            detail: { nodeId: msg.workspace_id },
-          })
-        );
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("starfire:pan-to-node", {
+              detail: { nodeId: msg.workspace_id },
+            })
+          );
+        }
       }
       break;
     }
