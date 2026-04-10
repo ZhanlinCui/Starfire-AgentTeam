@@ -185,6 +185,25 @@ export function handleCanvasEvent(
       break;
     }
 
+    case "WORKSPACE_PROVISION_FAILED": {
+      const errorMsg = (msg.payload.error as string) ?? "Unknown provisioning error";
+      set({
+        nodes: nodes.map((n) =>
+          n.id === msg.workspace_id
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  status: "failed",
+                  lastSampleError: errorMsg,
+                },
+              }
+            : n
+        ),
+      });
+      break;
+    }
+
     case "A2A_RESPONSE": {
       // A2A proxy completed — extract response text and store as agent message.
       // This gives the ChatTab instant response delivery via WebSocket instead of polling.
