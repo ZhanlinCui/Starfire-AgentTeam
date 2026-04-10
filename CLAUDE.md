@@ -228,7 +228,7 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 
 ## Database
 
-13 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
+14 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
 
