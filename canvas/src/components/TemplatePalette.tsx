@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
+import { checkDeploySecrets, type PreflightResult } from "@/lib/deploy-preflight";
+import { MissingKeysModal } from "./MissingKeysModal";
 
 interface Template {
   id: string;
@@ -94,6 +96,12 @@ export function TemplatePalette() {
   const [creating, setCreating] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Missing keys modal state
+  const [missingKeysInfo, setMissingKeysInfo] = useState<{
+    template: Template;
+    preflight: PreflightResult;
+  } | null>(null);
+
   const loadTemplates = useCallback(async () => {
     setLoading(true);
     try {
@@ -110,7 +118,21 @@ export function TemplatePalette() {
     if (open) loadTemplates();
   }, [open, loadTemplates]);
 
-  const handleDeploy = async (template: Template) => {
+  /** Resolve runtime from template ID (e.g., "langgraph", "claude-code-default" → "claude-code") */
+  const resolveRuntime = (templateId: string): string => {
+    const runtimeMap: Record<string, string> = {
+      langgraph: "langgraph",
+      "claude-code-default": "claude-code",
+      openclaw: "openclaw",
+      deepagents: "deepagents",
+      crewai: "crewai",
+      autogen: "autogen",
+    };
+    return runtimeMap[templateId] ?? templateId.replace(/-default$/, "");
+  };
+
+  /** Actually execute the deploy API call */
+  const executeDeploy = useCallback(async (template: Template) => {
     setCreating(template.id);
     setError(null);
     try {
@@ -128,6 +150,25 @@ export function TemplatePalette() {
       setError(e instanceof Error ? e.message : "Failed to deploy");
       setCreating(null);
     }
+  }, []);
+
+  /** Pre-deploy check: validate secrets before deploying */
+  const handleDeploy = async (template: Template) => {
+    setCreating(template.id);
+    setError(null);
+
+    const runtime = resolveRuntime(template.id);
+    const preflight = await checkDeploySecrets(runtime);
+
+    if (!preflight.ok) {
+      // Missing keys — show the modal instead of deploying
+      setMissingKeysInfo({ template, preflight });
+      setCreating(null);
+      return;
+    }
+
+    // All keys present — deploy directly
+    await executeDeploy(template);
   };
 
   return (
@@ -149,6 +190,21 @@ export function TemplatePalette() {
           <rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5" />
         </svg>
       </button>
+
+      {/* Missing Keys Modal */}
+      <MissingKeysModal
+        open={!!missingKeysInfo}
+        missingKeys={missingKeysInfo?.preflight.missingKeys ?? []}
+        runtime={missingKeysInfo?.preflight.runtime ?? ""}
+        onKeysAdded={() => {
+          if (missingKeysInfo) {
+            const template = missingKeysInfo.template;
+            setMissingKeysInfo(null);
+            executeDeploy(template);
+          }
+        }}
+        onCancel={() => setMissingKeysInfo(null)}
+      />
 
       {/* Sidebar */}
       {open && (

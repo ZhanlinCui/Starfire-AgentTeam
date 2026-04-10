@@ -31,6 +31,7 @@ import { Toolbar } from "./Toolbar";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TopBar } from "./canvas/TopBar";
 import { SettingsPanel, DeleteConfirmDialog } from "./settings";
+import { ProvisioningTimeout } from "./ProvisioningTimeout";
 
 const nodeTypes = {
   workspaceNode: WorkspaceNode,
@@ -269,6 +270,7 @@ function CanvasInner() {
       <ContextMenu />
       <SearchDialog />
       <Toaster />
+      <ProvisioningTimeout />
       {!selectedNodeId && <CreateWorkspaceButton />}
 
       {/* Confirmation dialog for structure changes */}
