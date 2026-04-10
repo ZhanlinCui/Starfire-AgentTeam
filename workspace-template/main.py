@@ -20,6 +20,8 @@ from config import load_config
 from heartbeat import HeartbeatLoop
 from preflight import run_preflight, render_preflight_report
 from tools.awareness_client import get_awareness_config
+import uuid as _uuid
+
 from tools.telemetry import setup_telemetry, make_trace_middleware
 from policies.namespaces import resolve_awareness_namespace
 
@@ -245,9 +247,70 @@ async def main():  # pragma: no cover
         log_level="info",
     )
     server = uvicorn.Server(server_config)
+
+    # 10b. Schedule initial_prompt self-message after server is ready.
+    # Only runs on first boot — creates a marker file to prevent re-execution on restart.
+    initial_prompt_task = None
+    initial_prompt_marker = os.path.join(config_path, ".initial_prompt_done")
+    if config.initial_prompt and not os.path.exists(initial_prompt_marker):
+        async def _send_initial_prompt():
+            """Wait for server to be ready, then send initial_prompt as self-message."""
+            # Wait for the A2A server to accept connections
+            ready = False
+            for attempt in range(30):
+                await asyncio.sleep(1)
+                try:
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        resp = await client.get(f"http://127.0.0.1:{port}/.well-known/agent.json")
+                        if resp.status_code == 200:
+                            ready = True
+                            break
+                except Exception:
+                    continue
+
+            if not ready:
+                print("Initial prompt: server not ready after 30s, skipping")
+                return
+
+            # Send initial prompt as A2A message/send to self
+            try:
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    print("Initial prompt: sending to self...")
+                    resp = await client.post(
+                        f"http://127.0.0.1:{port}/",
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": f"initial-prompt-{_uuid.uuid4().hex[:8]}",
+                            "method": "message/send",
+                            "params": {
+                                "message": {
+                                    "role": "user",
+                                    "messageId": f"initial-{_uuid.uuid4().hex[:8]}",
+                                    "parts": [{"kind": "text", "text": config.initial_prompt}],
+                                },
+                            },
+                        },
+                    )
+                    print(f"Initial prompt: completed (status={resp.status_code})")
+                    # Write marker so restarts don't re-execute
+                    try:
+                        with open(initial_prompt_marker, "w") as f:
+                            f.write("done")
+                    except OSError:
+                        pass
+            except asyncio.CancelledError:
+                print("Initial prompt: cancelled (server shutting down)")
+            except Exception as e:
+                print(f"Initial prompt: failed — {e}")
+
+        initial_prompt_task = asyncio.create_task(_send_initial_prompt())
+
     try:
         await server.serve()
     finally:
+        # Cancel initial prompt if still running
+        if initial_prompt_task and not initial_prompt_task.done():
+            initial_prompt_task.cancel()
         # Gracefully stop the Temporal worker background task on shutdown
         await temporal_wrapper.stop()
 

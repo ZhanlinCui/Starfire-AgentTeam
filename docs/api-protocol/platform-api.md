@@ -38,7 +38,7 @@ The platform uses the caller identity to enforce hierarchy-based access rules.
 | `GET` | `/workspaces/:id` | Get one workspace |
 | `PATCH` | `/workspaces/:id` | Update name, role, tier, runtime, workspace_dir, parent, etc. |
 | `DELETE` | `/workspaces/:id` | Remove workspace |
-| `POST` | `/workspaces/:id/restart` | Restart workspace |
+| `POST` | `/workspaces/:id/restart` | Restart workspace (reads runtime from container config.yaml before stop — detects runtime changes) |
 | `POST` | `/workspaces/:id/pause` | Pause workspace |
 | `POST` | `/workspaces/:id/resume` | Resume workspace |
 | `POST` | `/workspaces/:id/a2a` | Proxy A2A request to the target workspace (synchronous) |

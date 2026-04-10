@@ -9,6 +9,17 @@ defaults:
   # workspace_dir: not set by default — each agent gets an isolated Docker volume
   # Set per-workspace to bind-mount a host directory as /workspace
 
+  # initial_prompt runs once on first boot (not on restart).
+  # ${GITHUB_TOKEN} and ${GITHUB_REPO} are container env vars from .env secrets.
+  # IMPORTANT: Do NOT send A2A messages in initial_prompt — other agents may not
+  # be ready yet. Keep it local: clone, read, memorize. Wait for tasks.
+  initial_prompt: |
+    You just started. Set up your environment silently — do NOT contact other agents yet.
+    1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+    2. Read /workspace/repo/CLAUDE.md to understand the project
+    3. Read your system prompt at /configs/system-prompt.md to understand your role
+    4. You are now ready. Wait for tasks from your parent — do not initiate contact.
+
 workspaces:
   - name: PM
     role: Project Manager — coordinates Research and Dev teams
@@ -17,11 +28,27 @@ workspaces:
     files_dir: pm
     workspace_dir: /Users/hongming/Documents/GitHub/Starfire-AgentTeam
     canvas: { x: 400, y: 50 }
+    initial_prompt: |
+      You just started as PM. Set up silently — do NOT contact agents yet.
+      1. The repo is already mounted at /workspace — no need to clone
+      2. Read /workspace/CLAUDE.md to understand the project
+      3. Read your system prompt at /configs/system-prompt.md
+      4. Run: git log --oneline -5 in /workspace to see recent changes
+      5. Use commit_memory to save a brief summary of recent changes
+      6. You are now ready. Wait for the CEO to give you tasks.
     children:
       - name: Research Lead
         role: Market analysis and technical research
         files_dir: research-lead
         canvas: { x: 200, y: 250 }
+        initial_prompt: |
+          You just started as Research Lead. Set up silently — do NOT contact other agents.
+          1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+          2. Read /workspace/repo/CLAUDE.md
+          3. Read /configs/system-prompt.md
+          4. Read /workspace/repo/docs/product/overview.md to understand the product
+          5. Use commit_memory to save key product facts for later recall
+          6. Wait for tasks from PM.
         children:
           - name: Market Analyst
             role: Market sizing, trends, user research
@@ -39,34 +66,95 @@ workspaces:
         model: opus
         files_dir: dev-lead
         canvas: { x: 650, y: 250 }
+        initial_prompt: |
+          You just started as Dev Lead. Set up silently — do NOT contact other agents.
+          1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+          2. Read /workspace/repo/CLAUDE.md — full architecture, build commands, test commands
+          3. Read /configs/system-prompt.md
+          4. Run: cd /workspace/repo && git log --oneline -5
+          5. Use commit_memory to save the architecture summary and recent changes
+          6. Wait for tasks from PM.
         children:
           - name: Frontend Engineer
             role: Next.js canvas, React Flow, Zustand
             tier: 3
             model: opus
             files_dir: frontend-engineer
+            initial_prompt: |
+              You just started as Frontend Engineer. Set up silently — do NOT contact other agents.
+              1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+              2. Read /workspace/repo/CLAUDE.md — focus on Canvas section
+              3. Read /configs/system-prompt.md
+              4. Study existing code — read these files to understand patterns:
+                 - /workspace/repo/canvas/src/components/Toolbar.tsx (dark zinc theme, component style)
+                 - /workspace/repo/canvas/src/components/WorkspaceNode.tsx (node rendering)
+                 - /workspace/repo/canvas/src/store/canvas.ts (Zustand store patterns)
+              5. Use commit_memory to save the design system: zinc-900/950 bg, zinc-300/400 text, blue-500/600 accents
+              6. Wait for tasks from Dev Lead.
           - name: Backend Engineer
             role: Go platform, Postgres, Redis, A2A
             tier: 3
             model: opus
             files_dir: backend-engineer
+            initial_prompt: |
+              You just started as Backend Engineer. Set up silently — do NOT contact other agents.
+              1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+              2. Read /workspace/repo/CLAUDE.md — focus on Platform section, API routes, database
+              3. Read /configs/system-prompt.md
+              4. Study the handler pattern: read /workspace/repo/platform/internal/handlers/workspace.go
+              5. Use commit_memory to save the API route table and key patterns
+              6. Wait for tasks from Dev Lead.
           - name: DevOps Engineer
             role: CI/CD, Docker, infrastructure
             tier: 3
             model: opus
             files_dir: devops-engineer
+            initial_prompt: |
+              You just started as DevOps Engineer. Set up silently — do NOT contact other agents.
+              1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+              2. Read /workspace/repo/CLAUDE.md — focus on Infrastructure, Docker, CI sections
+              3. Read /configs/system-prompt.md
+              4. Read /workspace/repo/.github/workflows/ci.yml
+              5. Use commit_memory to save CI pipeline structure
+              6. Wait for tasks from Dev Lead.
           - name: Security Auditor
             role: Security auditing and vulnerability assessment
             tier: 3
             model: opus
             files_dir: security-auditor
+            initial_prompt: |
+              You just started as Security Auditor. Set up silently — do NOT contact other agents.
+              1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+              2. Read /workspace/repo/CLAUDE.md — focus on security, crypto, access control
+              3. Read /configs/system-prompt.md
+              4. Read /workspace/repo/platform/internal/crypto/aes.go
+              5. Use commit_memory to save security patterns and concerns
+              6. Wait for tasks from Dev Lead.
           - name: QA Engineer
             role: Testing, quality assurance, test automation
             tier: 3
             model: opus
             files_dir: qa-engineer
+            initial_prompt: |
+              You just started as QA Engineer. Set up silently — do NOT contact other agents.
+              1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+              2. Read /workspace/repo/CLAUDE.md — focus on ALL test commands and locations
+              3. Read /configs/system-prompt.md — your comprehensive QA requirements are there
+              4. Use commit_memory to save test suite locations and commands
+              5. Wait for tasks from Dev Lead. When asked to test, ALWAYS run tests yourself.
           - name: UIUX Designer
             role: User flow design, visual design review, interaction patterns, accessibility
             tier: 3
             model: opus
             files_dir: uiux-designer
+            initial_prompt: |
+              You just started as UIUX Designer. Set up silently — do NOT contact other agents.
+              1. Clone the repo: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+              2. Read /workspace/repo/CLAUDE.md — focus on Canvas section
+              3. Read /configs/system-prompt.md
+              4. Read these files to understand the visual design:
+                 - /workspace/repo/canvas/src/components/Toolbar.tsx
+                 - /workspace/repo/canvas/src/components/WorkspaceNode.tsx
+                 - /workspace/repo/canvas/src/components/SidePanel.tsx
+              5. Use commit_memory to save: dark zinc theme (zinc-900/950 bg, zinc-300/400 text, blue-500/600 accents, border-zinc-700/800)
+              6. Wait for tasks from Dev Lead.

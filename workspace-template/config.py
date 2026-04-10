@@ -193,6 +193,9 @@ class WorkspaceConfig:
     model: str = "anthropic:claude-sonnet-4-6"
     runtime: str = "langgraph"  # langgraph | claude-code | codex | ollama | custom
     runtime_config: RuntimeConfig = field(default_factory=RuntimeConfig)
+    initial_prompt: str = ""
+    """Auto-sent as the first A2A message after startup. Default empty = no auto-message.
+    Can be an inline string or a file reference (initial_prompt_file in yaml)."""
     skills: list[str] = field(default_factory=list)
     plugins: list[str] = field(default_factory=list)  # installed plugin names
     tools: list[str] = field(default_factory=list)
@@ -238,6 +241,14 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
     security_scan_raw = _ss_raw if isinstance(_ss_raw, dict) else {"mode": str(_ss_raw)}
     compliance_raw = raw.get("compliance", {})
 
+    # Resolve initial_prompt: inline string or file reference
+    initial_prompt = raw.get("initial_prompt", "")
+    initial_prompt_file = raw.get("initial_prompt_file", "")
+    if not initial_prompt and initial_prompt_file:
+        prompt_path = Path(config_path) / initial_prompt_file
+        if prompt_path.exists():
+            initial_prompt = prompt_path.read_text().strip()
+
     return WorkspaceConfig(
         name=raw.get("name", "Workspace"),
         description=raw.get("description", ""),
@@ -245,6 +256,7 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
         tier=int(raw.get("tier", 1)) if str(raw.get("tier", 1)).isdigit() else 1,
         model=model,
         runtime=runtime,
+        initial_prompt=initial_prompt,
         runtime_config=RuntimeConfig(
             command=runtime_raw.get("command", ""),
             args=runtime_raw.get("args", []),

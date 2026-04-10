@@ -47,6 +47,15 @@ tools:
   - browser       # only valid for tier 2+
   - computer      # only valid for tier 3+
 
+# Initial prompt -- auto-sent as first A2A message on startup (first boot only).
+# Runs once, then writes .initial_prompt_done marker to prevent re-execution on restart.
+# Supports inline string or file reference (initial_prompt_file: init.md)
+# IMPORTANT: Do NOT send A2A messages (delegate_task, etc.) in initial_prompt —
+# other agents may not be ready yet. Keep it local: clone, read, commit_memory, wait.
+initial_prompt: |
+  Clone the repo and read CLAUDE.md before doing anything else.
+  Save key facts to commit_memory. Wait for tasks from your parent.
+
 # Memory backend
 memory:
   backend: filesystem   # filesystem | langgraph_store | s3

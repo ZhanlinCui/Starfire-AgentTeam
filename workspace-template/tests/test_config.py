@@ -174,6 +174,58 @@ def test_load_config_env_path(tmp_path, monkeypatch):
     assert cfg.name == "EnvAgent"
 
 
+def test_initial_prompt_inline(tmp_path):
+    """initial_prompt reads inline string from YAML."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.dump({"initial_prompt": "Wake up and clone the repo"}))
+
+    cfg = load_config(str(tmp_path))
+    assert cfg.initial_prompt == "Wake up and clone the repo"
+
+
+def test_initial_prompt_from_file(tmp_path):
+    """initial_prompt_file reads prompt from a file."""
+    prompt_file = tmp_path / "init.md"
+    prompt_file.write_text("Clone repo and read CLAUDE.md")
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.dump({"initial_prompt_file": "init.md"}))
+
+    cfg = load_config(str(tmp_path))
+    assert cfg.initial_prompt == "Clone repo and read CLAUDE.md"
+
+
+def test_initial_prompt_inline_overrides_file(tmp_path):
+    """Inline initial_prompt takes precedence over initial_prompt_file."""
+    prompt_file = tmp_path / "init.md"
+    prompt_file.write_text("From file")
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.dump({
+        "initial_prompt": "From inline",
+        "initial_prompt_file": "init.md",
+    }))
+
+    cfg = load_config(str(tmp_path))
+    assert cfg.initial_prompt == "From inline"
+
+
+def test_initial_prompt_default_empty(tmp_path):
+    """initial_prompt defaults to empty string when not specified."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.dump({}))
+
+    cfg = load_config(str(tmp_path))
+    assert cfg.initial_prompt == ""
+
+
+def test_initial_prompt_file_missing(tmp_path):
+    """initial_prompt_file gracefully handles missing file."""
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.dump({"initial_prompt_file": "nonexistent.md"}))
+
+    cfg = load_config(str(tmp_path))
+    assert cfg.initial_prompt == ""
+
+
 def test_shared_context_default(tmp_path):
     """shared_context defaults to empty list when not specified in YAML."""
     config_yaml = tmp_path / "config.yaml"

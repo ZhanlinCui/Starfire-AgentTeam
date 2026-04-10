@@ -282,9 +282,9 @@ check "Dev peers include QA" "$QA_ID" "$R"
 echo ""
 echo "--- Section 5: Secrets ---"
 
-# List secrets (empty)
+# List secrets (initial state — may have secrets from org import .env)
 R=$(curl -s "$BASE/workspaces/$PM_ID/secrets")
-check "List secrets (empty)" '[]' "$R"
+check "List secrets (responds)" '[' "$R"
 
 # Set a secret
 R=$(curl -s -X POST "$BASE/workspaces/$PM_ID/secrets" -H "Content-Type: application/json" \

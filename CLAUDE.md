@@ -81,9 +81,9 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 
 ### Unit Tests
 ```bash
-cd platform && go test -race ./...               # 365+ Go tests (handlers, registry, provisioner, CLI, delegation — sqlmock + miniredis)
-cd canvas && npm test                            # 203 Vitest tests (store, components, hydration, buildTree)
-cd workspace-template && python -m pytest -v     # 869 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli, delegation)
+cd platform && go test -race ./...               # 370+ Go tests (handlers, registry, provisioner, CLI, delegation, org — sqlmock + miniredis)
+cd canvas && npm test                            # 325 Vitest tests (store, components, hydration, buildTree, secrets API)
+cd workspace-template && python -m pytest -v     # 872 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli, delegation)
 ```
 
 ### Integration Tests
@@ -173,6 +173,11 @@ lib/pq treats `[]byte` as `bytea`, not JSONB.
 - Embedded sub-workspaces: `nestNode` sets `hidden: !!targetId` on child nodes; children render as recursive `TeamMemberChip` components inside parent (up to 3 levels), not as separate canvas nodes. Use `n.data.parentId` (not React Flow's `n.parentId`) for hierarchy lookups.
 - Chat sessions: stored in localStorage per workspace. Conversation history (last 20 messages) sent via `params.metadata.history` in A2A `message/send` requests. Agents reconstruct the full conversation from this metadata.
 - Config save: "Save & Restart" writes config.yaml and auto-restarts the workspace. "Save" writes only (shows restart banner). Secrets POST/DELETE auto-restart on the platform side.
+
+### Initial Prompt
+Agents can auto-execute a prompt on startup before any user interaction. Configure via `initial_prompt` (inline string) or `initial_prompt_file` (path relative to config dir) in `config.yaml`. After the A2A server is ready, `main.py` sends the prompt as a `message/send` to self. A `.initial_prompt_done` marker file prevents re-execution on restart. Org templates support `initial_prompt` on both `defaults` (all agents) and per-workspace (overrides default).
+
+**Important:** Initial prompts must NOT send A2A messages (delegate_task, send_message_to_user) — other agents may not be ready. Keep them local: clone repo, read docs, save to memory, wait for tasks.
 
 ### Workspace Lifecycle
 `provisioning` → `online` (on register) → `degraded` (error_rate > 0.5) → `online` (recovered) → `offline` (Redis TTL expired OR health sweep detects dead container) → auto-restart → `provisioning` → ... → `removed` (deleted). Any state → `paused` (user pauses) → `provisioning` (user resumes). Paused workspaces skip health sweep, liveness monitor, and auto-restart.

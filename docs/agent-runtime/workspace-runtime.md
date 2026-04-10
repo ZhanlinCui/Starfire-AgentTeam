@@ -72,7 +72,7 @@ At a high level, `workspace-template/main.py` does this:
 
 | File | Responsibility |
 |---|---|
-| `main.py` | Entry point, adapter bootstrap, Agent Card registration, heartbeat startup |
+| `main.py` | Entry point, adapter bootstrap, Agent Card registration, heartbeat startup, initial prompt execution |
 | `config.py` | Parses `config.yaml` into the runtime config dataclasses |
 | `adapters/` | Adapter registry and adapter implementations |
 | `a2a_executor.py` | Shared LangGraph execution bridge and current-task reporting |

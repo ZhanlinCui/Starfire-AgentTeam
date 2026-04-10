@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +70,27 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		return
 	}
 
+	// Read runtime from container's config.yaml before stopping
+	// (user may have changed runtime via Config tab before restarting)
+	containerRuntime := dbRuntime
+	if h.provisioner != nil {
+		containerName := configDirName(id) // ws-{id[:12]}
+		if cfgBytes, readErr := h.provisioner.ExecRead(ctx, containerName, "/configs/config.yaml"); readErr == nil {
+			for _, line := range strings.Split(string(cfgBytes), "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "runtime:") {
+					parsed := strings.TrimSpace(strings.TrimPrefix(line, "runtime:"))
+					if parsed != "" && parsed != containerRuntime {
+						log.Printf("Restart: runtime changed in config.yaml %q→%q for %s", containerRuntime, parsed, wsName)
+						containerRuntime = parsed
+						db.DB.ExecContext(ctx, `UPDATE workspaces SET runtime = $1 WHERE id = $2`, containerRuntime, id)
+					}
+					break
+				}
+			}
+		}
+	}
+
 	// Stop existing container if any
 	h.provisioner.Stop(ctx, id)
 
@@ -114,9 +136,8 @@ func (h *WorkspaceHandler) Restart(c *gin.Context) {
 		log.Printf("Restart: using template %s for %s (%s)", templatePath, wsName, id)
 	}
 
-	// Runtime comes from DB — single source of truth, no Docker gymnastics needed
-	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: dbRuntime}
-	log.Printf("Restart: workspace %s (%s) runtime=%q", wsName, id, dbRuntime)
+	payload := models.CreateWorkspacePayload{Name: wsName, Tier: tier, Runtime: containerRuntime}
+	log.Printf("Restart: workspace %s (%s) runtime=%q", wsName, id, containerRuntime)
 
 	// Apply runtime-default template ONLY when explicitly requested via "apply_template": true.
 	// Use case: runtime was changed via Config tab — need new runtime's base files.
@@ -177,7 +198,7 @@ func (h *WorkspaceHandler) RestartByID(workspaceID string) {
 		time.Sleep(10 * time.Second)
 	}
 
-	log.Printf("Auto-restart: restarting %s (%s) runtime=%q after secret change (was: %s)", wsName, workspaceID, dbRuntime, status)
+	log.Printf("Auto-restart: restarting %s (%s) runtime=%q (was: %s)", wsName, workspaceID, dbRuntime, status)
 
 	h.provisioner.Stop(ctx, workspaceID)
 

@@ -42,36 +42,38 @@ func NewOrgHandler(wh *WorkspaceHandler, b *events.Broadcaster, p *provisioner.P
 
 // OrgTemplate is the YAML structure for an org hierarchy.
 type OrgTemplate struct {
-	Name        string            `yaml:"name"`
-	Description string            `yaml:"description"`
-	Defaults    OrgDefaults       `yaml:"defaults"`
-	Workspaces  []OrgWorkspace    `yaml:"workspaces"`
+	Name        string            `yaml:"name" json:"name"`
+	Description string            `yaml:"description" json:"description"`
+	Defaults    OrgDefaults       `yaml:"defaults" json:"defaults"`
+	Workspaces  []OrgWorkspace    `yaml:"workspaces" json:"workspaces"`
 }
 
 type OrgDefaults struct {
-	Runtime string   `yaml:"runtime"`
-	Tier    int      `yaml:"tier"`
-	Plugins []string `yaml:"plugins"`
+	Runtime       string   `yaml:"runtime" json:"runtime"`
+	Tier          int      `yaml:"tier" json:"tier"`
+	Plugins       []string `yaml:"plugins" json:"plugins"`
+	InitialPrompt string   `yaml:"initial_prompt" json:"initial_prompt"`
 }
 
 type OrgWorkspace struct {
-	Name         string         `yaml:"name"`
-	Role         string         `yaml:"role"`
-	Runtime      string         `yaml:"runtime"`
-	Tier         int            `yaml:"tier"`
-	Template     string         `yaml:"template"`
-	FilesDir     string         `yaml:"files_dir"`      // folder name relative to org template dir
-	SystemPrompt string         `yaml:"system_prompt"`  // inline (overridden by files_dir/system-prompt.md)
-	Model        string         `yaml:"model"`
-	WorkspaceDir string         `yaml:"workspace_dir"`  // host path to mount as /workspace (empty = isolated volume)
-	Plugins      []string       `yaml:"plugins"`        // plugins to pre-install from registry
-	External     bool           `yaml:"external"`
-	URL          string         `yaml:"url"`
-	Canvas       struct {
-		X float64 `yaml:"x"`
-		Y float64 `yaml:"y"`
-	} `yaml:"canvas"`
-	Children     []OrgWorkspace `yaml:"children"`
+	Name          string         `yaml:"name" json:"name"`
+	Role          string         `yaml:"role" json:"role"`
+	Runtime       string         `yaml:"runtime" json:"runtime"`
+	Tier          int            `yaml:"tier" json:"tier"`
+	Template      string         `yaml:"template" json:"template"`
+	FilesDir      string         `yaml:"files_dir" json:"files_dir"`
+	SystemPrompt  string         `yaml:"system_prompt" json:"system_prompt"`
+	Model         string         `yaml:"model" json:"model"`
+	WorkspaceDir  string         `yaml:"workspace_dir" json:"workspace_dir"`
+	Plugins       []string       `yaml:"plugins" json:"plugins"`
+	InitialPrompt string         `yaml:"initial_prompt" json:"initial_prompt"`
+	External      bool           `yaml:"external" json:"external"`
+	URL           string         `yaml:"url" json:"url"`
+	Canvas        struct {
+		X float64 `yaml:"x" json:"x"`
+		Y float64 `yaml:"y" json:"y"`
+	} `yaml:"canvas" json:"canvas"`
+	Children      []OrgWorkspace `yaml:"children" json:"children"`
 }
 
 // ListTemplates handles GET /org/templates — lists available org templates.
@@ -293,6 +295,28 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 					return nil
 				})
 			}
+		}
+
+		// Inject initial_prompt into config.yaml (workspace-level overrides default)
+		initialPrompt := ws.InitialPrompt
+		if initialPrompt == "" {
+			initialPrompt = defaults.InitialPrompt
+		}
+		if initialPrompt != "" {
+			if configFiles == nil {
+				configFiles = map[string][]byte{}
+			}
+			// Append initial_prompt to config.yaml using YAML block scalar.
+			// Trim each line to avoid trailing whitespace issues.
+			trimmed := strings.TrimSpace(initialPrompt)
+			lines := strings.Split(trimmed, "\n")
+			for i, line := range lines {
+				lines[i] = strings.TrimRight(line, " \t")
+			}
+			indented := strings.Join(lines, "\n  ")
+			existing := configFiles["config.yaml"]
+			configFiles["config.yaml"] = append(existing, []byte(fmt.Sprintf("initial_prompt: |\n  %s\n", indented))...)
+			log.Printf("Org import: injected initial_prompt (%d chars) into config.yaml for %s", len(trimmed), ws.Name)
 		}
 
 		// Inline system_prompt (only if no files_dir provides one)
