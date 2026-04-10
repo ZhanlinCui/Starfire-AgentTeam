@@ -88,13 +88,18 @@ export function handleCanvasEvent(
           ),
         });
       } else {
+        // Spread new nodes so they don't stack at (0,0)
+        const offset = nodes.length * 40;
+        const x = offset;
+        const y = offset;
+
         set({
           nodes: [
             ...nodes,
             {
               id: msg.workspace_id,
               type: "workspaceNode",
-              position: { x: 0, y: 0 },
+              position: { x, y },
               data: {
                 name: (msg.payload.name as string) ?? "New Workspace",
                 status: "provisioning",
@@ -113,6 +118,13 @@ export function handleCanvasEvent(
             },
           ],
         });
+
+        // Pan the canvas to the new node
+        window.dispatchEvent(
+          new CustomEvent("starfire:pan-to-node", {
+            detail: { nodeId: msg.workspace_id },
+          })
+        );
       }
       break;
     }

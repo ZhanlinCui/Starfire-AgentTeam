@@ -181,18 +181,8 @@ export function ChatTab({ workspaceId, data }: Props) {
           if (task) {
             setActivityLog((prev) => [...prev.slice(-8), `⟳ ${task}`]);
           }
-        } else if (msg.event === "A2A_RESPONSE" && msg.workspace_id === workspaceId) {
-          // Response arrived via WebSocket — extract and add to messages
-          const responseBody = msg.payload?.response_body as Record<string, unknown> | undefined;
-          if (responseBody) {
-            const text = extractResponseText(responseBody);
-            if (text) {
-              setMessages((prev) => [...prev, createMessage("agent", text)]);
-              setSending(false);
-              sendingFromAPIRef.current = false;
-            }
-          }
         }
+        // A2A_RESPONSE is handled by the store (pendingA2AResponse effect) — no duplicate here
       } catch { /* ignore */ }
     };
 

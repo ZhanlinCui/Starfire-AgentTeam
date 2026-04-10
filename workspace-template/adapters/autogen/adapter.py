@@ -6,6 +6,7 @@ includes all platform tools (delegation, memory, sandbox, approval), skills, and
 Requires: pip install autogen-agentchat autogen-ext[openai]
 """
 
+import json
 import logging
 
 from adapters.base import BaseAdapter, AdapterConfig
@@ -22,14 +23,31 @@ logger = logging.getLogger(__name__)
 
 
 def _langchain_to_autogen(lc_tool):
-    """Wrap a LangChain BaseTool as an async callable for AutoGen."""
-    async def wrapper(**kwargs) -> str:
-        result = await lc_tool.ainvoke(kwargs)
+    """Wrap a LangChain BaseTool as an AutoGen FunctionTool.
+
+    AutoGen requires typed function signatures (no **kwargs).
+    LangChain tools accept a single string or dict input via ainvoke.
+    We bridge them with a single `input: str` parameter.
+    """
+    from autogen_core.tools import FunctionTool
+
+    async def _invoke(input: str) -> str:  # noqa: A002
+        # Try to parse as JSON dict for tools expecting structured input
+        try:
+            parsed = json.loads(input)
+            if isinstance(parsed, dict):
+                result = await lc_tool.ainvoke(parsed)
+                return str(result)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        result = await lc_tool.ainvoke(input)
         return str(result)
 
-    wrapper.__name__ = lc_tool.name
-    wrapper.__doc__ = lc_tool.description
-    return wrapper
+    return FunctionTool(
+        _invoke,
+        name=lc_tool.name,
+        description=lc_tool.description or lc_tool.name,
+    )
 
 
 class AutoGenAdapter(BaseAdapter):
@@ -68,7 +86,7 @@ class AutoGenAdapter(BaseAdapter):
         result = await self._common_setup(config)
         self.system_prompt = result.system_prompt
         self.autogen_tools = [_langchain_to_autogen(t) for t in result.langchain_tools]
-        logger.info(f"AutoGen tools: {[t.__name__ for t in self.autogen_tools]}")
+        logger.info(f"AutoGen tools: {[t.name for t in self.autogen_tools]}")
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
         return AutoGenA2AExecutor(

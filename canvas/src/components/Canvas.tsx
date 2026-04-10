@@ -129,7 +129,28 @@ function CanvasInner() {
   }, [selectNode]);
 
   // Team zoom-in: double-click a team node to zoom to its children
-  const { fitBounds } = useReactFlow();
+  const { fitBounds, setCenter } = useReactFlow();
+
+  // Pan to newly deployed workspace
+  const panTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { nodeId } = (e as CustomEvent<{ nodeId: string }>).detail;
+      // Small delay so ReactFlow has time to lay out the node
+      clearTimeout(panTimerRef.current);
+      panTimerRef.current = setTimeout(() => {
+        const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
+        if (node) {
+          setCenter(node.position.x + 130, node.position.y + 60, { zoom: 1, duration: 500 });
+        }
+      }, 100);
+    };
+    window.addEventListener("starfire:pan-to-node", handler);
+    return () => {
+      window.removeEventListener("starfire:pan-to-node", handler);
+      clearTimeout(panTimerRef.current);
+    };
+  }, [setCenter]);
   useEffect(() => {
     const handler = (e: Event) => {
       const { nodeId } = (e as CustomEvent).detail;
