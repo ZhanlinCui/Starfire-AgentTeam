@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL = 30  # seconds
 MAX_CONSECUTIVE_FAILURES = 10
-DELEGATION_RESULTS_FILE = "/tmp/delegation_results.jsonl"
+MAX_SEEN_DELEGATION_IDS = 200
+# Shared path — also used by cli_executor._read_delegation_results()
+DELEGATION_RESULTS_FILE = os.environ.get("DELEGATION_RESULTS_FILE", "/tmp/delegation_results.jsonl")
 
 
 class HeartbeatLoop:
@@ -156,6 +158,11 @@ class HeartbeatLoop:
                         "error": d.get("error", ""),
                         "timestamp": time.time(),
                     })
+
+            # Evict old seen IDs if over limit
+            if len(self._seen_delegation_ids) > MAX_SEEN_DELEGATION_IDS:
+                # Keep most recent half
+                self._seen_delegation_ids = set(list(self._seen_delegation_ids)[MAX_SEEN_DELEGATION_IDS // 2:])
 
             if new_results:
                 # Append to results file for the agent to pick up

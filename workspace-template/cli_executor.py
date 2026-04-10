@@ -292,12 +292,18 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
     def _read_delegation_results(self) -> str:
         """Read and consume delegation results written by heartbeat loop."""
-        results_file = Path("/tmp/delegation_results.jsonl")
+        results_file = Path(os.environ.get("DELEGATION_RESULTS_FILE", "/tmp/delegation_results.jsonl"))
         if not results_file.exists():
             return ""
         try:
-            lines = results_file.read_text().strip().split("\n")
-            results_file.unlink()  # Consume — don't re-inject next time
+            # Atomic consume: rename first to prevent race with heartbeat writer
+            consumed = results_file.with_suffix(".consumed")
+            try:
+                results_file.rename(consumed)
+            except OSError:
+                return ""  # File disappeared between exists() and rename()
+            lines = consumed.read_text().strip().split("\n")
+            consumed.unlink(missing_ok=True)
             parts = []
             for line in lines:
                 if not line.strip():
