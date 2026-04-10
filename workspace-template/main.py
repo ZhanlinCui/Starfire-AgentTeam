@@ -93,8 +93,18 @@ async def main():  # pragma: no cover
     )
 
     # 5. Setup adapter and create executor
-    await adapter.setup(adapter_config)
-    executor = await adapter.create_executor(adapter_config)
+    # If setup fails, ensure heartbeat is stopped to prevent resource leak
+    try:
+        await adapter.setup(adapter_config)
+        executor = await adapter.create_executor(adapter_config)
+    except Exception:
+        # heartbeat hasn't started yet but may have async tasks pending
+        if hasattr(heartbeat, "stop"):
+            try:
+                await heartbeat.stop()
+            except Exception:
+                pass
+        raise
 
     # 5.5. Initialise Temporal durable execution wrapper (optional)
     # Connects to TEMPORAL_HOST (default: localhost:7233) and starts a

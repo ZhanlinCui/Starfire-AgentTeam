@@ -83,7 +83,7 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 ```bash
 cd platform && go test -race ./...               # 370+ Go tests (handlers, registry, provisioner, CLI, delegation, org — sqlmock + miniredis)
 cd canvas && npm test                            # 325 Vitest tests (store, components, hydration, buildTree, secrets API)
-cd workspace-template && python -m pytest -v     # 872 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli, delegation)
+cd workspace-template && python -m pytest -v     # 874 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli, delegation)
 ```
 
 ### Integration Tests
@@ -152,6 +152,8 @@ When a workspace specifies a template that doesn't exist, the Create handler fal
 - Root-level siblings (both parent_id IS NULL) → allowed
 - Parent ↔ child → allowed
 - Everything else → denied
+
+The A2A proxy (`POST /workspaces/:id/a2a`) enforces this for agent-to-agent calls. Canvas requests (no `X-Workspace-ID`), self-calls, and system callers (`webhook:*`, `system:*`, `test:*` prefixes via `isSystemCaller()` in `a2a_proxy.go`) bypass the check.
 
 ### JSONB Gotcha
 When inserting Go `[]byte` (from `json.Marshal`) into Postgres JSONB columns, you must:

@@ -22,6 +22,10 @@ import (
 )
 
 // OrgHandler manages org template import/export.
+// workspaceCreatePacingMs is the brief delay between sibling workspace creations
+// during org import. Prevents overwhelming Docker when creating many containers.
+const workspaceCreatePacingMs = 50
+
 type OrgHandler struct {
 	workspace   *WorkspaceHandler
 	broadcaster *events.Broadcaster
@@ -211,8 +215,10 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		workspaceDir = ws.WorkspaceDir
 	}
 
+	ctx := context.Background()
+
 	// Insert workspace
-	_, err := db.DB.Exec(`
+	_, err := db.DB.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id, workspace_dir)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`, id, ws.Name, role, tier, runtime, awarenessNS, "provisioning", parentID, workspaceDir)
@@ -222,17 +228,21 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 	}
 
 	// Canvas layout with coordinates from YAML
-	db.DB.Exec(`INSERT INTO canvas_layouts (workspace_id, x, y) VALUES ($1, $2, $3)`, id, ws.Canvas.X, ws.Canvas.Y)
+	if _, err := db.DB.ExecContext(ctx, `INSERT INTO canvas_layouts (workspace_id, x, y) VALUES ($1, $2, $3)`, id, ws.Canvas.X, ws.Canvas.Y); err != nil {
+		log.Printf("Org import: canvas layout insert failed for %s: %v", ws.Name, err)
+	}
 
 	// Broadcast
-	h.broadcaster.RecordAndBroadcast(context.Background(), "WORKSPACE_PROVISIONING", id, map[string]interface{}{
+	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISIONING", id, map[string]interface{}{
 		"name": ws.Name, "tier": tier,
 	})
 
 	// Handle external workspaces
 	if ws.External {
-		db.DB.Exec(`UPDATE workspaces SET status = 'online', url = $1 WHERE id = $2`, ws.URL, id)
-		h.broadcaster.RecordAndBroadcast(context.Background(), "WORKSPACE_ONLINE", id, map[string]interface{}{
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', url = $1 WHERE id = $2`, ws.URL, id); err != nil {
+			log.Printf("Org import: external workspace status update failed for %s: %v", ws.Name, err)
+		}
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", id, map[string]interface{}{
 			"name": ws.Name, "external": true,
 		})
 	} else if h.provisioner != nil {
@@ -352,11 +362,13 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 			} else {
 				encrypted = []byte(value) // store raw when encryption disabled
 			}
-			db.DB.Exec(`
+			if _, err := db.DB.ExecContext(ctx, `
 				INSERT INTO workspace_secrets (workspace_id, key, encrypted_value)
 				VALUES ($1, $2, $3)
 				ON CONFLICT (workspace_id, key) DO UPDATE SET encrypted_value = $3, updated_at = now()
-			`, id, key, encrypted)
+			`, id, key, encrypted); err != nil {
+				log.Printf("Org import: failed to insert secret %s for %s: %v", key, ws.Name, err)
+			}
 		}
 
 		go h.workspace.provisionWorkspace(id, templatePath, configFiles, payload)
@@ -368,12 +380,14 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		"tier":  tier,
 	})
 
-	// Recurse into children
+	// Recurse into children. Brief pacing avoids overwhelming Docker when
+	// creating many containers in sequence; container provisioning runs in
+	// goroutines so the main createWorkspaceTree returns quickly.
 	for _, child := range ws.Children {
 		if err := h.createWorkspaceTree(child, &id, defaults, orgBaseDir, results); err != nil {
 			return err
 		}
-		time.Sleep(500 * time.Millisecond) // stagger to avoid Docker throttling
+		time.Sleep(workspaceCreatePacingMs * time.Millisecond)
 	}
 
 	return nil

@@ -292,6 +292,14 @@ func TestProxyA2A_CallerIDPropagated(t *testing.T) {
 
 	mr.Set(fmt.Sprintf("ws:%s:url", "ws-target"), agentServer.URL)
 
+	// Access control: caller and target must be siblings (same parent_id)
+	mock.ExpectQuery("SELECT id, parent_id FROM workspaces WHERE id = ").
+		WithArgs("ws-caller").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow("ws-caller", "ws-parent"))
+	mock.ExpectQuery("SELECT id, parent_id FROM workspaces WHERE id = ").
+		WithArgs("ws-target").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow("ws-target", "ws-parent"))
+
 	// Expect activity log with source_id set
 	mock.ExpectExec("INSERT INTO activity_logs").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -315,5 +323,135 @@ func TestProxyA2A_CallerIDPropagated(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// mockCanCommunicate sets up sqlmock expectations for CanCommunicate(caller, target).
+// allowed=true sets up rows that satisfy the access policy (siblings under same parent).
+// allowed=false sets up rows that don't (different parents).
+func mockCanCommunicate(mock sqlmock.Sqlmock, caller, target string, allowed bool) {
+	callerParent := "shared-parent"
+	targetParent := "shared-parent"
+	if !allowed {
+		targetParent = "different-parent"
+	}
+	mock.ExpectQuery("SELECT id, parent_id FROM workspaces WHERE id = ").
+		WithArgs(caller).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow(caller, callerParent))
+	mock.ExpectQuery("SELECT id, parent_id FROM workspaces WHERE id = ").
+		WithArgs(target).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "parent_id"}).AddRow(target, targetParent))
+}
+
+// ==================== ProxyA2A — Access Control ====================
+
+func TestProxyA2A_AccessDenied_DifferentParents(t *testing.T) {
+	mock := setupTestDB(t)
+	mr := setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	mr.Set(fmt.Sprintf("ws:%s:url", "ws-target"), "http://localhost:1")
+
+	mockCanCommunicate(mock, "ws-caller", "ws-target", false)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-target"}}
+
+	body := `{"method":"message/send","params":{"message":{"role":"user","parts":[{"text":"hi"}]}}}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-target/a2a", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("X-Workspace-ID", "ws-caller")
+
+	handler.ProxyA2A(c)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProxyA2A_AllowedSelf_SkipsAccessCheck(t *testing.T) {
+	mock := setupTestDB(t)
+	mr := setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"jsonrpc":"2.0","id":"1","result":{}}`)
+	}))
+	defer agentServer.Close()
+	mr.Set(fmt.Sprintf("ws:%s:url", "ws-self"), agentServer.URL)
+
+	mock.ExpectExec("INSERT INTO activity_logs").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-self"}}
+
+	body := `{"method":"message/send","params":{"message":{"role":"user","parts":[{"text":"hi"}]}}}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-self/a2a", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("X-Workspace-ID", "ws-self")
+
+	handler.ProxyA2A(c)
+	time.Sleep(50 * time.Millisecond)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for self-call, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProxyA2A_SystemCaller_BypassesAccessCheck(t *testing.T) {
+	mock := setupTestDB(t)
+	mr := setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	agentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"jsonrpc":"2.0","id":"1","result":{}}`)
+	}))
+	defer agentServer.Close()
+	mr.Set(fmt.Sprintf("ws:%s:url", "ws-target"), agentServer.URL)
+
+	mock.ExpectExec("INSERT INTO activity_logs").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-target"}}
+
+	body := `{"method":"message/send","params":{"message":{"role":"user","parts":[{"text":"hi"}]}}}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-target/a2a", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("X-Workspace-ID", "webhook:github")
+
+	handler.ProxyA2A(c)
+	time.Sleep(50 * time.Millisecond)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for system caller, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIsSystemCaller(t *testing.T) {
+	cases := []struct {
+		caller   string
+		expected bool
+	}{
+		{"webhook:github", true},
+		{"system:scheduler", true},
+		{"test:fake", true},
+		{"ws-uuid-123", false},
+		{"", false},
+		{"webhook", false},
+		{"foo:bar", false},
+	}
+	for _, tc := range cases {
+		got := isSystemCaller(tc.caller)
+		if got != tc.expected {
+			t.Errorf("isSystemCaller(%q) = %v, want %v", tc.caller, got, tc.expected)
+		}
 	}
 }

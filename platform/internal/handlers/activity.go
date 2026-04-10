@@ -106,6 +106,11 @@ func (h *ActivityHandler) List(c *gin.Context) {
 		}
 		activities = append(activities, entry)
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Activity list rows error for %s: %v", workspaceID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query iteration failed"})
+		return
+	}
 	c.JSON(http.StatusOK, activities)
 }
 
@@ -212,6 +217,11 @@ func (h *ActivityHandler) SessionSearch(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Session search rows error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query iteration failed"})
+		return
+	}
 
 	c.JSON(http.StatusOK, items)
 }
@@ -312,8 +322,16 @@ func (h *ActivityHandler) Report(c *gin.Context) {
 
 // LogActivity inserts an activity log and optionally broadcasts via WebSocket.
 func LogActivity(ctx context.Context, broadcaster *events.Broadcaster, params ActivityParams) {
-	reqJSON, _ := json.Marshal(params.RequestBody)
-	respJSON, _ := json.Marshal(params.ResponseBody)
+	reqJSON, reqErr := json.Marshal(params.RequestBody)
+	if reqErr != nil {
+		log.Printf("LogActivity: failed to marshal request_body for %s: %v", params.WorkspaceID, reqErr)
+		reqJSON = []byte("null")
+	}
+	respJSON, respErr := json.Marshal(params.ResponseBody)
+	if respErr != nil {
+		log.Printf("LogActivity: failed to marshal response_body for %s: %v", params.WorkspaceID, respErr)
+		respJSON = []byte("null")
+	}
 
 	var reqStr, respStr *string
 	if params.RequestBody != nil {

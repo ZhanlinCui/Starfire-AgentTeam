@@ -913,6 +913,72 @@ async def test_run_cli_timeout_proc_kill_raises():
     assert "timed out" in str(eq.enqueue_event.call_args[0][0])
 
 
+async def test_run_cli_timeout_calls_proc_wait_to_reap_zombie():
+    """On timeout, proc.kill() is followed by proc.wait() to reap the zombie process."""
+    rc = RuntimeConfig(timeout=5)
+    executor = _make_executor(runtime_config=rc)
+
+    mock_proc = AsyncMock()
+    mock_proc.kill = MagicMock()
+    mock_proc.wait = AsyncMock()
+
+    eq = _make_event_queue()
+
+    # First wait_for call (for proc.communicate) raises TimeoutError
+    # Second wait_for call (for proc.wait inside the timeout handler) succeeds
+    call_count = {"n": 0}
+    original_wait_for = asyncio.wait_for
+
+    async def patched_wait_for(coro, timeout):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # Cancel the coro to avoid resource warning, then raise
+            try:
+                coro.close()
+            except Exception:
+                pass
+            raise asyncio.TimeoutError()
+        # Subsequent calls (for proc.wait reap) succeed immediately
+        try:
+            await coro
+        except Exception:
+            pass
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        with patch("asyncio.wait_for", side_effect=patched_wait_for):
+            await executor._run_cli("slow task", eq)
+
+    # Verify proc.kill was called
+    mock_proc.kill.assert_called_once()
+    # Verify proc.wait was called (to reap the zombie)
+    mock_proc.wait.assert_called()
+    # And we got the timeout message
+    eq.enqueue_event.assert_called_once()
+    assert "timed out" in str(eq.enqueue_event.call_args[0][0])
+
+
+async def test_run_cli_timeout_proc_wait_also_times_out():
+    """If proc.wait() also times out (truly stuck), we still send the timeout message."""
+    rc = RuntimeConfig(timeout=5)
+    executor = _make_executor(runtime_config=rc)
+
+    mock_proc = AsyncMock()
+    mock_proc.kill = MagicMock()
+    mock_proc.wait = AsyncMock()
+
+    eq = _make_event_queue()
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+        with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
+            await executor._run_cli("slow task", eq)
+
+    # Even though both wait_for calls timed out, we still emit the timeout event
+    eq.enqueue_event.assert_called_once()
+    assert "timed out" in str(eq.enqueue_event.call_args[0][0])
+    # And we still tried to kill
+    mock_proc.kill.assert_called_once()
+
+
 # ---------- _run_cli: non-zero exit with no stderr (line 466) ----------
 
 

@@ -61,6 +61,23 @@ func (h *Hub) Run() {
 	}
 }
 
+// safeSend sends data to a client channel without panicking on a closed channel.
+// Returns false if the channel was closed (i.e. client just disconnected).
+func safeSend(client *Client, data []byte) (sent bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Channel was closed between RLock check and send — client disconnected
+			sent = false
+		}
+	}()
+	select {
+	case client.Send <- data:
+		return true
+	default:
+		return false
+	}
+}
+
 // Broadcast sends a WSMessage to all appropriate clients.
 func (h *Hub) Broadcast(msg models.WSMessage) {
 	data, err := json.Marshal(msg)
@@ -75,20 +92,16 @@ func (h *Hub) Broadcast(msg models.WSMessage) {
 	for client := range h.clients {
 		// Canvas clients get everything
 		if client.WorkspaceID == "" {
-			select {
-			case client.Send <- data:
-			default:
-				log.Printf("WS: dropped message to canvas client (buffer full)")
+			if !safeSend(client, data) {
+				log.Printf("WS: dropped message to canvas client (buffer full or closed)")
 			}
 			continue
 		}
 
 		// Workspace clients: filter by CanCommunicate
 		if msg.WorkspaceID != "" && h.canCommunicate != nil && h.canCommunicate(client.WorkspaceID, msg.WorkspaceID) {
-			select {
-			case client.Send <- data:
-			default:
-				log.Printf("WS: dropped message to workspace %s (buffer full)", client.WorkspaceID)
+			if !safeSend(client, data) {
+				log.Printf("WS: dropped message to workspace %s (buffer full or closed)", client.WorkspaceID)
 			}
 		}
 	}
