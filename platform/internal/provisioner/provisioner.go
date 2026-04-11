@@ -493,16 +493,20 @@ func (p *Provisioner) RemoveVolume(ctx context.Context, workspaceID string) erro
 }
 
 // Stop stops and removes a workspace container.
+//
+// Uses force-remove FIRST to avoid a race with Docker's `unless-stopped`
+// restart policy: if we ContainerStop first, the restart policy can
+// respawn the container before ContainerRemove runs, leaving a zombie
+// that re-registers via heartbeat after deletion.
 func (p *Provisioner) Stop(ctx context.Context, workspaceID string) error {
 	name := ContainerName(workspaceID)
-	timeout := 10
 
-	if err := p.cli.ContainerStop(ctx, name, container.StopOptions{Timeout: &timeout}); err != nil {
-		log.Printf("Provisioner: stop warning for %s: %v", name, err)
-	}
-
+	// Force-remove kills and removes in one atomic operation, bypassing
+	// the restart policy entirely. If the container doesn't exist, the
+	// error is harmless.
 	if err := p.cli.ContainerRemove(ctx, name, container.RemoveOptions{Force: true}); err != nil {
-		return fmt.Errorf("failed to remove container %s: %w", name, err)
+		// Container may already be gone — log but don't fail.
+		log.Printf("Provisioner: force-remove warning for %s: %v", name, err)
 	}
 
 	log.Printf("Provisioner: stopped and removed container %s", name)
