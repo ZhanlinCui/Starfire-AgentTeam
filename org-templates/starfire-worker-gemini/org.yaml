@@ -1,8 +1,14 @@
 # Starfire Worker Team — Gemini-powered (cost-optimized)
-# Uses LangGraph runtime with Google Gemini 2.5 Flash for all agents.
+# Uses LangGraph runtime with Google Gemini 2.5 Flash.
+# LangGraph provides: ReAct loop, tool use, A2A delegation, memory.
+# Platform tools add: delegate_task, list_peers, commit_memory, etc.
 # ~20x cheaper than Claude Opus, suitable for daily operations.
+#
+# NOTE: DeepAgents runtime has richer built-in tools (filesystem, sub-agents,
+# planning) but requires Anthropic API key for internal middleware even when
+# using non-Anthropic models. Use langgraph for pure Gemini deployments.
 name: Starfire Worker Team (Gemini)
-description: Cost-optimized AI agent team using Gemini 2.5 Flash
+description: Cost-optimized AI agent team using LangGraph + Gemini 2.5 Flash
 
 defaults:
   runtime: langgraph
