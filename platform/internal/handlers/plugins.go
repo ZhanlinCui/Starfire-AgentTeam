@@ -160,8 +160,12 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 	}
 
 	// Fix ownership so the agent user (UID 1000) can read/write plugin files
+	// and CLAUDE.md (which the adapter appends plugin rules to on startup).
 	h.execAsRoot(ctx, containerName, []string{
 		"chown", "-R", "1000:1000", "/configs/plugins/" + body.Name,
+	})
+	h.execAsRoot(ctx, containerName, []string{
+		"sh", "-c", "touch /configs/CLAUDE.md && chown 1000:1000 /configs/CLAUDE.md",
 	})
 
 	// Auto-restart workspace to pick up the plugin

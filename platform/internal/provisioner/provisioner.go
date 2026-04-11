@@ -220,6 +220,11 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		log.Printf("Provisioner: started container %s (image: %s)", name, startedInfo.Image[:19])
 	}
 
+	// Fix /configs ownership so the agent user (UID 1000) can write CLAUDE.md,
+	// skills, and other files that plugins inject on startup. Docker creates
+	// volume files as root; the agent process runs as UID 1000.
+	p.execInContainer(ctx, resp.ID, []string{"chown", "-R", "1000:1000", "/configs"})
+
 	// Copy template files into /configs if TemplatePath is set
 	if cfg.TemplatePath != "" {
 		if err := p.CopyTemplateToContainer(ctx, resp.ID, cfg.TemplatePath); err != nil {
@@ -480,6 +485,20 @@ func (p *Provisioner) ReadFromVolume(ctx context.Context, volumeName, filePath s
 		data = data[8+size:]
 	}
 	return clean, nil
+}
+
+// execInContainer runs a command inside a running container as root.
+// Best-effort: logs errors but does not fail the caller.
+func (p *Provisioner) execInContainer(ctx context.Context, containerID string, cmd []string) {
+	execCfg := container.ExecOptions{Cmd: cmd, User: "root"}
+	execID, err := p.cli.ContainerExecCreate(ctx, containerID, execCfg)
+	if err != nil {
+		log.Printf("Provisioner: exec create failed: %v", err)
+		return
+	}
+	if err := p.cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{}); err != nil {
+		log.Printf("Provisioner: exec start failed: %v", err)
+	}
 }
 
 // RemoveVolume removes the config volume for a workspace.
