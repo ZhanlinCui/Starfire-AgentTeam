@@ -1,0 +1,8 @@
+name: starfire-dev
+version: 1.0.0
+description: Starfire codebase conventions, past bugs, quality standards, and coordination workflows
+author: Starfire
+tags: [conventions, quality, coordination, codebase]
+
+skills:
+  - review-loop
