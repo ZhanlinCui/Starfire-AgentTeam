@@ -1,25 +1,23 @@
 # Free Beats All — Zero-cost AI agent team
 #
-# Each agent uses a DIFFERENT free LLM provider to spread rate limits.
-# All providers have per-minute rate limits (not per-day), so the retry
-# logic in the SDK executor handles temporary 429s automatically.
+# Each agent on a DIFFERENT free provider to maximize combined rate limits.
+# If one provider hits 429, only that agent retries — others keep working.
 #
-# Provider breakdown:
-#   PM           → Groq (Llama 3.3 70B) — 30 RPM, fast inference
-#   Dev Lead     → OpenRouter (free models) — 20 RPM, wide model selection
-#   FE           → Cerebras (Llama 3.3 70B) — 30 RPM, ultra-fast
-#   BE           → Groq (Qwen3 32B) — 30 RPM, good at code
-#   QA           → OpenRouter (free models) — 20 RPM
+#   PM  → Groq        (Llama 3.3 70B)   — 30 RPM, reliable
+#   DL  → Cerebras    (Qwen 3 235B)     — 30 RPM, huge model
+#   FE  → OpenRouter  (auto-free)       — 20 RPM, routes to best free model
+#   BE  → Groq        (Qwen QWQ 32B)    — 30 RPM, good at code
+#   QA  → Cerebras    (Llama 3.1 8B)    — 30 RPM, fast for test runs
 #
-# Total cost: $0/month. Rate limits handled by retry with backoff.
+# Combined: 140 RPM across 3 providers. Total cost: $0/month.
 #
-# API keys needed (all free, no credit card):
+# API keys (all free, no credit card):
 #   GROQ_API_KEY       — https://console.groq.com/keys
 #   OPENROUTER_API_KEY — https://openrouter.ai/keys
-#   CEREBRAS_API_KEY   — https://cloud.cerebras.ai/
+#   CEREBRAS_API_KEY   — https://cloud.cerebras.ai
 
 name: Free Beats All
-description: Zero-cost AI agent team using free LLM providers (Groq, OpenRouter, Cerebras)
+description: Zero-cost AI team — Groq + Cerebras + OpenRouter free tiers
 
 defaults:
   runtime: langgraph
@@ -44,25 +42,25 @@ workspaces:
       - name: Dev Lead
         role: Engineering coordinator — delegates to FE, BE, QA
         tier: 3
-        model: openrouter:meta-llama/llama-3.3-70b-instruct:free
+        model: cerebras:qwen-3-235b-a22b-instruct-2507
         files_dir: dev-lead
         canvas: { x: 600, y: 200 }
         children:
           - name: Frontend Engineer
             role: React/Next.js, React Flow, Zustand, Tailwind CSS
             tier: 3
-            model: groq:qwen-qwq-32b
+            model: openrouter:openrouter/free
             files_dir: frontend-engineer
             canvas: { x: 400, y: 350 }
           - name: Backend Engineer
             role: Go platform, Postgres, Redis, A2A protocol
             tier: 3
-            model: groq:llama-3.3-70b-versatile
+            model: groq:qwen/qwen3-32b
             files_dir: backend-engineer
             canvas: { x: 600, y: 350 }
           - name: QA Engineer
             role: Testing, quality assurance, test automation
             tier: 3
-            model: openrouter:deepseek/deepseek-r1:free
+            model: cerebras:qwen-3-235b-a22b-instruct-2507
             files_dir: qa-engineer
             canvas: { x: 800, y: 350 }
