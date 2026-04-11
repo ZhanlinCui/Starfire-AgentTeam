@@ -305,44 +305,39 @@ def test_read_delegation_results_handles_blank_lines_in_middle(tmp_path, monkeyp
 
 
 def test_read_delegation_results_rename_race(tmp_path, monkeypatch):
-    """If the file disappears between exists() and rename(), return empty.
-
-    Scoped: subclass Path so only `rename` is overridden, and only the Path
-    reference inside executor_helpers is swapped — no global monkey-patching.
-    """
+    """If the file disappears between exists() and rename(), return empty."""
     results_file = tmp_path / "delegation.jsonl"
     results_file.write_text("{}\n", encoding="utf-8")
     monkeypatch.setenv("DELEGATION_RESULTS_FILE", str(results_file))
 
-    import executor_helpers
-
-    class RacingPath(Path):  # type: ignore[misc]
-        """Path subclass where rename() raises, simulating the race."""
-        def rename(self, target):
-            raise OSError("race: file disappeared between exists() and rename()")
-
-    monkeypatch.setattr(executor_helpers, "Path", RacingPath)
-    assert read_delegation_results() == ""
+    with patch("executor_helpers.Path") as MockPath:
+        mock_instance = MagicMock()
+        mock_instance.exists.return_value = True
+        mock_instance.with_suffix.return_value = tmp_path / "delegation.consumed"
+        mock_instance.rename.side_effect = OSError("race")
+        MockPath.return_value = mock_instance
+        assert read_delegation_results() == ""
 
 
 def test_read_delegation_results_read_text_raises(tmp_path, monkeypatch):
-    """Post-rename read failure returns empty instead of crashing.
-
-    Scoped: subclass Path so only read_text is overridden, and only the
-    module's Path reference is swapped (not global pathlib.Path).
-    """
+    """Post-rename read failure returns empty instead of crashing."""
     results_file = tmp_path / "delegation.jsonl"
     results_file.write_text("{}\n", encoding="utf-8")
     monkeypatch.setenv("DELEGATION_RESULTS_FILE", str(results_file))
 
-    import executor_helpers
+    consumed_mock = MagicMock()
+    consumed_mock.read_text.side_effect = OSError("disk gone")
+    consumed_mock.unlink = MagicMock()
 
-    class FailingReadPath(Path):  # type: ignore[misc]
-        def read_text(self, *args, **kwargs):
-            raise OSError("disk gone")
+    with patch("executor_helpers.Path") as MockPath:
+        mock_instance = MagicMock()
+        mock_instance.exists.return_value = True
+        mock_instance.with_suffix.return_value = consumed_mock
+        mock_instance.rename.return_value = None
+        MockPath.return_value = mock_instance
+        assert read_delegation_results() == ""
 
-    monkeypatch.setattr(executor_helpers, "Path", FailingReadPath)
-    assert read_delegation_results() == ""
+    consumed_mock.unlink.assert_called_once_with(missing_ok=True)
 
 
 # ======================================================================
