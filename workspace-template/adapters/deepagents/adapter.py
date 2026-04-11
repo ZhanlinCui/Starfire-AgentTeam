@@ -156,6 +156,13 @@ class DeepAgentsAdapter(BaseAdapter):
             if deepagent_skills:
                 logger.info("DeepAgents skills: %d Python files from %s", len(deepagent_skills), skills_dir)
 
+        # ── LLM Cache: avoid repeat API calls for identical prompts ──
+        # InMemoryCache is zero-config and per-container. Cron tasks that fire
+        # the same prompt daily, repeated delegation boilerplate, and system
+        # prompt prefixes all benefit. Cache lives for the container lifecycle.
+        from langchain_core.caches import InMemoryCache
+        cache = InMemoryCache()
+
         # ── Create the agent with full configuration ──
         self.agent = create_deep_agent(
             model=llm,
@@ -166,11 +173,12 @@ class DeepAgentsAdapter(BaseAdapter):
             memory=memory_files if memory_files else None,
             permissions=permissions,
             skills=deepagent_skills if deepagent_skills else None,
+            cache=cache,
         )
 
         logger.info(
             "DeepAgents agent created: %d platform tools, backend=%s, "
-            "checkpointer=MemorySaver, memory=%d files, permissions=%d rules, skills=%d",
+            "checkpointer=MemorySaver, cache=InMemoryCache, memory=%d files, permissions=%d rules, skills=%d",
             len(result.langchain_tools), type(backend).__name__,
             len(memory_files), len(permissions), len(deepagent_skills),
         )

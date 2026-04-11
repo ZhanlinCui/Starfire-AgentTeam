@@ -37,6 +37,16 @@ class LangGraphAdapter(BaseAdapter):
         self.system_prompt = None
 
     async def setup(self, config: AdapterConfig) -> None:
+        # Enable LLM response caching — identical prompts return instantly
+        # without an API call. Saves cost on repeated delegation boilerplate,
+        # cron tasks, and system prompt prefixes.
+        try:
+            from langchain_core.caches import InMemoryCache
+            from langchain_core.globals import set_llm_cache
+            set_llm_cache(InMemoryCache())
+        except Exception:
+            pass  # Cache is optional — degrade gracefully
+
         result = await self._common_setup(config)
         self.loaded_skills = result.loaded_skills
         self.all_tools = result.langchain_tools
