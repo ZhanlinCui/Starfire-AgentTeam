@@ -1,0 +1,67 @@
+# Starfire Worker Team — Gemini-powered (cost-optimized)
+# Uses DeepAgents runtime with Google Gemini 2.0 Flash.
+# DeepAgents adds: task planning, filesystem, sub-agents, shell execution.
+# ~20x cheaper than Claude Opus, suitable for daily operations.
+
+name: Starfire Worker Team (Gemini)
+description: Cost-optimized AI agent team using DeepAgents + Gemini
+
+defaults:
+  runtime: deepagents
+  tier: 2
+  model: google_genai:gemini-2.0-flash
+
+  initial_prompt: |
+    You just started. Set up your environment silently — do NOT contact other agents yet.
+    1. Clone the repo: git clone https://github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
+    2. Set up git hooks: cd /workspace/repo && git config core.hooksPath .githooks
+    3. Read /workspace/repo/CLAUDE.md to understand the project
+    4. Read your system prompt at /configs/system-prompt.md to understand your role
+    5. You are now ready. Wait for tasks from your parent — do not initiate contact.
+
+workspaces:
+  - name: PM
+    role: Project Manager — coordinates Dev team
+    tier: 3
+    files_dir: pm
+    canvas: { x: 400, y: 50 }
+    children:
+      - name: Dev Lead
+        role: Engineering coordinator — delegates to FE, BE, DevOps, Security, QA
+        tier: 3
+        files_dir: dev-lead
+        canvas: { x: 650, y: 200 }
+        children:
+          - name: Frontend Engineer
+            role: React/Next.js, React Flow, Zustand, Tailwind CSS
+            tier: 3
+            files_dir: frontend-engineer
+            canvas: { x: 400, y: 350 }
+          - name: Backend Engineer
+            role: Go platform, Postgres, Redis, A2A protocol
+            tier: 3
+            files_dir: backend-engineer
+            canvas: { x: 600, y: 350 }
+          - name: DevOps Engineer
+            role: CI/CD, Docker, infrastructure
+            tier: 3
+            files_dir: devops-engineer
+            canvas: { x: 800, y: 350 }
+          - name: Security Auditor
+            role: Security auditing and vulnerability assessment
+            tier: 3
+            files_dir: security-auditor
+            canvas: { x: 400, y: 450 }
+            schedules:
+              - name: Daily security scan
+                cron_expr: "0 9 * * *"
+                prompt: |
+                  Daily security audit. Pull latest code (cd /workspace/repo && git pull).
+                  Scan for: leaked secrets, SQL injection, XSS, missing input validation.
+                  Report findings to Dev Lead via delegate_task with file:line references.
+                enabled: true
+          - name: QA Engineer
+            role: Testing, quality assurance, test automation
+            tier: 3
+            files_dir: qa-engineer
+            canvas: { x: 600, y: 450 }
