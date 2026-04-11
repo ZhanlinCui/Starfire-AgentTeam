@@ -88,7 +88,7 @@ if [ -n "$STAGED_GO" ]; then
   for f in $STAGED_GO; do
     DIFF=$(git diff --cached "$f" | grep '^+' | grep -v '^+++' || true)
     if echo "$DIFF" | grep -qE 'fmt\.Sprintf.*SELECT|fmt\.Sprintf.*INSERT|fmt\.Sprintf.*UPDATE|fmt\.Sprintf.*DELETE' 2>/dev/null; then
-      echo "❌ SQL INJECTION RISK in $f — use parameterized queries ($1, $2), not fmt.Sprintf"
+      echo "❌ SQL INJECTION RISK in $f — use parameterized queries (\$1, \$2), not fmt.Sprintf"
       ERRORS=$((ERRORS + 1))
     fi
   done
