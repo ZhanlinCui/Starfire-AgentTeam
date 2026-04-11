@@ -9,11 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from config import RuntimeConfig
-from cli_executor import CLIAgentExecutor, _brief_summary
+from cli_executor import CLIAgentExecutor
+from executor_helpers import brief_summary as _brief_summary
 
 
 def _make_executor(
-    runtime="claude-code",
+    runtime="codex",
     runtime_config=None,
     system_prompt="You are a helpful agent.",
     heartbeat=None,
@@ -54,32 +55,34 @@ def _make_event_queue():
 # ---------- _build_command tests ----------
 
 
-def test_build_command_claude_code():
-    """Verify correct flags for claude-code runtime."""
+def test_build_command_codex_defaults():
+    """Verify codex preset produces the expected flags."""
     executor = _make_executor()
     cmd = executor._build_command("Hello world")
 
-    assert cmd[0] == "claude"
+    assert cmd[0] == "codex"
     assert "--print" in cmd
     assert "--dangerously-skip-permissions" in cmd
-    assert "--output-format" in cmd
-    assert "json" in cmd
+    # No --output-format json anymore — that was a dead claude-code branch.
+    assert "--output-format" not in cmd
     # Prompt flag and message at the end
     assert "-p" in cmd
     idx = cmd.index("-p")
     assert cmd[idx + 1] == "Hello world"
 
 
-def test_build_command_claude_code_with_session():
-    """Verify --resume flag when session_id exists."""
-    executor = _make_executor()
-    executor._session_id = "session-abc-123"
+def test_cli_executor_rejects_claude_code_runtime():
+    """Claude-code is served by ClaudeSDKExecutor — CLI path must refuse it."""
+    from cli_executor import CLIAgentExecutor
+    with pytest.raises(ValueError, match="ClaudeSDKExecutor"):
+        CLIAgentExecutor(
+            runtime="claude-code",
+            runtime_config=RuntimeConfig(),
+        )
 
-    cmd = executor._build_command("Follow up question")
 
-    assert "--resume" in cmd
-    idx = cmd.index("--resume")
-    assert cmd[idx + 1] == "session-abc-123"
+# classify_subprocess_error / sanitize_agent_error tests moved to
+# test_executor_helpers.py — the function lives in executor_helpers now.
 
 
 def test_build_command_model_flag():
@@ -104,20 +107,14 @@ def test_build_command_no_model_flag_when_empty():
     assert "--model" not in cmd
 
 
-def test_system_prompt_only_first_message():
-    """Verify system prompt not sent when session_id exists (resumed session)."""
+def test_system_prompt_included_every_call():
+    """System prompt is injected on every call now that the CLI executor
+    no longer tracks session state."""
     executor = _make_executor(system_prompt="Be helpful")
-
-    # First message — system prompt should appear
     cmd_first = executor._build_command("First message")
-    assert "--system-prompt" in cmd_first
-
-    # Simulate session continuity
-    executor._session_id = "session-xyz"
-
-    # Second message — system prompt should NOT appear
     cmd_second = executor._build_command("Second message")
-    assert "--system-prompt" not in cmd_second
+    assert "--system-prompt" in cmd_first
+    assert "--system-prompt" in cmd_second
 
 
 # ---------- execute tests ----------
@@ -125,28 +122,21 @@ def test_system_prompt_only_first_message():
 
 @pytest.mark.asyncio
 async def test_set_current_task_on_execute():
-    """Verify heartbeat is updated during execution."""
+    """Heartbeat is updated with the task summary, then cleared."""
     heartbeat = MagicMock()
     heartbeat.current_task = ""
     heartbeat.active_tasks = 0
 
     executor = _make_executor(heartbeat=heartbeat)
-
-    # Track heartbeat updates
-    task_values = []
-    original_set = executor._set_current_task
-
-    async def tracking_set(task):
-        task_values.append(task)
-        # Just update heartbeat directly without HTTP call
-        if heartbeat:
-            heartbeat.current_task = task
-            heartbeat.active_tasks = 1 if task else 0
-
-    executor._set_current_task = tracking_set
-
-    # Mock _run_cli to avoid subprocess
     executor._run_cli = AsyncMock()
+
+    task_values = []
+
+    async def tracking_set(hb, task):
+        task_values.append(task)
+        if hb:
+            hb.current_task = task
+            hb.active_tasks = 1 if task else 0
 
     part = MagicMock()
     part.text = "Build the feature"
@@ -154,12 +144,15 @@ async def test_set_current_task_on_execute():
     context.message.parts = [part]
     eq = _make_event_queue()
 
-    await executor.execute(context, eq)
+    with patch("cli_executor.set_current_task", new=tracking_set), \
+         patch("cli_executor.read_delegation_results", return_value=""), \
+         patch("cli_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("cli_executor.commit_memory", new=AsyncMock()):
+        await executor.execute(context, eq)
 
-    # Should have set task at start and cleared at end
     assert len(task_values) == 2
-    assert task_values[0] != ""  # set to brief summary
-    assert task_values[1] == ""  # cleared
+    assert task_values[0] != ""   # brief summary set at start
+    assert task_values[1] == ""   # cleared at end
 
 
 @pytest.mark.asyncio
@@ -234,13 +227,11 @@ def test_brief_summary_fallback():
 
 @pytest.mark.asyncio
 async def test_run_cli_success():
-    """Successful CLI execution enqueues the output."""
+    """Successful CLI execution enqueues the raw stdout as the response."""
     executor = _make_executor()
 
     mock_proc = AsyncMock()
-    mock_proc.communicate = AsyncMock(
-        return_value=(b'{"session_id": "s1", "result": "Done!"}', b"")
-    )
+    mock_proc.communicate = AsyncMock(return_value=(b"Done!", b""))
     mock_proc.returncode = 0
 
     eq = _make_event_queue()
@@ -251,8 +242,6 @@ async def test_run_cli_success():
     eq.enqueue_event.assert_called_once()
     event_arg = eq.enqueue_event.call_args[0][0]
     assert "Done!" in str(event_arg)
-    # Session ID should be captured
-    assert executor._session_id == "s1"
 
 
 @pytest.mark.asyncio
@@ -274,7 +263,7 @@ async def test_run_cli_timeout():
 
     eq.enqueue_event.assert_called_once()
     event_arg = eq.enqueue_event.call_args[0][0]
-    assert "timed out" in str(event_arg)
+    assert "timeout" in str(event_arg)
 
 
 @pytest.mark.asyncio
@@ -324,7 +313,7 @@ def test_resolve_auth_token_from_file(tmp_path):
             # Ensure no env var override
             os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
             executor = CLIAgentExecutor(
-                runtime="claude-code",
+                runtime="codex",
                 runtime_config=rc,
                 config_path=str(tmp_path),
             )
@@ -333,20 +322,32 @@ def test_resolve_auth_token_from_file(tmp_path):
 
 def test_resolve_auth_token_from_preset_default_file(tmp_path):
     """Auth token from the preset's default_auth_file when config file_name is empty."""
-    # claude-code preset uses default_auth_file=".auth-token"
-    token_file = tmp_path / ".auth-token"
-    token_file.write_text("preset-default-token")
-
-    rc = RuntimeConfig()  # no explicit auth_token_file
-    with patch("shutil.which", return_value="/usr/bin/claude"):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    # Use a test runtime with a default_auth_file preset entry so we don't
+    # depend on the (now-removed) claude-code preset.
+    from cli_executor import RUNTIME_PRESETS
+    RUNTIME_PRESETS["filetoken-test"] = {
+        "command": "fakecli",
+        "base_args": [],
+        "prompt_flag": "-p",
+        "model_flag": None,
+        "system_prompt_flag": None,
+        "auth_pattern": None,
+        "default_auth_env": "",
+        "default_auth_file": ".auth-token",
+    }
+    try:
+        token_file = tmp_path / ".auth-token"
+        token_file.write_text("preset-default-token")
+        rc = RuntimeConfig()  # no explicit auth_token_file
+        with patch("shutil.which", return_value="/usr/bin/fakecli"):
             executor = CLIAgentExecutor(
-                runtime="claude-code",
+                runtime="filetoken-test",
                 runtime_config=rc,
                 config_path=str(tmp_path),
             )
-    assert executor._auth_token == "preset-default-token"
+        assert executor._auth_token == "preset-default-token"
+    finally:
+        RUNTIME_PRESETS.pop("filetoken-test", None)
 
 
 def test_resolve_auth_token_returns_none_when_no_file_and_no_env(tmp_path):
@@ -356,7 +357,7 @@ def test_resolve_auth_token_returns_none_when_no_file_and_no_env(tmp_path):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
             executor = CLIAgentExecutor(
-                runtime="claude-code",
+                runtime="codex",
                 runtime_config=rc,
                 config_path=str(tmp_path),  # no .auth-token file here
             )
@@ -371,7 +372,7 @@ def test_create_auth_helper_creates_executable_script(tmp_path):
     rc = RuntimeConfig()
     with patch("shutil.which", return_value="/usr/bin/claude"):
         executor = CLIAgentExecutor(
-            runtime="claude-code",
+            runtime="codex",
             runtime_config=rc,
             config_path=str(tmp_path),
         )
@@ -410,255 +411,138 @@ def test_auth_helper_created_when_apiKeyHelper_pattern(tmp_path):
     assert "test-api-key" in content
 
 
-# ---------- _get_a2a_instructions non-MCP path (line 219) ----------
+# A2A instructions tests moved to test_executor_helpers.py — the CLI executor
+# now calls get_a2a_instructions() from the shared module directly in
+# _build_command(), with no wrapper method of its own.
 
 
-def test_get_a2a_instructions_non_mcp_path(tmp_path):
-    """Non-MCP runtimes (ollama/custom) get CLI delegation instructions."""
-    rc = RuntimeConfig(command="myagent")
-    with patch("shutil.which", return_value="/usr/bin/myagent"):
+# Helper-method tests for _set_current_task, _recall_memories, _commit_memory
+# moved to tests/test_executor_helpers.py — they exercise shared code in
+# executor_helpers.py that both CLIAgentExecutor and ClaudeSDKExecutor call.
+
+
+async def test_execute_injects_delegation_results_into_prompt(tmp_path):
+    """When delegation results are present, execute() prepends them to the prompt."""
+    executor = _make_executor(config_path=str(tmp_path))
+    ctx = _make_context(["Follow up question"])
+    eq = _make_event_queue()
+
+    captured = {}
+
+    async def fake_run_cli(user_input, _event_queue):
+        captured["user_input"] = user_input
+
+    with patch("cli_executor.read_delegation_results",
+               return_value="- [completed] Prior task done"), \
+         patch("cli_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("cli_executor.set_current_task", new=AsyncMock()), \
+         patch("cli_executor.commit_memory", new=AsyncMock()), \
+         patch.object(executor, "_run_cli", side_effect=fake_run_cli):
+        await executor.execute(ctx, eq)
+
+    assert "Delegation results received while you were idle" in captured["user_input"]
+    assert "Prior task done" in captured["user_input"]
+    assert "Follow up question" in captured["user_input"]
+
+
+async def test_run_cli_timeout_kill_already_exited():
+    """ProcessLookupError from kill() (proc already exited) is silently skipped."""
+    executor = _make_executor(
+        runtime_config=RuntimeConfig(timeout=1),
+    )
+    eq = _make_event_queue()
+
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    proc.kill = MagicMock(side_effect=ProcessLookupError())
+    proc.wait = AsyncMock()
+
+    with patch("asyncio.create_subprocess_exec", return_value=proc):
+        await executor._run_cli("task", eq)
+
+    eq.enqueue_event.assert_called_once()
+    assert "timeout" in str(eq.enqueue_event.call_args[0][0])
+
+
+async def test_run_cli_env_pattern_propagates_auth_token(tmp_path):
+    """When auth_pattern=env, the auth token is injected into subprocess env."""
+    rc = RuntimeConfig(auth_token_env="MY_TOKEN")
+    with patch("shutil.which", return_value="/usr/bin/claude"), \
+         patch.dict(os.environ, {"MY_TOKEN": "secret-token-xyz"}, clear=False):
         executor = CLIAgentExecutor(
-            runtime="custom",
+            runtime="codex",
             runtime_config=rc,
             config_path=str(tmp_path),
         )
-    instructions = executor._get_a2a_instructions()
-    assert "a2a_cli.py" in instructions
-    assert "Inter-Agent Communication" in instructions
-    # Make sure it's NOT the MCP version
-    assert "MCP tools" not in instructions
-
-
-def test_get_a2a_instructions_ollama_is_non_mcp(tmp_path):
-    """Ollama runtime (auth_pattern=None) uses CLI delegation instructions."""
-    rc = RuntimeConfig()
-    with patch("shutil.which", return_value="/usr/bin/ollama"):
-        executor = CLIAgentExecutor(
-            runtime="ollama",
-            runtime_config=rc,
-            config_path=str(tmp_path),
-        )
-    instructions = executor._get_a2a_instructions()
-    assert "a2a_cli.py" in instructions
-
-
-# ---------- _set_current_task HTTP path (lines 232-252) ----------
-
-
-async def test_set_current_task_with_workspace_and_platform(tmp_path):
-    """_set_current_task sends HTTP heartbeat when WORKSPACE_ID and PLATFORM_URL set."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.post = AsyncMock(return_value=mock_resp)
-
-    with patch("cli_executor.httpx.AsyncClient", return_value=mock_client):
-        with patch.dict(os.environ, {
-            "WORKSPACE_ID": "ws-123",
-            "PLATFORM_URL": "http://platform.test",
-        }):
-            # Force a fresh http client
-            if hasattr(executor, "_http_client"):
-                del executor._http_client
-            # Inject mock client directly
-            executor._http_client = mock_client
-            await executor._set_current_task("Running analysis")
 
-    mock_client.post.assert_called_once()
-    call_args = mock_client.post.call_args
-    assert "heartbeat" in call_args[0][0]
-    assert call_args[1]["json"]["current_task"] == "Running analysis"
+    captured_env = {}
 
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        proc = AsyncMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b'{"result": "ok"}', b""))
+        return proc
 
-async def test_set_current_task_http_exception_is_suppressed(tmp_path):
-    """_set_current_task swallows HTTP exceptions (best-effort)."""
-    executor = _make_executor(config_path=str(tmp_path))
+    eq = _make_event_queue()
+    with patch("asyncio.create_subprocess_exec", side_effect=fake_create_subprocess_exec):
+        await executor._run_cli("hi", eq)
 
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=Exception("network failure"))
-    executor._http_client = mock_client
+    assert captured_env.get("MY_TOKEN") == "secret-token-xyz"
 
-    with patch.dict(os.environ, {
-        "WORKSPACE_ID": "ws-123",
-        "PLATFORM_URL": "http://platform.test",
-    }):
-        # Should not raise
-        await executor._set_current_task("some task")
 
+async def test_run_cli_session_error_exhausts_all_retries():
+    """Session errors retried until exhaustion then surface as error."""
+    executor = _make_executor()
+    eq = _make_event_queue()
 
-async def test_set_current_task_no_workspace_id_skips_http(tmp_path):
-    """_set_current_task skips HTTP when WORKSPACE_ID or PLATFORM_URL is absent."""
-    executor = _make_executor(config_path=str(tmp_path))
+    proc = AsyncMock()
+    proc.returncode = 1
+    proc.communicate = AsyncMock(return_value=(b"", b"no conversation found with that id"))
 
-    mock_client = AsyncMock()
-    executor._http_client = mock_client
+    with patch("asyncio.create_subprocess_exec", return_value=proc), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        await executor._run_cli("task", eq)
 
-    with patch.dict(os.environ, {}, clear=True):
-        os.environ.pop("WORKSPACE_ID", None)
-        os.environ.pop("PLATFORM_URL", None)
-        await executor._set_current_task("task")
+    eq.enqueue_event.assert_called_once()
 
-    mock_client.post.assert_not_called()
 
+async def test_run_cli_timeout_kill_raises_generic_exception():
+    """Kill raising non-ProcessLookupError is logged and swallowed."""
+    executor = _make_executor(
+        runtime_config=RuntimeConfig(timeout=1),
+    )
+    eq = _make_event_queue()
 
-# ---------- _recall_memories (lines 265, 274-276) ----------
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    proc.kill = MagicMock(side_effect=RuntimeError("kill refused"))
+    proc.wait = AsyncMock()
 
+    with patch("asyncio.create_subprocess_exec", return_value=proc):
+        await executor._run_cli("task", eq)
 
-async def test_recall_memories_success(tmp_path):
-    """_recall_memories returns formatted lines when API returns a list."""
-    executor = _make_executor(config_path=str(tmp_path))
+    eq.enqueue_event.assert_called_once()
+    assert "timeout" in str(eq.enqueue_event.call_args[0][0])
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = [
-        {"scope": "LOCAL", "content": "User likes Python"},
-        {"scope": "GLOBAL", "content": "User prefers concise answers"},
-    ]
 
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-    mock_client.get = AsyncMock(return_value=mock_resp)
-    mock_client.is_closed = False  # prevent _get_http_client from replacing the mock
-    executor._http_client = mock_client
+async def test_run_cli_timeout_proc_wait_raises_generic_exception():
+    """proc.wait() raising non-TimeoutError exception is logged and swallowed."""
+    executor = _make_executor(
+        runtime_config=RuntimeConfig(timeout=1),
+    )
+    eq = _make_event_queue()
 
-    with patch.dict(os.environ, {
-        "WORKSPACE_ID": "ws-abc",
-        "PLATFORM_URL": "http://platform.test",
-    }):
-        result = await executor._recall_memories()
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    proc.kill = MagicMock()
+    proc.wait = AsyncMock(side_effect=RuntimeError("wait broken"))
 
-    assert "User likes Python" in result
-    assert "User prefers concise answers" in result
-    assert "[LOCAL]" in result
+    with patch("asyncio.create_subprocess_exec", return_value=proc):
+        await executor._run_cli("task", eq)
 
-
-async def test_recall_memories_empty_list_returns_empty_string(tmp_path):
-    """_recall_memories returns empty string when API returns empty list."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = []
-
-    mock_client = AsyncMock()
-    mock_client.get = AsyncMock(return_value=mock_resp)
-    executor._http_client = mock_client
-
-    with patch.dict(os.environ, {
-        "WORKSPACE_ID": "ws-abc",
-        "PLATFORM_URL": "http://platform.test",
-    }):
-        result = await executor._recall_memories()
-
-    assert result == ""
-
-
-async def test_recall_memories_no_workspace_returns_empty(tmp_path):
-    """_recall_memories returns empty string when WORKSPACE_ID not set."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    with patch.dict(os.environ, {}, clear=True):
-        os.environ.pop("WORKSPACE_ID", None)
-        os.environ.pop("PLATFORM_URL", None)
-        result = await executor._recall_memories()
-
-    assert result == ""
-
-
-async def test_recall_memories_exception_returns_empty(tmp_path):
-    """_recall_memories swallows exceptions and returns empty string."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    mock_client = AsyncMock()
-    mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
-    executor._http_client = mock_client
-
-    with patch.dict(os.environ, {
-        "WORKSPACE_ID": "ws-abc",
-        "PLATFORM_URL": "http://platform.test",
-    }):
-        result = await executor._recall_memories()
-
-    assert result == ""
-
-
-# ---------- _commit_memory (lines 283, 289-290, 296) ----------
-
-
-async def test_commit_memory_no_workspace_returns_early(tmp_path):
-    """_commit_memory returns early (no HTTP call) when WORKSPACE_ID not set."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    mock_client = AsyncMock()
-    executor._http_client = mock_client
-
-    with patch.dict(os.environ, {}, clear=True):
-        os.environ.pop("WORKSPACE_ID", None)
-        os.environ.pop("PLATFORM_URL", None)
-        await executor._commit_memory("something to remember")
-
-    mock_client.post.assert_not_called()
-
-
-async def test_commit_memory_no_content_returns_early(tmp_path):
-    """_commit_memory returns early when content is empty."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    mock_client = AsyncMock()
-    executor._http_client = mock_client
-
-    with patch.dict(os.environ, {
-        "WORKSPACE_ID": "ws-abc",
-        "PLATFORM_URL": "http://platform.test",
-    }):
-        await executor._commit_memory("")
-
-    mock_client.post.assert_not_called()
-
-
-async def test_commit_memory_posts_to_api(tmp_path):
-    """_commit_memory sends POST when workspace_id, platform_url, and content present."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(return_value=mock_resp)
-    mock_client.is_closed = False  # prevent _get_http_client from replacing the mock
-    executor._http_client = mock_client
-
-    with patch.dict(os.environ, {
-        "WORKSPACE_ID": "ws-abc",
-        "PLATFORM_URL": "http://platform.test",
-    }):
-        await executor._commit_memory("Important fact about user")
-
-    mock_client.post.assert_called_once()
-    call_args = mock_client.post.call_args
-    assert "memories" in call_args[0][0]
-    assert call_args[1]["json"]["content"] == "Important fact about user"
-
-
-async def test_commit_memory_exception_is_suppressed(tmp_path):
-    """_commit_memory swallows HTTP exceptions (best-effort)."""
-    executor = _make_executor(config_path=str(tmp_path))
-
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=Exception("timeout"))
-    executor._http_client = mock_client
-
-    with patch.dict(os.environ, {
-        "WORKSPACE_ID": "ws-abc",
-        "PLATFORM_URL": "http://platform.test",
-    }):
-        # Should not raise
-        await executor._commit_memory("some content")
+    eq.enqueue_event.assert_called_once()
+    assert "timeout" in str(eq.enqueue_event.call_args[0][0])
 
 
 # ---------- _build_command ollama model positional arg (line 316) ----------
@@ -723,26 +607,9 @@ def test_build_command_ollama_positional_prompt(tmp_path):
     assert "-p" not in cmd
 
 
-# ---------- _run_cli: session_id from JSON "session_id" field (line 426+) ----------
-
-
-async def test_run_cli_captures_session_id_from_json():
-    """session_id field in JSON output is captured."""
-    executor = _make_executor()
-
-    mock_proc = AsyncMock()
-    mock_proc.communicate = AsyncMock(
-        return_value=(b'{"session_id": "new-session-99", "result": "All done"}', b"")
-    )
-    mock_proc.returncode = 0
-
-    eq = _make_event_queue()
-
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-        await executor._run_cli("Do task", eq)
-
-    assert executor._session_id == "new-session-99"
-    eq.enqueue_event.assert_called_once()
+# Session-id-from-JSON test removed: the claude-code runtime used to emit
+# --output-format json and the CLI executor parsed it. Now claude-code goes
+# through ClaudeSDKExecutor, so the CLI executor no longer JSON-parses stdout.
 
 
 # ---------- _run_cli: rate limit retry (lines 442-443, 468-474) ----------
@@ -811,10 +678,9 @@ async def test_run_cli_rate_limit_in_stderr_retries():
 # ---------- _run_cli: auth error clears session and retries (line 364+) ----------
 
 
-async def test_run_cli_auth_error_clears_session_id():
-    """Auth error in stderr clears _session_id and retries."""
+async def test_run_cli_auth_error_retries():
+    """Auth error in stderr triggers retry."""
     executor = _make_executor()
-    executor._session_id = "existing-session"
 
     proc_auth_err = AsyncMock()
     proc_auth_err.returncode = 1
@@ -824,7 +690,7 @@ async def test_run_cli_auth_error_clears_session_id():
 
     proc_ok = AsyncMock()
     proc_ok.returncode = 0
-    proc_ok.communicate = AsyncMock(return_value=(b'{"result": "retried ok"}', b""))
+    proc_ok.communicate = AsyncMock(return_value=(b"retried ok", b""))
 
     call_iter = iter([proc_auth_err, proc_ok])
 
@@ -834,9 +700,6 @@ async def test_run_cli_auth_error_clears_session_id():
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await executor._run_cli("task", eq)
 
-    # Session should have been cleared on auth error
-    # (may have been re-set if second attempt has JSON with session_id)
-    # Just verify the retry happened and an event was enqueued
     assert eq.enqueue_event.call_count >= 1
 
 
@@ -844,13 +707,12 @@ async def test_run_cli_auth_error_clears_session_id():
 
 
 async def test_run_cli_empty_result_all_retries_returns_no_response():
-    """When all retries return empty output, enqueue 'no response' message."""
+    """When all retries return empty stdout, enqueue 'no response' message."""
     executor = _make_executor()
 
-    # claude-code with JSON output that has empty result
     proc = AsyncMock()
     proc.returncode = 0
-    proc.communicate = AsyncMock(return_value=(b'{"result": ""}', b""))
+    proc.communicate = AsyncMock(return_value=(b"", b""))
 
     eq = _make_event_queue()
 
@@ -864,7 +726,7 @@ async def test_run_cli_empty_result_all_retries_returns_no_response():
 
 
 async def test_run_cli_empty_result_on_intermediate_attempt_retries():
-    """Empty result on first attempt triggers retry before giving up."""
+    """Empty stdout on first attempt triggers retry before giving up."""
     executor = _make_executor()
 
     call_count = 0
@@ -873,9 +735,8 @@ async def test_run_cli_empty_result_on_intermediate_attempt_retries():
         nonlocal call_count
         call_count += 1
         if call_count < 3:
-            # Empty result triggers retry
-            return (b'{"result": ""}', b"")
-        return (b'{"result": "finally got one"}', b"")
+            return (b"", b"")
+        return (b"finally got one", b"")
 
     proc = AsyncMock()
     proc.returncode = 0
@@ -888,6 +749,7 @@ async def test_run_cli_empty_result_on_intermediate_attempt_retries():
             await executor._run_cli("task", eq)
 
     eq.enqueue_event.assert_called_once()
+    assert "finally got one" in str(eq.enqueue_event.call_args[0][0])
     assert "finally got one" in str(eq.enqueue_event.call_args[0][0])
 
 
@@ -910,7 +772,7 @@ async def test_run_cli_timeout_proc_kill_raises():
             await executor._run_cli("slow task", eq)
 
     eq.enqueue_event.assert_called_once()
-    assert "timed out" in str(eq.enqueue_event.call_args[0][0])
+    assert "timeout" in str(eq.enqueue_event.call_args[0][0])
 
 
 async def test_run_cli_timeout_calls_proc_wait_to_reap_zombie():
@@ -954,7 +816,7 @@ async def test_run_cli_timeout_calls_proc_wait_to_reap_zombie():
     mock_proc.wait.assert_called()
     # And we got the timeout message
     eq.enqueue_event.assert_called_once()
-    assert "timed out" in str(eq.enqueue_event.call_args[0][0])
+    assert "timeout" in str(eq.enqueue_event.call_args[0][0])
 
 
 async def test_run_cli_timeout_proc_wait_also_times_out():
@@ -974,7 +836,7 @@ async def test_run_cli_timeout_proc_wait_also_times_out():
 
     # Even though both wait_for calls timed out, we still emit the timeout event
     eq.enqueue_event.assert_called_once()
-    assert "timed out" in str(eq.enqueue_event.call_args[0][0])
+    assert "timeout" in str(eq.enqueue_event.call_args[0][0])
     # And we still tried to kill
     mock_proc.kill.assert_called_once()
 
@@ -1043,9 +905,6 @@ async def test_run_cli_non_json_output_used_raw():
 async def test_execute_injects_memories_into_prompt(tmp_path):
     """Memories are prepended to the prompt when returned."""
     executor = _make_executor(config_path=str(tmp_path))
-    executor._recall_memories = AsyncMock(return_value="- [LOCAL] remember this")
-    executor._commit_memory = AsyncMock()
-    executor._set_current_task = AsyncMock()
 
     captured_inputs = []
 
@@ -1055,9 +914,14 @@ async def test_execute_injects_memories_into_prompt(tmp_path):
 
     executor._run_cli = capture_run_cli
 
-    context = _make_context(["Do the task"])
-    eq = _make_event_queue()
-    await executor.execute(context, eq)
+    with patch("cli_executor.recall_memories",
+               new=AsyncMock(return_value="- [LOCAL] remember this")), \
+         patch("cli_executor.commit_memory", new=AsyncMock()), \
+         patch("cli_executor.set_current_task", new=AsyncMock()), \
+         patch("cli_executor.read_delegation_results", return_value=""):
+        context = _make_context(["Do the task"])
+        eq = _make_event_queue()
+        await executor.execute(context, eq)
 
     assert len(captured_inputs) == 1
     assert "Prior context from memory" in captured_inputs[0]
@@ -1071,9 +935,6 @@ async def test_execute_injects_memories_into_prompt(tmp_path):
 async def test_execute_no_memories_no_injection(tmp_path):
     """No memories = prompt passed through unchanged."""
     executor = _make_executor(config_path=str(tmp_path))
-    executor._recall_memories = AsyncMock(return_value="")
-    executor._commit_memory = AsyncMock()
-    executor._set_current_task = AsyncMock()
 
     captured_inputs = []
 
@@ -1082,9 +943,13 @@ async def test_execute_no_memories_no_injection(tmp_path):
 
     executor._run_cli = capture_run_cli
 
-    context = _make_context(["Clean task without memories"])
-    eq = _make_event_queue()
-    await executor.execute(context, eq)
+    with patch("cli_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("cli_executor.commit_memory", new=AsyncMock()), \
+         patch("cli_executor.set_current_task", new=AsyncMock()), \
+         patch("cli_executor.read_delegation_results", return_value=""):
+        context = _make_context(["Clean task without memories"])
+        eq = _make_event_queue()
+        await executor.execute(context, eq)
 
     assert captured_inputs[0] == "Clean task without memories"
 
@@ -1136,7 +1001,7 @@ def test_init_warns_when_command_not_found(tmp_path, caplog):
     with patch("shutil.which", return_value=None):
         with caplog.at_level(logging.WARNING, logger="cli_executor"):
             CLIAgentExecutor(
-                runtime="claude-code",
+                runtime="codex",
                 runtime_config=rc,
                 config_path=str(tmp_path),
             )
@@ -1146,61 +1011,16 @@ def test_init_warns_when_command_not_found(tmp_path, caplog):
 # ---------- lines 233-234: heartbeat updated in _set_current_task ----------
 
 
-async def test_set_current_task_updates_heartbeat(tmp_path):
-    """_set_current_task updates heartbeat.current_task and active_tasks."""
-    heartbeat = MagicMock()
-    heartbeat.current_task = ""
-    heartbeat.active_tasks = 0
-
-    executor = _make_executor(heartbeat=heartbeat, config_path=str(tmp_path))
-
-    with patch.dict(os.environ, {}, clear=True):
-        os.environ.pop("WORKSPACE_ID", None)
-        os.environ.pop("PLATFORM_URL", None)
-        await executor._set_current_task("Working on analysis")
-
-    assert heartbeat.current_task == "Working on analysis"
-    assert heartbeat.active_tasks == 1
-
-
-async def test_set_current_task_clears_heartbeat_when_empty(tmp_path):
-    """_set_current_task sets active_tasks=0 when task string is empty."""
-    heartbeat = MagicMock()
-    heartbeat.current_task = "old task"
-    heartbeat.active_tasks = 1
-
-    executor = _make_executor(heartbeat=heartbeat, config_path=str(tmp_path))
-
-    with patch.dict(os.environ, {}, clear=True):
-        os.environ.pop("WORKSPACE_ID", None)
-        os.environ.pop("PLATFORM_URL", None)
-        await executor._set_current_task("")
-
-    assert heartbeat.current_task == ""
-    assert heartbeat.active_tasks == 0
+# Heartbeat-update tests for set_current_task moved to test_executor_helpers.py —
+# the CLI executor now calls set_current_task() directly from the shared module
+# with no wrapper of its own.
 
 
 # ---------- line 296: _get_system_prompt reads from file ----------
 
 
-def test_get_system_prompt_reads_from_file(tmp_path):
-    """_get_system_prompt returns content from system-prompt.md when it exists."""
-    prompt_file = tmp_path / "system-prompt.md"
-    prompt_file.write_text("  You are a specialist agent.  \n")
-
-    executor = _make_executor(config_path=str(tmp_path))
-    result = executor._get_system_prompt()
-    assert result == "You are a specialist agent."
-
-
-def test_get_system_prompt_falls_back_to_init_value(tmp_path):
-    """_get_system_prompt falls back to init-time system_prompt when no file."""
-    executor = _make_executor(
-        system_prompt="Fallback prompt",
-        config_path=str(tmp_path),
-    )
-    result = executor._get_system_prompt()
-    assert result == "Fallback prompt"
+# get_system_prompt tests moved to test_executor_helpers.py — the CLI executor
+# now calls the shared helper directly with no wrapper.
 
 
 # ---------- line 364: auth error retries exhaust → enqueues error ----------
@@ -1209,7 +1029,6 @@ def test_get_system_prompt_falls_back_to_init_value(tmp_path):
 async def test_run_cli_auth_error_exhausts_all_retries():
     """Auth error on every attempt eventually enqueues error (all retries spent)."""
     executor = _make_executor()
-    executor._session_id = "old-session"
 
     proc = AsyncMock()
     proc.returncode = 1
@@ -1234,9 +1053,6 @@ async def test_run_cli_auth_error_exhausts_all_retries():
 async def test_execute_uses_root_text_when_no_direct_text(tmp_path):
     """execute() extracts text from part.root.text when part.text is absent."""
     executor = _make_executor(config_path=str(tmp_path))
-    executor._recall_memories = AsyncMock(return_value="")
-    executor._commit_memory = AsyncMock()
-    executor._set_current_task = AsyncMock()
 
     captured_inputs = []
 
@@ -1253,62 +1069,16 @@ async def test_execute_uses_root_text_when_no_direct_text(tmp_path):
     context = MagicMock()
     context.message.parts = [part]
     eq = _make_event_queue()
-    await executor.execute(context, eq)
+    with patch("cli_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("cli_executor.commit_memory", new=AsyncMock()), \
+         patch("cli_executor.set_current_task", new=AsyncMock()), \
+         patch("cli_executor.read_delegation_results", return_value=""):
+        await executor.execute(context, eq)
 
     assert len(captured_inputs) == 1
     assert "text from root attribute" in captured_inputs[0]
 
 
-# ---------------------------------------------------------------------------
-# Delegation results injection tests
-# ---------------------------------------------------------------------------
-
-def test_read_delegation_results_empty(tmp_path):
-    """No results file → empty string."""
-    from cli_executor import CLIAgentExecutor
-    from config import RuntimeConfig
-    executor = CLIAgentExecutor("claude-code", RuntimeConfig(), config_path=str(tmp_path))
-    import os
-    os.environ["DELEGATION_RESULTS_FILE"] = str(tmp_path / "nonexistent.jsonl")
-    result = executor._read_delegation_results()
-    assert result == ""
-
-
-def test_read_delegation_results_parses_and_consumes(tmp_path):
-    """Results file is read, parsed, and consumed (deleted)."""
-    import json
-    from cli_executor import CLIAgentExecutor
-    from config import RuntimeConfig
-    executor = CLIAgentExecutor("claude-code", RuntimeConfig(), config_path=str(tmp_path))
-
-    results_file = tmp_path / "delegation_results.jsonl"
-    results_file.write_text(json.dumps({
-        "delegation_id": "d-1", "status": "completed",
-        "summary": "Task done", "response_preview": "Result here"
-    }) + "\n")
-
-    import os
-    os.environ["DELEGATION_RESULTS_FILE"] = str(results_file)
-    result = executor._read_delegation_results()
-
-    assert "[completed]" in result
-    assert "Task done" in result
-    assert "Result here" in result
-    # File should be consumed
-    assert not results_file.exists()
-
-
-def test_read_delegation_results_handles_bad_json(tmp_path):
-    """Malformed JSON lines are skipped gracefully."""
-    from cli_executor import CLIAgentExecutor
-    from config import RuntimeConfig
-    executor = CLIAgentExecutor("claude-code", RuntimeConfig(), config_path=str(tmp_path))
-
-    results_file = tmp_path / "delegation_results.jsonl"
-    results_file.write_text("not json\n{bad\n")
-
-    import os
-    os.environ["DELEGATION_RESULTS_FILE"] = str(results_file)
-    result = executor._read_delegation_results()
-
-    assert result == ""
+# Delegation results tests moved to tests/test_executor_helpers.py — the
+# function now lives in executor_helpers.read_delegation_results() and is
+# shared by both executors.

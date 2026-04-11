@@ -241,22 +241,23 @@ class TestClaudeCodeAdapter:
         await adapter.setup(config)
 
     @pytest.mark.asyncio
-    async def test_create_executor_returns_cli_executor(self, monkeypatch):
+    async def test_create_executor_returns_sdk_executor(self, monkeypatch):
         from adapters.claude_code.adapter import ClaudeCodeAdapter
 
         fake_executor = MagicMock()
-        fake_cli_module = MagicMock()
-        fake_cli_module.CLIAgentExecutor = MagicMock(return_value=fake_executor)
-        monkeypatch.setitem(sys.modules, "cli_executor", fake_cli_module)
-
-        # Also mock config RuntimeConfig
-        from config import RuntimeConfig
-        monkeypatch.setitem(sys.modules, "config", MagicMock(RuntimeConfig=RuntimeConfig))
+        fake_sdk_module = MagicMock()
+        fake_sdk_module.ClaudeSDKExecutor = MagicMock(return_value=fake_executor)
+        monkeypatch.setitem(sys.modules, "claude_sdk_executor", fake_sdk_module)
 
         adapter = ClaudeCodeAdapter()
-        result = await adapter.create_executor(_make_config(runtime_config={}))
+        result = await adapter.create_executor(
+            _make_config(runtime_config={"model": "opus"})
+        )
 
         assert result is fake_executor
+        # Verify model was forwarded from runtime_config
+        kwargs = fake_sdk_module.ClaudeSDKExecutor.call_args.kwargs
+        assert kwargs["model"] == "opus"
 
 
 # ============================================================================

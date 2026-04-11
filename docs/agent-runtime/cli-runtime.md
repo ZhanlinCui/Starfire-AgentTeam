@@ -59,12 +59,15 @@ runtime: claude-code
 runtime_config:
   model: sonnet          # or opus, haiku
   auth_token_file: .auth-token   # OAuth token file in /configs/
-  timeout: 0           # seconds
 ```
 
-Invokes: `claude --print --dangerously-skip-permissions --allowed-tools Bash --model sonnet --system-prompt <prompt> -p "<message>"`
+Uses the **Claude Agent SDK** (`claude-agent-sdk` Python package) to invoke the Claude Code engine programmatically via `ClaudeSDKExecutor`. This replaced the earlier subprocess-based approach (`claude --print ...`) to eliminate stdout buffering, zombie processes, session-ID parsing fragility, and ~500ms per-message startup overhead.
 
-**Auth:** Uses the `CLAUDE_CODE_OAUTH_TOKEN` env var — the OAuth token is read from `/configs/.auth-token` and injected into the subprocess environment. The `--bare` flag is **not** used because it disables OAuth and reduces the agent to a simple LLM provider. Without `--bare`, each workspace is a full agentic Claude Code instance with hooks, CLAUDE.md discovery, auto-memory, and plugin support.
+The SDK uses the same Claude Code engine under the hood — plugins, CLAUDE.md discovery, hooks, auto-memory, and skills all work identically. The `@anthropic-ai/claude-code` npm package is still installed in the image because the SDK wraps it internally.
+
+**Auth:** Uses the `CLAUDE_CODE_OAUTH_TOKEN` env var — the OAuth token is read from `/configs/.auth-token` and picked up by the SDK automatically.
+
+**Concurrency:** Turns are serialized per-executor via an `asyncio.Lock` so session state stays race-free. Cooperative cancel support via `aclose()` on the SDK's async generator.
 
 **Important:** Claude Code refuses to run as root with `--dangerously-skip-permissions`. The Dockerfile creates a non-root `agent` user.
 
@@ -111,17 +114,18 @@ runtime: openclaw
 
 ## Session Continuity (Claude Code)
 
-Claude Code workspaces maintain conversation state across messages using the `--resume` flag:
+Claude Code workspaces maintain conversation state across messages using the SDK's `resume` option:
 
-1. **First message**: runs with `--output-format json` to capture the `session_id` from the response
-2. **Subsequent messages**: runs with `--resume <session_id>` to continue the same conversation
+1. **First message**: the SDK's `ResultMessage` returns a `session_id`
+2. **Subsequent messages**: the SDK is called with `resume=<session_id>` to continue the same conversation
 3. **System prompt**: only injected on the first message — resumed sessions already have it
+4. **Memories**: recalled from the platform API on the first turn only; subsequent turns already have context
 
-Session state is stored inside the container at `~/.claude/` and persists across messages but resets on container restart. This means the PM remembers what you discussed earlier in the conversation.
+Session state is stored inside the container at `~/.claude/` and persists across messages but resets on container restart.
 
 ## System Prompt
 
-CLI runtimes load `system-prompt.md` from the workspace's config directory (`/configs/system-prompt.md`). The prompt is injected on the **first message only** (subsequent messages resume the session). Hot-reload still works — restart the container to pick up prompt changes.
+All runtimes load `system-prompt.md` from the workspace's config directory (`/configs/system-prompt.md`). For Claude Code (SDK executor) and other CLI runtimes, the prompt is re-read on each message (supports hot-reload without restart). A2A delegation instructions are appended automatically.
 
 For LangGraph runtimes, the system prompt is built from multiple sources (config, skills, plugins, peer capabilities) at startup.
 
@@ -241,8 +245,10 @@ This pushes an immediate heartbeat with `current_task` to the platform, which br
 | File | Role |
 |------|------|
 | `main.py` | Runtime selector — discovers adapter, calls setup/create_executor |
+| `claude_sdk_executor.py` | `ClaudeSDKExecutor` for Claude Code runtime (SDK-based, replaces subprocess) |
+| `executor_helpers.py` | Shared helpers: memory recall/commit, delegation results, heartbeat, system prompt, error sanitization |
+| `cli_executor.py` | `CLIAgentExecutor` for Codex, Ollama, custom runtimes (subprocess-based) |
 | `a2a_executor.py` | `LangGraphA2AExecutor`, shared `set_current_task()`, `_extract_history()` |
-| `cli_executor.py` | `CLIAgentExecutor` for Claude Code (subprocess-based) |
 | `adapters/base.py` | `BaseAdapter` interface + `AdapterConfig` dataclass |
 | `adapters/__init__.py` | Auto-discovers adapters from subdirectories |
 | `agent_molecule_status.py` | CLI tool + module for updating canvas task display from any process |
@@ -252,11 +258,12 @@ This pushes an immediate heartbeat with `current_task` to the platform, which br
 
 ## Rate Limit Handling
 
-The CLI executor includes built-in retry logic with exponential backoff:
+Both executors include built-in retry logic with exponential backoff:
 - Empty responses (common rate limit signal) → retry up to 3 times (5s, 10s, 20s)
 - Rate limit errors (429, "overloaded") → retry with same backoff
-- Auth errors (OAuth token transient failures) → clear session, retry with backoff
-- Timeouts → kill subprocess and report (no retry)
+- Auth errors (OAuth token transient failures) → retry with backoff
+- Timeouts → kill subprocess (CLI) or close stream (SDK) and report (no retry)
+- All error messages are sanitized via `sanitize_agent_error()` — no raw stderr or exception details leak to the user chat
 
 The A2A CLI (`a2a_cli.py`) also retries delegation calls on rate limits.
 
