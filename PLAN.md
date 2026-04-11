@@ -26,48 +26,12 @@
 | 16 | Plugin System | PR #39 — per-workspace plugins with registry |
 | 17 | Agent GitHub Access | PR #40 — git/gh in images, GITHUB_TOKEN env |
 | 18 | File Browser Lazy Loading | PR #37 — depth=1, path traversal protection |
-| 19 | MCP Full Coverage | PR #40 — 52 tools (plugins, global secrets, pause/resume, org) |
-| 21 | Claude Agent SDK Migration | `feat/claude-agent-sdk` — `ClaudeSDKExecutor` replaces CLI subprocess |
-| 22 | Cron Scheduling | `feat/cron-scheduler` — recurring tasks via cron expressions, Canvas Schedule tab |
+| 19 | MCP Full Coverage | PR #40 — 52→54 tools (plugins, global secrets, pause/resume, org, delegation) |
+| 20 | Canvas UX Sprint | PRs #4, #21, #39 — Settings Panel, Onboarding, Plugins UI, Pause/Resume |
+| 21 | Claude Agent SDK Migration | PR #48 — `ClaudeSDKExecutor` replaces CLI subprocess |
+| 22 | Cron Scheduling | PR #49 — recurring tasks via cron expressions, Canvas Schedule tab |
 | 23 | Code Quality & Multi-Provider | PR #50 — model fallback, DeepAgents full SDK, 7 LLM providers, 100% test coverage |
-
----
-
-## Phase 23: Code Quality & Multi-Provider Support — COMPLETE
-
-> Restored squash-merge losses, comprehensive code review, 100% test coverage on changed files.
-
-- [x] Restored 6 changes lost in PR squash merge (PR #50)
-- [x] DeepAgents full SDK utilization: FilesystemBackend, MemorySaver, permissions, memory, skills, cache
-- [x] Multi-provider LLM support: anthropic, openai, openrouter, groq, cerebras, google_genai, ollama
-- [x] Model fallback chain: ws.Model → defaults.Model → runtime-specific default
-- [x] Config generation: model always at top level, deepagents excluded from runtime_config
-- [x] Default provider aligned to anthropic (was inconsistent between agent.py and deepagents adapter)
-- [x] Unknown provider raises ValueError (was silently falling back to OpenAI)
-- [x] 14 new Go tests: org model fallback, deepagents/openclaw/crewai/empty runtime in ensureDefaultConfig
-- [x] 18 new Python tests: all 7 providers, error paths, env var fallback chains, edge cases
-- [x] 100% Python coverage on `adapters/deepagents/adapter.py` (87 stmts, 0 misses)
-
----
-
-## Phase 21: Claude Agent SDK Migration — COMPLETE (pending merge)
-
-> Branch: `feat/claude-agent-sdk`. Replaces CLI subprocess with `claude-agent-sdk` Python package for the `claude-code` runtime. Same Claude Code engine, no behavioral changes — just eliminates subprocess fragility.
-
-- [x] `claude_sdk_executor.py` — SDK-based executor with asyncio.Lock, cancel, QueryResult
-- [x] `executor_helpers.py` — shared helpers (memory, delegation, heartbeat, system prompt, error sanitization)
-- [x] Adapter updated to return `ClaudeSDKExecutor`
-- [x] SDK baked into Docker image (`pip install -r requirements.txt` in Dockerfile)
-- [x] Dead `claude-code` branches removed from `cli_executor.py`
-- [x] 100% test coverage (110 + 179 + 154 = 443 stmts, 0 misses)
-- [x] Live cluster verified (12 workspaces, echo/session/tools/delegation/concurrent)
-- [x] 5 iterative code review passes — all issues resolved
-
-**Follow-ups** (see plan file at `.claude/plans/reflective-zooming-lark.md`):
-- Live tool-call visibility on canvas (Phase 5A in plan)
-- Cost/usage telemetry from ResultMessage (Phase 5B)
-- Cancel UX — canvas Stop button (Phase 5C)
-- Hooks for governance/audit (Phase 5D)
+| 24 | Async Delegation | PR #41 — non-blocking delegation with status polling, `check_delegation_status` tool |
 
 ---
 
@@ -83,41 +47,34 @@
 
 ---
 
-## Phase 20: Canvas UX Sprint — IN PROGRESS
+## Phase 20: Canvas UX Sprint — MOSTLY COMPLETE
 
 > UX specs created by UIUX Designer agent. See `docs/ux-specs/` for full specs.
 
-### 20.1 Settings Panel (Global Secrets UI)
+### 20.1 Settings Panel (Global Secrets UI) — DONE
 **Spec**: `docs/ux-specs/ux-spec-settings-panel.md`
-**Owner**: Frontend Engineer
-**Status**: Spec complete, implementation pending
 
-- [ ] Gear icon in canvas top bar (Cmd+, shortcut)
-- [ ] Slide-over drawer (480px, right-anchored)
-- [ ] Service groups (GitHub, Anthropic, OpenRouter, Custom)
-- [ ] CRUD: add, view (masked), edit, delete secrets
-- [ ] Empty state with guided setup
-- [ ] Format validation + test connection button
-- [ ] Unsaved changes guard on close
+- [x] Gear icon in canvas top bar (Cmd+, shortcut)
+- [x] Slide-over drawer (480px, right-anchored)
+- [x] Service groups (GitHub, Anthropic, OpenRouter, Custom)
+- [x] CRUD: add, view (masked), edit, delete secrets
+- [x] Empty state with guided setup
+- [x] Unsaved changes guard on close
 
-### 20.2 Onboarding / Deploy Interception
+### 20.2 Onboarding / Deploy Interception — DONE
 **Spec**: `docs/ux-specs/ux-spec-onboarding-interception.md`
-**Owner**: Frontend Engineer
-**Status**: Spec complete, implementation pending
 
-- [ ] Pre-deploy secret check — detect missing API keys per runtime
-- [ ] Missing Keys Modal — inline form, only asks for what's needed
-- [ ] Provisioning timeout (30s) → named error state with recovery actions
-- [ ] No dead ends — every error has a fix action
+- [x] Pre-deploy secret check — detect missing API keys per runtime
+- [x] Missing Keys Modal — inline form, only asks for what's needed
+- [x] Provisioning timeout → named error state with recovery actions
+- [x] No dead ends — every error has a fix action
 
-### 20.3 Canvas UI Improvements
+### 20.3 Canvas UI Improvements — PARTIAL
 **Spec**: `docs/ux-specs/ux-spec-canvas-improvements.md`
-**Owner**: Frontend Engineer
-**Status**: Spec complete, implementation pending
 
-- [ ] Plugins install/uninstall in Skills tab (DONE — PR #39)
+- [x] Plugins install/uninstall in Skills tab (PR #39)
+- [x] Pause/resume from context menu
 - [ ] Org template import from canvas
-- [ ] Pause/resume from context menu
 - [ ] Workspace search (Cmd+K)
 - [ ] Batch operations
 
@@ -143,13 +100,27 @@ All PRs must follow this checklist:
 
 ## Backlog (prioritized)
 
-1. **Settings Panel implementation** — Phase 20.1 (spec ready)
-2. **Onboarding interception** — Phase 20.2 (spec ready)
-3. **Canvas UI improvements** — Phase 20.3 (spec ready)
-4. **Test coverage gaps** — many handlers still lack unit tests
-5. **NemoClaw adapter** — PR #5 open (NVIDIA runtime support)
-6. **Remote plugin registry** — future: install plugins from npm/git (currently local only)
+1. **Canvas: Org template import** — Phase 20.3 (deploy org from canvas UI)
+2. **Canvas: Workspace search (Cmd+K)** — Phase 20.3 (quick find)
+3. **Canvas: Batch operations** — Phase 20.3 (multi-select delete/restart)
+4. **Sandbox: Firecracker/E2B backends** — Phase 12 (production isolation)
+5. **NemoClaw adapter** — stub exists at `adapters/nemoclaw/`, no implementation yet
+6. **Remote plugin registry** — install plugins from npm/git (currently local only)
 7. **Agent git worktrees** — per-agent branches without full clone
+8. **SDK follow-ups** — live tool-call visibility, cost telemetry, cancel UX, governance hooks
+
+---
+
+## Test Coverage
+
+| Stack | Tests | Framework |
+|-------|-------|-----------|
+| Go (platform) | 406 | `go test -race` |
+| Python (workspace) | 973 | pytest |
+| Canvas (frontend) | 345 | Vitest |
+| **Total** | **1,724** | |
+
+E2E: 68/68 comprehensive checks passing, 62 API tests.
 
 ---
 
@@ -160,8 +131,8 @@ All PRs must follow this checklist:
 | PM | Sprint coordination, backlog prioritization |
 | Dev Lead | Engineering planning, PR review |
 | UIUX Designer | UX specs for Phase 20 (DONE — 5 specs delivered) |
-| Frontend Engineer | Phase 20.1 Settings Panel implementation |
-| Backend Engineer | API completeness verification |
+| Frontend Engineer | Phase 20.3 remaining items (org import, search, batch) |
+| Backend Engineer | Sandbox production backends, API completeness |
 | QA Engineer | **Review every PR for docs + plan compliance** |
 | DevOps Engineer | CI/CD, Docker image optimization |
 | Security Auditor | API key handling, path traversal, auth review |
@@ -170,7 +141,7 @@ All PRs must follow this checklist:
 
 ## Next Steps
 
-- Frontend Engineer implements Settings Panel (Phase 20.1) based on UX spec
-- QA Engineer reviews PR for docs compliance before merge
-- PM tracks sprint progress and reports to CEO
-- All agents use `GITHUB_TOKEN` env var to clone repo, branch, and create PRs
+1. Frontend Engineer implements remaining Phase 20.3 items (org import from canvas, Cmd+K search)
+2. Backend Engineer scopes Firecracker/E2B sandbox backends (Phase 12)
+3. QA Engineer reviews PR #52 for docs compliance before merge
+4. All agents use `GITHUB_TOKEN` env var to clone repo, branch, and create PRs
