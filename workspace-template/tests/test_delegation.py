@@ -1,4 +1,3 @@
-import os
 """Tests for tools/delegation.py (async delegation model).
 
 The delegation tool now returns immediately with a task_id and runs the
@@ -11,6 +10,7 @@ A2A request in the background. Tests verify:
 
 import asyncio
 import importlib.util
+import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 

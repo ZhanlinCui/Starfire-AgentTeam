@@ -124,7 +124,7 @@ class BaseAdapter(ABC):
                     seen_skill_ids.add(skill.metadata.id)
         logger.info(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
 
-        # Assemble tools: 5 core + skill tools
+        # Assemble tools: 6 core + skill tools
         all_tools = [delegate_to_workspace, check_delegation_status, request_approval, commit_memory, search_memory, run_code]
         for skill in loaded_skills:
             all_tools.extend(skill.tools)
