@@ -29,8 +29,8 @@ import { SearchDialog } from "./SearchDialog";
 import { Toaster } from "./Toaster";
 import { Toolbar } from "./Toolbar";
 import { ConfirmDialog } from "./ConfirmDialog";
-// Phase 20 components — disabled until integration issues resolved
-// import { SettingsPanel, DeleteConfirmDialog } from "./settings";
+// Phase 20 components
+import { SettingsPanel, DeleteConfirmDialog } from "./settings";
 // import { ProvisioningTimeout } from "./ProvisioningTimeout";
 
 const nodeTypes = {
@@ -152,8 +152,6 @@ function CanvasInner() {
     };
   }, [setCenter]);
   useEffect(() => {
-    // Imperative event handler: uses getState() to read the freshest store
-    // state at the moment the event fires (not closure-captured stale data).
     const handler = (e: Event) => {
       const { nodeId } = (e as CustomEvent).detail;
       const state = useCanvasStore.getState();
@@ -225,7 +223,7 @@ function CanvasInner() {
 
   // Determine which workspace ID to use for global settings.
   // Fall back to "global" when no specific node is selected.
-  // const settingsWorkspaceId = selectedNodeId ?? "global";
+  const settingsWorkspaceId = selectedNodeId ?? "global";
 
   return (
     <div className="w-screen h-screen bg-zinc-950">
@@ -309,8 +307,8 @@ function CanvasInner() {
       />
 
       {/* Settings Panel — global secrets management drawer */}
-      {/* <SettingsPanel workspaceId={settingsWorkspaceId} /> */}
-      {/* <DeleteConfirmDialog workspaceId={settingsWorkspaceId} /> */}
+      <SettingsPanel workspaceId={settingsWorkspaceId} />
+      <DeleteConfirmDialog workspaceId={settingsWorkspaceId} />
     </div>
   );
 }

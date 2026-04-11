@@ -24,7 +24,7 @@ if [ -n "$STAGED_TSX" ]; then
     # Check if file uses hooks/handlers
     if grep -qE "useState|useEffect|useCallback|useMemo|useRef|useStore|onClick|onChange" "$f" 2>/dev/null; then
       # Check if 'use client' is in the first 3 lines
-      if ! head -3 "$f" | grep -q "'use client'" 2>/dev/null; then
+      if ! head -3 "$f" | grep -qE "use client" 2>/dev/null; then
         echo "❌ MISSING 'use client': $f"
         echo "   This file uses React hooks but lacks the 'use client' directive."
         echo "   Add \"'use client';\" as the very first line."

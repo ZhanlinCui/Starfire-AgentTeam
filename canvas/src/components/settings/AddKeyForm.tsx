@@ -1,3 +1,4 @@
+'use client';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { SecretGroup } from '@/types/secrets';
 import { useSecretsStore } from '@/stores/secrets-store';

@@ -1,13 +1,5 @@
 import type { Secret } from '@/types/secrets';
 
-/**
- * Secrets CRUD API client.
- *
- * NOTE: These endpoints do not exist on the platform yet (confirmed by
- * Backend Engineer 2026-04-09). During development, back with MSW mock
- * handlers. The contracts below are the agreed-upon target shape.
- */
-
 const PLATFORM_URL = process.env.NEXT_PUBLIC_PLATFORM_URL ?? 'http://localhost:8080';
 
 function apiUrl(workspaceId: string, path = ''): string {
@@ -48,13 +40,12 @@ export class ApiError extends Error {
 export async function listSecrets(
   workspaceId: string,
 ): Promise<Secret[]> {
-  const data = await request<Array<{ key: string; scope?: string; has_value?: boolean; created_at?: string; updated_at?: string }>>(apiUrl(workspaceId));
-  // Platform returns flat array with { key, scope, has_value }
-  // Transform to Secret[] format expected by the store
-  if (!Array.isArray(data)) return [];
-  return data.map((item) => ({
+  // Platform returns a flat array: [{ key, has_value, scope, created_at, updated_at }]
+  const data = await request<Array<{ key: string; has_value?: boolean; scope?: string; created_at?: string; updated_at?: string }>>(apiUrl(workspaceId));
+  const items = Array.isArray(data) ? data : [];
+  return items.map((item) => ({
     name: item.key,
-    masked_value: item.has_value ? '••••••••' : '',
+    masked_value: '••••••••',
     group: inferGroupFromKey(item.key) as Secret['group'],
     status: 'unverified' as const,
     updated_at: item.updated_at ?? '',
@@ -123,8 +114,13 @@ export async function fetchDependents(
   workspaceId: string,
   secretName: string,
 ): Promise<string[]> {
-  const data = await request<{ dependents: string[] }>(
-    apiUrl(workspaceId, `/${encodeURIComponent(secretName)}/dependents`),
-  );
-  return data.dependents;
+  try {
+    const data = await request<{ dependents: string[] }>(
+      apiUrl(workspaceId, `/${encodeURIComponent(secretName)}/dependents`),
+    );
+    return data.dependents ?? [];
+  } catch {
+    // Endpoint may not exist yet — gracefully return empty
+    return [];
+  }
 }

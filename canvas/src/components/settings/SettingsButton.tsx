@@ -1,3 +1,5 @@
+'use client';
+
 import { forwardRef } from 'react';
 import { useSecretsStore } from '@/stores/secrets-store';
 import * as Tooltip from '@radix-ui/react-tooltip';

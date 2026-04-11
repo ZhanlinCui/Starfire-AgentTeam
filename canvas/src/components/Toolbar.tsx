@@ -3,8 +3,8 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
-// import { SettingsButton } from "@/components/settings/SettingsButton";
-// import { settingsGearRef } from "@/components/settings/SettingsPanel";
+import { SettingsButton } from "@/components/settings/SettingsButton";
+import { settingsGearRef } from "@/components/settings/SettingsPanel";
 
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
@@ -154,8 +154,8 @@ export function Toolbar() {
         )}
       </div>
 
-      {/* Settings gear icon — disabled until integration issues resolved */}
-      {/* <SettingsButton ref={settingsGearRef} /> */}
+      {/* Settings gear icon */}
+      <SettingsButton ref={settingsGearRef} />
     </div>
   );
 }

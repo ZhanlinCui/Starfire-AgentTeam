@@ -1,3 +1,5 @@
+'use client';
+
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 
 interface UnsavedChangesGuardProps {

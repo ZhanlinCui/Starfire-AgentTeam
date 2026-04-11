@@ -52,9 +52,9 @@ describe('secrets API client', () => {
 
   describe('listSecrets', () => {
     it('sends GET to /workspaces/{id}/secrets and transforms response', async () => {
-      // Platform returns flat array with { key, scope, has_value }
+      // Platform returns a flat array: [{ key, has_value, scope, created_at, updated_at }]
       const platformResponse = [
-        { key: 'GITHUB_TOKEN', scope: 'workspace', has_value: true, updated_at: '2026-01-01' },
+        { key: 'GITHUB_TOKEN', has_value: true, scope: 'workspace', created_at: '2026-01-01', updated_at: '2026-01-02' },
       ];
       global.fetch = mockFetch(platformResponse);
 
@@ -74,12 +74,12 @@ describe('secrets API client', () => {
           masked_value: '••••••••',
           group: 'github',
           status: 'unverified',
-          updated_at: '2026-01-01',
+          updated_at: '2026-01-02',
         },
       ]);
     });
 
-    it('returns empty array for non-array response', async () => {
+    it('returns empty array when response is not an array', async () => {
       global.fetch = mockFetch({ unexpected: 'data' });
       const result = await listSecrets(WS_ID);
       expect(result).toEqual([]);
@@ -202,6 +202,13 @@ describe('secrets API client', () => {
         expect.anything(),
       );
       expect(result).toEqual(['ws-a', 'ws-b']);
+    });
+
+    it('returns empty array when endpoint does not exist (404)', async () => {
+      global.fetch = mockFetch({ error: 'not found' }, 404);
+
+      const result = await fetchDependents(WS_ID, 'GITHUB_TOKEN');
+      expect(result).toEqual([]);
     });
   });
 

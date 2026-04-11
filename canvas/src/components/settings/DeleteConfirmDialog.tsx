@@ -1,3 +1,4 @@
+'use client';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useSecretsStore } from '@/stores/secrets-store';
