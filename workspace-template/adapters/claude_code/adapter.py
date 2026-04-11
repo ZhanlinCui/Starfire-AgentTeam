@@ -44,21 +44,13 @@ class ClaudeCodeAdapter(BaseAdapter):
             os.makedirs(os.path.dirname(claude_md), exist_ok=True)
             existing = ""
             if os.path.exists(claude_md):
-                try:
-                    existing = open(claude_md).read()
-                except PermissionError:
-                    # File created by root during plugin install — fix ownership
-                    os.system(f"chmod a+rw {claude_md}")
-                    existing = open(claude_md).read()
+                existing = open(claude_md).read()
             if "# Plugin Rules" not in existing:
-                try:
-                    with open(claude_md, "a") as f:
-                        f.write("\n\n# Plugin Rules\n")
-                        for rule in plugins.rules:
-                            f.write(f"\n{rule}\n")
-                    logger.info("Claude Code: injected %d plugin rules into CLAUDE.md", len(plugins.rules))
-                except PermissionError:
-                    logger.warning("Claude Code: cannot write to CLAUDE.md (permission denied) — plugin rules not injected")
+                with open(claude_md, "a") as f:
+                    f.write("\n\n# Plugin Rules\n")
+                    for rule in plugins.rules:
+                        f.write(f"\n{rule}\n")
+                logger.info("Claude Code: injected %d plugin rules into CLAUDE.md", len(plugins.rules))
             else:
                 logger.info("Claude Code: plugin rules already present in CLAUDE.md, skipping")
 

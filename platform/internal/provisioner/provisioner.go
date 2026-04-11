@@ -220,10 +220,9 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		log.Printf("Provisioner: started container %s (image: %s)", name, startedInfo.Image[:19])
 	}
 
-	// Fix /configs ownership so the agent user (UID 1000) can write CLAUDE.md,
-	// skills, and other files that plugins inject on startup. Docker creates
-	// volume files as root; the agent process runs as UID 1000.
-	p.execInContainer(ctx, resp.ID, []string{"chown", "-R", "1000:1000", "/configs"})
+	// Volume ownership is fixed by the entrypoint (starts as root, chowns
+	// /configs and /workspace, then drops to agent via gosu). No per-start
+	// chown needed here.
 
 	// Copy template files into /configs if TemplatePath is set
 	if cfg.TemplatePath != "" {

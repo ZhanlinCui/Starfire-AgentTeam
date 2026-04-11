@@ -1,6 +1,23 @@
 #!/bin/bash
 # No set -e — individual commands handle their own errors gracefully
 
+# ──────────────────────────────────────────────────────────
+# Volume ownership fix (runs as root)
+# ──────────────────────────────────────────────────────────
+# Docker creates volume contents as root. The agent process runs as UID 1000
+# and needs to write to /configs (CLAUDE.md, skills, plugins) and /workspace
+# (cloned repos, scratch files). Fix ownership once at startup so every
+# future file operation works without per-file chown hacks.
+if [ "$(id -u)" = "0" ]; then
+    chown -R agent:agent /configs /workspace 2>/dev/null
+    # Re-exec this script as the agent user via gosu (clean PID 1 handoff)
+    exec gosu agent "$0" "$@"
+fi
+
+# ──────────────────────────────────────────────────────────
+# Everything below runs as the agent user (UID 1000)
+# ──────────────────────────────────────────────────────────
+
 # Ensure user-installed packages are in PATH
 export PATH="$HOME/.local/bin:$PATH"
 

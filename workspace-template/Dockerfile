@@ -41,10 +41,16 @@ RUN ln -s /app/a2a_cli.py /usr/local/bin/a2a && chmod +x /app/a2a_cli.py /app/a2
 RUN mkdir -p /workspace /plugins /home/agent/.claude /home/agent/.config /home/agent/.local && \
     chown -R agent:agent /app /home/agent /workspace
 
+# Install gosu for clean root → agent user handoff in entrypoint.
+# The entrypoint starts as root to fix volume ownership, then exec's
+# as the agent user so Claude Code's --dangerously-skip-permissions works.
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
+    rm -rf /var/lib/apt/lists/*
+
 VOLUME /configs
 VOLUME /workspace
 
 EXPOSE 8000
 RUN chmod +x /app/entrypoint.sh
-USER agent
+# Start as root — entrypoint fixes volume permissions then drops to agent
 CMD ["./entrypoint.sh"]
