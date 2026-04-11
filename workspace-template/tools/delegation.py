@@ -93,8 +93,8 @@ async def _notify_completion(task_id: str, target_workspace_id: str, status: str
                     "status": status,
                 },
             )
-    except Exception:
-        pass  # Best-effort notification
+    except Exception as e:
+        logger.debug("Delegation notify failed (best-effort): %s", e)
 
 
 async def _execute_delegation(task_id: str, workspace_id: str, task: str):
