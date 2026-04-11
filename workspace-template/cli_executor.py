@@ -1,17 +1,21 @@
 """CLI-based agent executor for A2A protocol.
 
-Supports any CLI agent that accepts a prompt and outputs a response:
-- Claude Code: claude --print --bare -p "..."
+Supports CLI agents that accept a prompt and output a response:
 - OpenAI Codex: codex --print -p "..."
 - Ollama: ollama run <model> "..."
 - Custom: any command that reads stdin or accepts -p
 
+NOTE: the `claude-code` runtime no longer routes here. It uses
+ClaudeSDKExecutor (see claude_sdk_executor.py) which wraps the
+claude-agent-sdk Python package. This executor is reserved for CLI-only
+runtimes that don't yet have a programmatic SDK integration.
+
 The runtime is selected via config.yaml:
-  runtime: claude-code | codex | ollama | custom
+  runtime: codex | ollama | custom
   runtime_config:
-    command: "claude"       # for custom
+    command: "codex"        # for custom
     args: ["--extra-flag"]  # additional CLI args
-    auth_token_env: "CLAUDE_AUTH_TOKEN"
+    auth_token_env: "OPENAI_API_KEY"
     auth_token_file: ".auth-token"
     timeout: 300
     model: "sonnet"
@@ -24,52 +28,39 @@ import logging
 import os
 import shlex
 import shutil
+import sys
 import tempfile
 from pathlib import Path
-
-import httpx
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.utils import new_agent_text_message
 
 from config import RuntimeConfig
+from executor_helpers import (
+    CONFIG_MOUNT,
+    MEMORY_CONTENT_MAX_CHARS,
+    WORKSPACE_MOUNT,
+    brief_summary,
+    classify_subprocess_error,
+    commit_memory,
+    extract_message_text,
+    get_a2a_instructions,
+    get_mcp_server_path,
+    get_system_prompt,
+    read_delegation_results,
+    recall_memories,
+    sanitize_agent_error,
+    set_current_task,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _brief_summary(text: str, max_len: int = 80) -> str:
-    """Extract a brief one-line task summary for the canvas card display."""
-    for line in text.split("\n"):
-        line = line.strip()
-        # Strip markdown headers (# ## ###)
-        while line.startswith("#"):
-            line = line[1:]
-        line = line.strip()
-        if not line or line.startswith("```") or line == "---":
-            continue
-        # Remove markdown bold/italic markers
-        line = line.replace("**", "").replace("__", "")
-        if len(line) > max_len:
-            line = line[:max_len - 3] + "..."
-        return line
-    return text[:max_len]
-
-
-# Built-in runtime presets
+# Built-in runtime presets.
+# The `claude-code` runtime uses ClaudeSDKExecutor (claude_sdk_executor.py)
+# and intentionally has no entry here.
 RUNTIME_PRESETS: dict[str, dict] = {
-    "claude-code": {
-        "command": "claude",
-        # Full agentic mode — all tools enabled, dangerously-skip-permissions for unattended operation
-        # Workspace tier controls access at the platform level
-        "base_args": ["--print", "--dangerously-skip-permissions"],
-        "prompt_flag": "-p",
-        "model_flag": "--model",
-        "system_prompt_flag": "--system-prompt",
-        "auth_pattern": "env",  # OAuth token via CLAUDE_CODE_OAUTH_TOKEN (--bare disables OAuth)
-        "default_auth_env": "CLAUDE_CODE_OAUTH_TOKEN",
-        "default_auth_file": ".auth-token",
-    },
     "codex": {
         "command": "codex",
         "base_args": ["--print", "--dangerously-skip-permissions"],
@@ -107,9 +98,15 @@ class CLIAgentExecutor(AgentExecutor):
         config_path: str = "/configs",
         heartbeat: "HeartbeatLoop | None" = None,
     ):
+        if runtime == "claude-code":
+            # Defensive — the adapter should never construct a CLI executor
+            # for claude-code. Fail loud rather than silently falling back.
+            raise ValueError(
+                "claude-code runtime is served by ClaudeSDKExecutor, not "
+                "CLIAgentExecutor. Check adapters/claude_code/adapter.py."
+            )
         self.runtime = runtime
         self.config = runtime_config
-        self._session_id: str | None = None  # Claude Code session ID for conversation continuity
         self.system_prompt = system_prompt
         self.config_path = config_path
         self._heartbeat = heartbeat
@@ -144,7 +141,7 @@ class CLIAgentExecutor(AgentExecutor):
         if self.preset.get("auth_pattern") in ("apiKeyHelper", "env"):
             mcp_config = json.dumps({
                 "mcpServers": {
-                    "a2a": {"command": "python3", "args": ["/app/a2a_mcp_server.py"]}
+                    "a2a": {"command": sys.executable, "args": [get_mcp_server_path()]}
                 }
             })
             fd, self._mcp_config_path = tempfile.mkstemp(suffix=".json", prefix="a2a-mcp-")
@@ -189,155 +186,10 @@ class CLIAgentExecutor(AgentExecutor):
         os.chmod(helper_path, 0o700)
         return helper_path
 
-    def _get_a2a_instructions(self) -> str:
-        """Generate A2A delegation instructions injected into every system prompt."""
-        if self.preset.get("auth_pattern") in ("apiKeyHelper", "env"):
-            # MCP-compatible runtime — use MCP tools for delegation
-            return """## Inter-Agent Communication
-You have MCP tools for communicating with other workspaces:
-- list_peers: discover available peer workspaces (name, ID, status, role)
-- delegate_task: send a task and WAIT for the response (for quick tasks)
-- delegate_task_async: send a task and return immediately with a task_id (for long tasks)
-- check_task_status: poll an async task's status and get results when done
-- get_workspace_info: get your own workspace info
-
-For quick questions, use delegate_task (synchronous).
-For long-running work (building pages, running audits), use delegate_task_async + check_task_status.
-Always use list_peers first to discover available workspace IDs.
-Access control is enforced — you can only reach siblings and parent/children.
-
-PROACTIVE MESSAGING: Use send_message_to_user to push messages to the user's chat at ANY time:
-- Acknowledge tasks immediately: "Got it, delegating to the team now..."
-- Send progress updates during long work: "Research Lead finished, waiting on Dev Lead..."
-- Deliver follow-up results: "All teams reported back. Here's the synthesis: ..."
-This lets you respond quickly ("I'll work on this") and come back later with results.
-
-If delegate_task returns a DELEGATION FAILED message, do NOT forward the raw error to the user.
-Instead: (1) try delegating to a different peer, (2) handle the task yourself, or
-(3) tell the user which peer is unavailable and provide your own best answer."""
-
-        # For non-MCP runtimes (ollama, custom), provide CLI instructions
-        return """## Inter-Agent Communication
-You can delegate tasks to other workspaces using the a2a command:
-  python3 /app/a2a_cli.py peers                                  # List available peers
-  python3 /app/a2a_cli.py delegate <workspace_id> <task>          # Sync: wait for response
-  python3 /app/a2a_cli.py delegate --async <workspace_id> <task>  # Async: return task_id
-  python3 /app/a2a_cli.py status <workspace_id> <task_id>         # Check async task
-  python3 /app/a2a_cli.py info                                    # Your workspace info
-
-For quick questions, use sync delegate. For long tasks, use --async + status.
-Only delegate to peers listed by the peers command (access control enforced)."""
-
-    async def _set_current_task(self, task: str):
-        """Update current task on heartbeat and push immediately via platform API."""
-        if self._heartbeat:
-            self._heartbeat.current_task = task
-            self._heartbeat.active_tasks = 1 if task else 0
-        # Push immediately via platform API for real-time canvas update
-        workspace_id = os.environ.get("WORKSPACE_ID", "")
-        platform_url = os.environ.get("PLATFORM_URL", "")
-        if workspace_id and platform_url:
-            try:
-                await self._get_http_client().post(
-                    f"{platform_url}/registry/heartbeat",
-                    json={
-                        "workspace_id": workspace_id,
-                        "current_task": task,
-                        "active_tasks": 1 if task else 0,
-                        "error_rate": 0,
-                        "sample_error": "",
-                        "uptime_seconds": 0,
-                    },
-                )
-            except Exception:
-                pass  # Best-effort
-
-    def _get_http_client(self) -> httpx.AsyncClient:
-        """Lazy-init a shared httpx client for platform API calls."""
-        if not hasattr(self, "_http_client") or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(timeout=5.0)
-        return self._http_client
-
-    async def _recall_memories(self) -> str:
-        """Recall recent memories from platform API. Returns formatted string or empty."""
-        workspace_id = os.environ.get("WORKSPACE_ID", "")
-        platform_url = os.environ.get("PLATFORM_URL", "")
-        if not workspace_id or not platform_url:
-            return ""
-        try:
-            resp = await self._get_http_client().get(
-                f"{platform_url}/workspaces/{workspace_id}/memories",
-            )
-            data = resp.json()
-            if isinstance(data, list) and data:
-                lines = [f"- [{m.get('scope', '?')}] {m.get('content', '')}" for m in data[-10:]]
-                return "\n".join(lines)
-        except Exception:
-            pass
-        return ""
-
-    async def _commit_memory(self, content: str):
-        """Save a memory to platform API. Best-effort, no error propagation."""
-        workspace_id = os.environ.get("WORKSPACE_ID", "")
-        platform_url = os.environ.get("PLATFORM_URL", "")
-        if not workspace_id or not platform_url or not content:
-            return
-        try:
-            await self._get_http_client().post(
-                f"{platform_url}/workspaces/{workspace_id}/memories",
-                json={"content": content, "scope": "LOCAL"},
-            )
-        except Exception:
-            pass
-
-    def _read_delegation_results(self) -> str:
-        """Read and consume delegation results written by heartbeat loop."""
-        results_file = Path(os.environ.get("DELEGATION_RESULTS_FILE", "/tmp/delegation_results.jsonl"))
-        if not results_file.exists():
-            return ""
-        try:
-            # Atomic consume: rename first to prevent race with heartbeat writer
-            consumed = results_file.with_suffix(".consumed")
-            try:
-                results_file.rename(consumed)
-            except OSError:
-                return ""  # File disappeared between exists() and rename()
-            lines = consumed.read_text().strip().split("\n")
-            consumed.unlink(missing_ok=True)
-            parts = []
-            for line in lines:
-                if not line.strip():
-                    continue
-                try:
-                    r = json.loads(line)
-                    status = r.get("status", "?")
-                    summary = r.get("summary", "")
-                    preview = r.get("response_preview", "")
-                    parts.append(f"- [{status}] {summary}")
-                    if preview:
-                        parts.append(f"  Response: {preview[:200]}")
-                except json.JSONDecodeError:
-                    continue
-            return "\n".join(parts) if parts else ""
-        except Exception:
-            return ""
-
-    def _get_system_prompt(self) -> str | None:
-        """Get system prompt — re-read from file each time (supports hot-reload)."""
-        prompt_file = Path(self.config_path) / "system-prompt.md"
-        if prompt_file.exists():
-            return prompt_file.read_text().strip()
-        return self.system_prompt  # fall back to init-time value
-
     def _build_command(self, message: str) -> list[str]:
         """Build the full CLI command from preset + config + message."""
         cmd = self.config.command or self.preset["command"]
         args = list(self.preset.get("base_args", []))
-
-        # Session continuity — resume previous conversation if we have a session ID
-        # Only for claude-code which supports --resume
-        if self._session_id and self.runtime == "claude-code":
-            args.extend(["--resume", self._session_id])
 
         # Model
         model = self.config.model or None
@@ -348,18 +200,20 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             # Ollama: model is positional after "run"
             args.append(model)
 
-        # System prompt — only on first message (resumed sessions already have it)
-        if not self._session_id:
-            system_prompt = self._get_system_prompt() or ""
-            a2a_instructions = self._get_a2a_instructions()
-            if a2a_instructions:
-                system_prompt = f"{system_prompt}\n\n{a2a_instructions}" if system_prompt else a2a_instructions
+        # System prompt (+ A2A instructions). The remaining CLI runtimes don't
+        # support session resume, so we inject the system prompt on every call.
+        system_prompt = get_system_prompt(self.config_path, fallback=self.system_prompt) or ""
+        mcp_capable = self.preset.get("auth_pattern") in ("apiKeyHelper", "env")
+        a2a_instructions = get_a2a_instructions(mcp=mcp_capable)
+        if a2a_instructions:
+            system_prompt = (
+                f"{system_prompt}\n\n{a2a_instructions}" if system_prompt else a2a_instructions
+            )
+        system_flag = self.preset.get("system_prompt_flag")
+        if system_prompt and system_flag:
+            args.extend([system_flag, system_prompt])
 
-            system_flag = self.preset.get("system_prompt_flag")
-            if system_prompt and system_flag:
-                args.extend([system_flag, system_prompt])
-
-        # Auth (apiKeyHelper pattern for claude-code)
+        # Auth (apiKeyHelper pattern — reserved for future CLI runtimes)
         if self._auth_helper_path and self.preset.get("auth_pattern") == "apiKeyHelper":
             settings = json.dumps({"apiKeyHelper": self._auth_helper_path})
             args.extend(["--settings", settings])
@@ -367,10 +221,6 @@ Only delegate to peers listed by the peers command (access control enforced)."""
         # A2A MCP server — inject for MCP-compatible runtimes (created once in __init__)
         if self._mcp_config_path:
             args.extend(["--mcp-config", self._mcp_config_path])
-
-        # JSON output for claude-code to capture session ID
-        if self.runtime == "claude-code":
-            args.extend(["--output-format", "json"])
 
         # Extra args from config (before prompt so flags are parsed correctly)
         args.extend(self.config.args)
@@ -387,45 +237,41 @@ Only delegate to peers listed by the peers command (access control enforced)."""
 
     async def execute(self, context: RequestContext, event_queue: EventQueue):
         """Execute a task by invoking the CLI agent."""
-        # Extract text from message parts
-        parts = context.message.parts
-        text_parts = []
-        for part in parts:
-            if hasattr(part, "text") and part.text:
-                text_parts.append(part.text)
-            elif hasattr(part, "root") and hasattr(part.root, "text"):
-                text_parts.append(part.root.text)
-
-        user_input = " ".join(text_parts).strip()
+        user_input = extract_message_text(context.message)
         if not user_input:
             await event_queue.enqueue_event(
                 new_agent_text_message("Error: message contained no text content.")
             )
             return
 
-        # Show current task on canvas — extract a brief one-line summary
-        await self._set_current_task(_brief_summary(user_input))
+        # Keep a clean copy of the user's actual message for memory BEFORE any
+        # delegation or memory injection happens.
+        original_input = user_input
 
-        logger.info("CLI execute [%s]: %s", self.runtime, user_input[:200])
+        # Show current task on canvas — extract a brief one-line summary
+        await set_current_task(self._heartbeat, brief_summary(user_input))
+
+        logger.debug("CLI execute [%s]: %s", self.runtime, user_input[:200])
 
         # Inject delegation results that arrived since last message
-        delegation_context = self._read_delegation_results()
+        delegation_context = read_delegation_results()
         if delegation_context:
             user_input = f"[Delegation results received while you were idle]\n{delegation_context}\n\n[New message]\n{user_input}"
 
-        # Auto-recall: inject prior memories into the prompt on first message (no session yet)
-        original_input = user_input  # Keep clean copy for memory
-        if not self._session_id:
-            memories = await self._recall_memories()
-            if memories:
-                user_input = f"[Prior context from memory]\n{memories}\n\n{user_input}"
+        # Auto-recall: inject prior memories into every prompt. (The CLI
+        # runtimes don't keep a session, so there's no "first turn" concept.)
+        memories = await recall_memories()
+        if memories:
+            user_input = f"[Prior context from memory]\n{memories}\n\n{user_input}"
 
         try:
             await self._run_cli(user_input, event_queue)
         finally:
-            await self._set_current_task("")
+            await set_current_task(self._heartbeat, "")
             # Auto-commit: save the original user request (not the memory-injected version)
-            await self._commit_memory(f"Conversation: {original_input[:200]}")
+            await commit_memory(
+                f"Conversation: {original_input[:MEMORY_CONTENT_MAX_CHARS]}"
+            )
 
     async def _run_cli(self, user_input: str, event_queue: EventQueue):
         """Run the CLI subprocess and enqueue the result."""
@@ -446,7 +292,11 @@ Only delegate to peers listed by the peers command (access control enforced)."""
             try:
                 # Run in /workspace if it exists and has content (cloned repo),
                 # otherwise /configs (agent config files)
-                cwd = "/workspace" if os.path.isdir("/workspace") and os.listdir("/workspace") else "/configs"
+                cwd = (
+                    WORKSPACE_MOUNT
+                    if os.path.isdir(WORKSPACE_MOUNT) and os.listdir(WORKSPACE_MOUNT)
+                    else CONFIG_MOUNT
+                )
 
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -471,20 +321,6 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                                  stdout_text[:200] if stdout_text else "(empty)",
                                  stderr_text[:500] if stderr_text else "(empty)")
 
-                # Parse JSON output from claude-code to extract session_id and result text
-                if self.runtime == "claude-code" and stdout_text:
-                    try:
-                        out = json.loads(stdout_text)
-                        if isinstance(out, dict):
-                            # Capture session ID for conversation continuity
-                            sid = out.get("session_id")
-                            if sid:
-                                self._session_id = sid
-                            # Extract the text result
-                            stdout_text = out.get("result", "") or ""
-                    except json.JSONDecodeError:
-                        pass  # Not JSON — use raw output
-
                 if proc.returncode == 0 or stdout_text:
                     # Success, or non-zero exit but produced output (some CLIs exit 1 with valid output)
                     result = stdout_text
@@ -507,37 +343,24 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                         return
                 else:
                     error_msg = stderr_text or f"Exit code {proc.returncode}"
-                    # Check for rate limit errors
-                    if "rate" in error_msg.lower() or "429" in error_msg or "overloaded" in error_msg.lower():
-                        if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
-                            logger.warning("CLI agent [%s] rate limited (attempt %d/%d), retrying in %ds",
-                                           self.runtime, attempt + 1, max_retries, delay)
-                            await asyncio.sleep(delay)
-                            continue
-                    # Session errors: clear stale session and retry fresh
-                    if "no conversation found" in error_msg.lower() or "session" in error_msg.lower():
-                        self._session_id = None
-                        if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
-                            logger.warning("CLI agent [%s]: stale session (attempt %d/%d), retrying fresh in %ds",
-                                           self.runtime, attempt + 1, max_retries, delay)
-                            await asyncio.sleep(delay)
-                            continue
+                    # Classify once — used both for retry policy and the
+                    # sanitized user-facing error message.
+                    category = classify_subprocess_error(error_msg, proc.returncode)
+                    if category in ("rate_limited", "session_error", "auth_failed") \
+                            and attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(
+                            "CLI agent [%s] %s (attempt %d/%d), retrying in %ds",
+                            self.runtime, category, attempt + 1, max_retries, delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
 
-                    # Auth errors: clear session and retry (OAuth tokens can have transient failures)
-                    if "auth" in error_msg.lower() or "api_key" in error_msg.lower() or "X-Api-Key" in error_msg:
-                        self._session_id = None
-                        if attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
-                            logger.warning("CLI agent [%s]: auth error (attempt %d/%d), retrying in %ds",
-                                           self.runtime, attempt + 1, max_retries, delay)
-                            await asyncio.sleep(delay)
-                            continue
-
+                    # Log the full stderr (may contain paths/tokens); surface
+                    # only the sanitized category to the user.
                     logger.error("CLI agent error [%s]: %s", self.runtime, error_msg[:500])
                     await event_queue.enqueue_event(
-                        new_agent_text_message(f"Agent error: {error_msg[:500]}")
+                        new_agent_text_message(sanitize_agent_error(category=category))
                     )
                     return
 
@@ -559,13 +382,13 @@ Only delegate to peers listed by the peers command (access control enforced)."""
                     except Exception as wait_err:
                         logger.warning("CLI wait error: %s", wait_err)
                 await event_queue.enqueue_event(
-                    new_agent_text_message(f"Agent timed out after {timeout}s")
+                    new_agent_text_message(sanitize_agent_error(category="timeout"))
                 )
                 return
-            except Exception as e:
-                logger.error("CLI agent exception [%s]: %s", self.runtime, e)
+            except Exception as exc:
+                logger.exception("CLI agent exception [%s]", self.runtime)
                 await event_queue.enqueue_event(
-                    new_agent_text_message(f"Agent error: {e}")
+                    new_agent_text_message(sanitize_agent_error(exc))
                 )
                 return
 

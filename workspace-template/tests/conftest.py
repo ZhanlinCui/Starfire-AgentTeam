@@ -199,9 +199,53 @@ def _make_tools_mocks():
     sys.modules["tools.hitl"] = tools_hitl_mod
 
 
+def _make_claude_agent_sdk_mock():
+    """Stub claude_agent_sdk so claude_sdk_executor can be imported without
+    the real SDK installed. Tests that exercise execute() patch query().
+
+    Installed at collection time so a top-level `import claude_agent_sdk`
+    in claude_sdk_executor.py resolves to this stub. Real tests can override
+    individual attributes via patch().
+    """
+    mod = ModuleType("claude_agent_sdk")
+
+    class _StubTextBlock:
+        def __init__(self, text=""):
+            self.text = text
+
+    class _StubAssistantMessage:
+        def __init__(self, blocks=None):
+            self.content = blocks or []
+
+    class _StubResultMessage:
+        def __init__(self, session_id=None, result=None):
+            self.session_id = session_id
+            self.result = result
+
+    class _StubOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    async def _stub_query(prompt, options):  # pragma: no cover — overridden in tests
+        yield _StubAssistantMessage([_StubTextBlock("stub")])
+        yield _StubResultMessage(session_id="stub-session")
+
+    mod.TextBlock = _StubTextBlock
+    mod.AssistantMessage = _StubAssistantMessage
+    mod.ResultMessage = _StubResultMessage
+    mod.ClaudeAgentOptions = _StubOptions
+    mod.query = _stub_query
+    sys.modules["claude_agent_sdk"] = mod
+
+
 # Install mocks before any test collection imports a2a_executor
 if "a2a" not in sys.modules:
     _make_a2a_mocks()
+
+# Install claude_agent_sdk stub unconditionally: the real SDK ships with
+# workspace-template:claude-code but tests run outside the container.
+if "claude_agent_sdk" not in sys.modules:
+    _make_claude_agent_sdk_mock()
 
 if "langchain_core" not in sys.modules:
     _make_langchain_mocks()

@@ -75,8 +75,10 @@ At a high level, `workspace-template/main.py` does this:
 | `main.py` | Entry point, adapter bootstrap, Agent Card registration, heartbeat startup, initial prompt execution |
 | `config.py` | Parses `config.yaml` into the runtime config dataclasses |
 | `adapters/` | Adapter registry and adapter implementations |
+| `claude_sdk_executor.py` | `ClaudeSDKExecutor` — Claude Code runtime via `claude-agent-sdk` (replaces subprocess) |
+| `executor_helpers.py` | Shared helpers for all executors: memory, delegation, heartbeat, system prompt, error sanitization |
 | `a2a_executor.py` | Shared LangGraph execution bridge and current-task reporting |
-| `cli_executor.py` | CLI-oriented executor behavior and delegation instructions |
+| `cli_executor.py` | `CLIAgentExecutor` — subprocess executor for Codex, Ollama, custom runtimes |
 | `skills/loader.py` | Parses `SKILL.md`, loads tool modules, returns loaded skill metadata |
 | `skills/watcher.py` | Hot reload path for skill changes |
 | `plugins.py` | Scans mounted plugins for shared rules, prompt fragments, and extra skills |

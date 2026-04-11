@@ -27,6 +27,28 @@
 | 17 | Agent GitHub Access | PR #40 — git/gh in images, GITHUB_TOKEN env |
 | 18 | File Browser Lazy Loading | PR #37 — depth=1, path traversal protection |
 | 19 | MCP Full Coverage | PR #40 — 52 tools (plugins, global secrets, pause/resume, org) |
+| 21 | Claude Agent SDK Migration | `feat/claude-agent-sdk` — `ClaudeSDKExecutor` replaces CLI subprocess |
+
+---
+
+## Phase 21: Claude Agent SDK Migration — COMPLETE (pending merge)
+
+> Branch: `feat/claude-agent-sdk`. Replaces CLI subprocess with `claude-agent-sdk` Python package for the `claude-code` runtime. Same Claude Code engine, no behavioral changes — just eliminates subprocess fragility.
+
+- [x] `claude_sdk_executor.py` — SDK-based executor with asyncio.Lock, cancel, QueryResult
+- [x] `executor_helpers.py` — shared helpers (memory, delegation, heartbeat, system prompt, error sanitization)
+- [x] Adapter updated to return `ClaudeSDKExecutor`
+- [x] SDK baked into Docker image (`pip install -r requirements.txt` in Dockerfile)
+- [x] Dead `claude-code` branches removed from `cli_executor.py`
+- [x] 100% test coverage (110 + 179 + 154 = 443 stmts, 0 misses)
+- [x] Live cluster verified (12 workspaces, echo/session/tools/delegation/concurrent)
+- [x] 5 iterative code review passes — all issues resolved
+
+**Follow-ups** (see plan file at `.claude/plans/reflective-zooming-lark.md`):
+- Live tool-call visibility on canvas (Phase 5A in plan)
+- Cost/usage telemetry from ResultMessage (Phase 5B)
+- Cancel UX — canvas Stop button (Phase 5C)
+- Hooks for governance/audit (Phase 5D)
 
 ---
 

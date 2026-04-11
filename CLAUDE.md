@@ -62,7 +62,7 @@ Each runtime has its own Docker image extending `workspace-template:base`, with 
 | Runtime | Image Tag | Key Deps |
 |---------|-----------|----------|
 | langgraph | `workspace-template:langgraph` | langchain-anthropic, langgraph |
-| claude-code | `workspace-template:claude-code` | @anthropic-ai/claude-code (npm) |
+| claude-code | `workspace-template:claude-code` | claude-agent-sdk (pip), @anthropic-ai/claude-code (npm) |
 | openclaw | `workspace-template:openclaw` | openclaw deps |
 | crewai | `workspace-template:crewai` | crewai |
 | autogen | `workspace-template:autogen` | autogen |
@@ -83,7 +83,7 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 ```bash
 cd platform && go test -race ./...               # 370+ Go tests (handlers, registry, provisioner, CLI, delegation, org — sqlmock + miniredis)
 cd canvas && npm test                            # 325 Vitest tests (store, components, hydration, buildTree, secrets API)
-cd workspace-template && python -m pytest -v     # 874 pytest tests (config, heartbeat, prompt, skills, a2a, executor, memory, mcp, plugins, cli, delegation)
+cd workspace-template && python -m pytest -v     # 955 pytest tests (config, heartbeat, prompt, skills, a2a, executor, sdk-executor, memory, mcp, plugins, cli, delegation)
 ```
 
 ### Integration Tests

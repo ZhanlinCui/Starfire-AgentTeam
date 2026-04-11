@@ -72,9 +72,9 @@ class ClaudeCodeAdapter(BaseAdapter):
             logger.warning("Claude Code: cannot copy plugin skills to %s (permission denied) — skills remain in plugin dir", skills_dst)
 
     async def setup(self, config: AdapterConfig) -> None:
-        import shutil
-
-        # Load and inject plugins before CLI setup
+        # Load and inject plugins before executor setup. The Claude Code engine
+        # (used by the SDK under the hood) still reads CLAUDE.md and the skills
+        # directory at /configs/skills, so this remains unchanged.
         from plugins import load_plugins
         workspace_plugins_dir = os.path.join(config.config_path, "plugins")
         plugins = load_plugins(
@@ -83,12 +83,8 @@ class ClaudeCodeAdapter(BaseAdapter):
         )
         await self.inject_plugins(config, plugins)
 
-        cmd = config.runtime_config.get("command") or "claude"
-        if not shutil.which(cmd):
-            logger.warning(f"Claude Code CLI '{cmd}' not found in PATH")
-
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
-        from cli_executor import CLIAgentExecutor
+        from claude_sdk_executor import ClaudeSDKExecutor
 
         # Load system prompt if exists
         system_prompt = config.system_prompt
@@ -98,17 +94,17 @@ class ClaudeCodeAdapter(BaseAdapter):
                 with open(prompt_file) as f:
                     system_prompt = f.read()
 
-        from config import RuntimeConfig
-
-        # Convert dict back to RuntimeConfig dataclass if needed
+        # runtime_config may arrive as a dict (from main.py vars(...)) or as a
+        # RuntimeConfig dataclass. Read `model` defensively from either shape.
         rc = config.runtime_config
         if isinstance(rc, dict):
-            rc = RuntimeConfig(**{k: v for k, v in rc.items() if k in RuntimeConfig.__dataclass_fields__})
+            model = rc.get("model") or "sonnet"
+        else:
+            model = getattr(rc, "model", None) or "sonnet"
 
-        return CLIAgentExecutor(
-            runtime="claude-code",
-            runtime_config=rc,
+        return ClaudeSDKExecutor(
             system_prompt=system_prompt,
             config_path=config.config_path,
             heartbeat=config.heartbeat,
+            model=model,
         )
