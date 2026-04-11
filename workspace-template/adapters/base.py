@@ -94,7 +94,7 @@ class BaseAdapter(ABC):
         from coordinator import get_children, get_parent_context, build_children_description
         from prompt import build_system_prompt, get_peer_capabilities
         from tools.approval import request_approval
-        from tools.delegation import delegate_to_workspace
+        from tools.delegation import delegate_to_workspace, check_delegation_status
         from tools.memory import commit_memory, search_memory
         from tools.sandbox import run_code
 
@@ -125,7 +125,7 @@ class BaseAdapter(ABC):
         logger.info(f"Loaded {len(loaded_skills)} skills: {[s.metadata.id for s in loaded_skills]}")
 
         # Assemble tools: 5 core + skill tools
-        all_tools = [delegate_to_workspace, request_approval, commit_memory, search_memory, run_code]
+        all_tools = [delegate_to_workspace, check_delegation_status, request_approval, commit_memory, search_memory, run_code]
         for skill in loaded_skills:
             all_tools.extend(skill.tools)
 

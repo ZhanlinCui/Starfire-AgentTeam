@@ -1,34 +1,19 @@
-"""Delegation tool for sending tasks to peer workspaces via A2A.
+"""Async delegation tool for sending tasks to peer workspaces via A2A.
 
-RBAC enforcement
-----------------
-The calling workspace must hold a role that grants the ``"delegate"`` action
-(see ``tools/audit.ROLE_PERMISSIONS``).  The roles are read from
-``config.yaml`` under ``rbac.roles`` at first call and cached for the life of
-the process.  If the config cannot be loaded, the workspace defaults to the
-``"operator"`` role (full access) so that agents remain functional in
-lightweight / test environments.
+Delegations are non-blocking: the tool fires the A2A request in the background
+and returns immediately with a task_id. The agent can check status anytime via
+check_delegation_status, or just continue working and check later.
 
-Audit trail
------------
-Every delegation attempt — including RBAC denials, discovery failures, and
-A2A-level errors — is appended as a JSON Lines record to the audit log
-(default: ``/var/log/starfire/audit.jsonl``, overridden by ``AUDIT_LOG_PATH``).
-The ``trace_id`` field (a UUID v4) is shared across all events that belong to
-the same delegation attempt, enabling end-to-end trace reconstruction.
-
-OpenTelemetry
--------------
-A ``task_delegate`` span is created for every delegation.  W3C TraceContext
-headers (``traceparent`` / ``tracestate``) are injected into the outgoing HTTP
-request so the receiving workspace can parent its ``task_receive`` span to the
-same distributed trace.  The current traceparent is also written into the A2A
-metadata payload as a fallback for receivers that cannot access HTTP headers.
+When the delegate responds, the result is stored and the agent is notified
+via a status update.
 """
 
 import asyncio
 import os
 import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
 
 import httpx
 from langchain_core.tools import tool
@@ -48,168 +33,115 @@ PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
 WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "")
 DELEGATION_RETRY_ATTEMPTS = int(os.environ.get("DELEGATION_RETRY_ATTEMPTS", "3"))
 DELEGATION_RETRY_DELAY = float(os.environ.get("DELEGATION_RETRY_DELAY", "5.0"))
-DELEGATION_TIMEOUT = float(os.environ.get("DELEGATION_TIMEOUT", "120.0"))
+DELEGATION_TIMEOUT = float(os.environ.get("DELEGATION_TIMEOUT", "300.0"))
 
 
-@tool
-async def delegate_to_workspace(
-    workspace_id: str,
-    task: str,
-) -> dict:
-    """Delegate a task to a peer workspace via A2A protocol.
+class DelegationStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
-    Args:
-        workspace_id: The ID of the target workspace to delegate to.
-        task: The task description to send to the peer.
 
-    Returns:
-        A dict with the result or error information.
-    """
-    # One trace_id links every audit event for this delegation attempt.
-    task_id = str(uuid.uuid4())
+@dataclass
+class DelegationTask:
+    task_id: str
+    workspace_id: str
+    task_description: str
+    status: DelegationStatus = DelegationStatus.PENDING
+    result: Optional[str] = None
+    error: Optional[str] = None
 
-    # --- RBAC check -----------------------------------------------------------
-    roles, custom_perms = get_workspace_roles()
-    if not check_permission("delegate", roles, custom_perms):
-        log_event(
-            event_type="rbac",
-            action="rbac.deny",
-            resource=workspace_id,
-            outcome="denied",
-            trace_id=task_id,
-            attempted_action="delegate",
-            roles=roles,
-        )
-        return {
-            "success": False,
-            "error": (
-                "RBAC: this workspace does not have the 'delegate' permission. "
-                f"Current roles: {roles}"
-            ),
-        }
 
-    # Log that the action was allowed by RBAC before attempting it.
-    log_event(
-        event_type="delegation",
-        action="delegate",
-        resource=workspace_id,
-        outcome="allowed",
-        trace_id=task_id,
-        target_workspace_id=workspace_id,
-        task_preview=task[:200],
-    )
+# In-memory store of delegation tasks for this workspace
+_delegations: dict[str, DelegationTask] = {}
+_background_tasks: set[asyncio.Task] = set()
+MAX_DELEGATION_HISTORY = 100
+logger = __import__("logging").getLogger(__name__)
 
-    # ── OTEL: task_delegate span ─────────────────────────────────────────────
-    # Started here (after RBAC) so that it spans discovery + A2A send.
-    # The span is a child of the currently active llm_call/task_receive span,
-    # forming a complete picture of the outbound delegation in the trace.
+
+def _evict_old_delegations():
+    """Remove completed/failed delegations when store exceeds MAX_DELEGATION_HISTORY."""
+    if len(_delegations) <= MAX_DELEGATION_HISTORY:
+        return
+    # Evict oldest completed/failed first
+    removable = [
+        tid for tid, d in _delegations.items()
+        if d.status in (DelegationStatus.COMPLETED, DelegationStatus.FAILED)
+    ]
+    for tid in removable[:len(_delegations) - MAX_DELEGATION_HISTORY]:
+        del _delegations[tid]
+
+
+def _on_task_done(task: asyncio.Task):
+    """Callback for background tasks — log unhandled exceptions."""
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception():
+        logger.error("Delegation background task failed: %s", task.exception())
+
+
+async def _notify_completion(task_id: str, target_workspace_id: str, status: str):
+    """Push notification to platform when delegation completes/fails."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/notify",
+                json={
+                    "type": "delegation_complete",
+                    "task_id": task_id,
+                    "target_workspace_id": target_workspace_id,
+                    "status": status,
+                },
+            )
+    except Exception:
+        pass  # Best-effort notification
+
+
+async def _execute_delegation(task_id: str, workspace_id: str, task: str):
+    """Background coroutine that sends the A2A request and stores the result."""
+    delegation = _delegations[task_id]
+    delegation.status = DelegationStatus.IN_PROGRESS
+
     tracer = get_tracer()
-
     with tracer.start_as_current_span("task_delegate") as delegate_span:
         delegate_span.set_attribute(WORKSPACE_ID_ATTR, WORKSPACE_ID)
         delegate_span.set_attribute(A2A_SOURCE_WORKSPACE, WORKSPACE_ID)
         delegate_span.set_attribute(A2A_TARGET_WORKSPACE, workspace_id)
         delegate_span.set_attribute(A2A_TASK_ID, task_id)
-        delegate_span.set_attribute("a2a.task_preview", task[:256])
 
         async with httpx.AsyncClient(timeout=DELEGATION_TIMEOUT) as client:
-            # --- Discover the target workspace URL ----------------------------
+            # Discover target URL
             try:
                 discover_resp = await client.get(
                     f"{PLATFORM_URL}/registry/discover/{workspace_id}",
                     headers={"X-Workspace-ID": WORKSPACE_ID},
                 )
-                if discover_resp.status_code == 403:
-                    log_event(
-                        event_type="delegation",
-                        action="delegate",
-                        resource=workspace_id,
-                        outcome="failure",
-                        trace_id=task_id,
-                        reason="platform_forbidden",
-                        http_status=403,
-                    )
-                    return {
-                        "success": False,
-                        "error": f"Not authorized to communicate with {workspace_id}",
-                    }
-                if discover_resp.status_code == 404:
-                    log_event(
-                        event_type="delegation",
-                        action="delegate",
-                        resource=workspace_id,
-                        outcome="failure",
-                        trace_id=task_id,
-                        reason="workspace_not_found",
-                        http_status=404,
-                    )
-                    return {
-                        "success": False,
-                        "error": f"Workspace {workspace_id} not found",
-                    }
                 if discover_resp.status_code != 200:
-                    log_event(
-                        event_type="delegation",
-                        action="delegate",
-                        resource=workspace_id,
-                        outcome="failure",
-                        trace_id=task_id,
-                        reason="discovery_error",
-                        http_status=discover_resp.status_code,
-                    )
-                    return {
-                        "success": False,
-                        "error": f"Discovery failed with status {discover_resp.status_code}",
-                    }
+                    delegation.status = DelegationStatus.FAILED
+                    delegation.error = f"Discovery failed: HTTP {discover_resp.status_code}"
+                    log_event(event_type="delegation", action="delegate", resource=workspace_id,
+                              outcome="failure", trace_id=task_id, reason="discovery_error")
+                    return
 
                 target_url = discover_resp.json().get("url")
                 if not target_url:
-                    log_event(
-                        event_type="delegation",
-                        action="delegate",
-                        resource=workspace_id,
-                        outcome="failure",
-                        trace_id=task_id,
-                        reason="no_url_in_registry",
-                    )
-                    return {
-                        "success": False,
-                        "error": f"Workspace {workspace_id} has no URL",
-                    }
-
-                delegate_span.set_attribute("a2a.target_url", target_url)
-
+                    delegation.status = DelegationStatus.FAILED
+                    delegation.error = "No URL for workspace"
+                    return
             except Exception as e:
-                log_event(
-                    event_type="delegation",
-                    action="delegate",
-                    resource=workspace_id,
-                    outcome="failure",
-                    trace_id=task_id,
-                    reason="discovery_exception",
-                    error=str(e),
-                )
-                try:
-                    delegate_span.record_exception(e)
-                except Exception:
-                    pass
-                return {"success": False, "error": f"Discovery error: {e}"}
+                delegation.status = DelegationStatus.FAILED
+                delegation.error = f"Discovery error: {e}"
+                return
 
-            # --- Send A2A message/send with retry -----------------------------
-            # Inject W3C TraceContext headers so the receiving workspace can
-            # attach its task_receive span to the current distributed trace.
-            # We also embed traceparent in the A2A metadata as a fallback.
-            outgoing_headers = inject_trace_headers(
-                {
-                    "Content-Type": "application/json",
-                    "X-Workspace-ID": WORKSPACE_ID,
-                }
-            )
+            # Send A2A with retry
+            outgoing_headers = inject_trace_headers({
+                "Content-Type": "application/json",
+                "X-Workspace-ID": WORKSPACE_ID,
+            })
             traceparent = get_current_traceparent()
 
             last_error = None
             for attempt in range(DELEGATION_RETRY_ATTEMPTS):
-                delegate_span.set_attribute("a2a.attempt", attempt + 1)
                 try:
                     a2a_resp = await client.post(
                         target_url,
@@ -217,18 +149,16 @@ async def delegate_to_workspace(
                         json={
                             "jsonrpc": "2.0",
                             "method": "message/send",
-                            "id": f"delegation-{workspace_id}-{attempt}",
+                            "id": f"delegation-{task_id}-{attempt}",
                             "params": {
                                 "message": {
                                     "role": "user",
                                     "parts": [{"kind": "text", "text": task}],
-                                    "messageId": f"msg-{workspace_id}-{attempt}",
+                                    "messageId": f"msg-{task_id}-{attempt}",
                                 },
                                 "metadata": {
                                     "parent_task_id": task_id,
                                     "source_workspace_id": WORKSPACE_ID,
-                                    # W3C traceparent for receivers that read
-                                    # it from the JSON payload rather than headers
                                     "traceparent": traceparent,
                                 },
                             },
@@ -238,35 +168,34 @@ async def delegate_to_workspace(
                     if a2a_resp.status_code == 200:
                         try:
                             result = a2a_resp.json()
-                        except (ValueError, Exception) as e:
-                            return f"Peer responded with status 200 but invalid JSON: {str(e)[:200]}"
+                        except Exception:
+                            delegation.status = DelegationStatus.FAILED
+                            delegation.error = "Invalid JSON response"
+                            return
+
                         if "result" in result:
                             task_result = result["result"]
-                            # Extract text from artifacts
                             artifacts = task_result.get("artifacts", [])
                             texts = []
                             for artifact in artifacts:
                                 for part in artifact.get("parts", []):
                                     if part.get("kind") == "text":
                                         texts.append(part["text"])
-                            log_event(
-                                event_type="delegation",
-                                action="delegate",
-                                resource=workspace_id,
-                                outcome="success",
-                                trace_id=task_id,
-                                target_workspace_id=workspace_id,
-                                attempt=attempt + 1,
-                            )
-                            delegate_span.set_attribute("a2a.success", True)
-                            return {
-                                "success": True,
-                                "response": "\n".join(texts) if texts else str(task_result),
-                                "workspace_id": workspace_id,
-                            }
+                            # Also check top-level parts
+                            for part in task_result.get("parts", []):
+                                if part.get("kind") == "text":
+                                    texts.append(part["text"])
+
+                            delegation.status = DelegationStatus.COMPLETED
+                            delegation.result = "\n".join(texts) if texts else str(task_result)
+                            log_event(event_type="delegation", action="delegate", resource=workspace_id,
+                                      outcome="success", trace_id=task_id, attempt=attempt + 1)
+                            await _notify_completion(task_id, workspace_id, "completed")
+                            return
+
                         if "error" in result:
                             last_error = result["error"].get("message", str(result["error"]))
-                            break  # Don't retry explicit RPC errors
+                            break
 
                 except (httpx.ConnectError, httpx.TimeoutException) as e:
                     last_error = str(e)
@@ -274,22 +203,107 @@ async def delegate_to_workspace(
                         await asyncio.sleep(DELEGATION_RETRY_DELAY * (attempt + 1))
                     continue
 
-        log_event(
-            event_type="delegation",
-            action="delegate",
-            resource=workspace_id,
-            outcome="failure",
-            trace_id=task_id,
-            target_workspace_id=workspace_id,
-            attempts=DELEGATION_RETRY_ATTEMPTS,
-            last_error=str(last_error),
-        )
-        delegate_span.set_attribute("a2a.success", False)
-        delegate_span.set_attribute("a2a.last_error", str(last_error or ""))
+            delegation.status = DelegationStatus.FAILED
+            delegation.error = str(last_error)
+            log_event(event_type="delegation", action="delegate", resource=workspace_id,
+                      outcome="failure", trace_id=task_id, last_error=str(last_error))
+            await _notify_completion(task_id, workspace_id, "failed")
 
-        return {
-            "success": False,
-            "error": last_error,
-            "workspace_id": workspace_id,
-            "message": f"Delegation to {workspace_id} failed after {DELEGATION_RETRY_ATTEMPTS} attempts.",
-        }
+
+@tool
+async def delegate_to_workspace(
+    workspace_id: str,
+    task: str,
+) -> dict:
+    """Delegate a task to a peer workspace via A2A protocol (non-blocking).
+
+    Sends the task in the background and returns immediately with a task_id.
+    Use check_delegation_status to poll for the result, or continue working
+    and check later. The delegate works independently.
+
+    Args:
+        workspace_id: The ID of the target workspace to delegate to.
+        task: The task description to send to the peer.
+
+    Returns:
+        A dict with task_id and status="delegated". Use check_delegation_status(task_id) to get results.
+    """
+    task_id = str(uuid.uuid4())
+
+    # RBAC check
+    roles, custom_perms = get_workspace_roles()
+    if not check_permission("delegate", roles, custom_perms):
+        log_event(event_type="rbac", action="rbac.deny", resource=workspace_id,
+                  outcome="denied", trace_id=task_id, attempted_action="delegate", roles=roles)
+        return {"success": False, "error": f"RBAC: no 'delegate' permission. Roles: {roles}"}
+
+    log_event(event_type="delegation", action="delegate", resource=workspace_id,
+              outcome="dispatched", trace_id=task_id, task_preview=task[:200])
+
+    # Store the delegation and launch background task
+    delegation = DelegationTask(
+        task_id=task_id,
+        workspace_id=workspace_id,
+        task_description=task[:200],
+    )
+    _delegations[task_id] = delegation
+    _evict_old_delegations()
+
+    bg_task = asyncio.create_task(_execute_delegation(task_id, workspace_id, task))
+    _background_tasks.add(bg_task)
+    bg_task.add_done_callback(_on_task_done)
+
+    return {
+        "success": True,
+        "task_id": task_id,
+        "status": "delegated",
+        "message": f"Task delegated to {workspace_id}. Use check_delegation_status('{task_id}') to get the result when ready.",
+    }
+
+
+@tool
+async def check_delegation_status(
+    task_id: str = "",
+) -> dict:
+    """Check the status of a delegated task, or list all active delegations.
+
+    Args:
+        task_id: The task_id returned by delegate_to_workspace. If empty, lists all delegations.
+
+    Returns:
+        Status and result (if completed) of the delegation.
+    """
+    if not task_id:
+        # List all delegations
+        summary = []
+        for tid, d in _delegations.items():
+            entry = {
+                "task_id": tid,
+                "workspace_id": d.workspace_id,
+                "status": d.status.value,
+                "task": d.task_description,
+            }
+            if d.status == DelegationStatus.COMPLETED:
+                entry["result_preview"] = (d.result or "")[:200]
+            if d.status == DelegationStatus.FAILED:
+                entry["error"] = d.error
+            summary.append(entry)
+        return {"delegations": summary, "count": len(summary)}
+
+    delegation = _delegations.get(task_id)
+    if not delegation:
+        return {"error": f"No delegation found with task_id {task_id}"}
+
+    result = {
+        "task_id": task_id,
+        "workspace_id": delegation.workspace_id,
+        "status": delegation.status.value,
+        "task": delegation.task_description,
+    }
+
+    if delegation.status == DelegationStatus.COMPLETED:
+        result["result"] = delegation.result
+    elif delegation.status == DelegationStatus.FAILED:
+        result["error"] = delegation.error
+
+    return result
