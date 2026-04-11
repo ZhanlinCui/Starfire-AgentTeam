@@ -364,10 +364,28 @@ class TestDeepAgentsAdapter:
         adapter = DeepAgentsAdapter()
         _stub_common_setup(adapter, monkeypatch)
 
-        fake_deepagents = ModuleType("deepagents")
         fake_agent = MagicMock()
+
+        # Mock deepagents package with all imports used by setup()
+        fake_deepagents = ModuleType("deepagents")
         fake_deepagents.create_deep_agent = MagicMock(return_value=fake_agent)
+        fake_deepagents.FilesystemPermission = MagicMock()
         monkeypatch.setitem(sys.modules, "deepagents", fake_deepagents)
+
+        fake_backends = ModuleType("deepagents.backends")
+        fake_backends.FilesystemBackend = MagicMock()
+        monkeypatch.setitem(sys.modules, "deepagents.backends", fake_backends)
+
+        fake_checkpoint = ModuleType("langgraph.checkpoint.memory")
+        fake_checkpoint.MemorySaver = MagicMock()
+        monkeypatch.setitem(sys.modules, "langgraph.checkpoint.memory", fake_checkpoint)
+        monkeypatch.setitem(sys.modules, "langgraph.checkpoint", ModuleType("langgraph.checkpoint"))
+        monkeypatch.setitem(sys.modules, "langgraph", ModuleType("langgraph"))
+
+        fake_cache_mod = ModuleType("langchain_core.caches")
+        fake_cache_mod.InMemoryCache = MagicMock()
+        monkeypatch.setitem(sys.modules, "langchain_core.caches", fake_cache_mod)
+        monkeypatch.setitem(sys.modules, "langchain_core", ModuleType("langchain_core"))
 
         # Mock the LLM creation
         monkeypatch.setattr(adapter, "_create_llm", lambda model: MagicMock())
