@@ -431,6 +431,79 @@ class TestDeepAgentsAdapter:
         result = adapter._create_llm("anthropic:claude-sonnet-4-6")
         assert result is fake_llm
 
+    def test_create_llm_cerebras(self, monkeypatch):
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+
+        fake_openai_mod = ModuleType("langchain_openai")
+        fake_llm = MagicMock()
+        fake_openai_mod.ChatOpenAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai_mod)
+        monkeypatch.setenv("CEREBRAS_API_KEY", "test-key")
+
+        result = adapter._create_llm("cerebras:llama3.1-8b")
+        assert result is fake_llm
+        fake_openai_mod.ChatOpenAI.assert_called_once_with(
+            model="llama3.1-8b",
+            openai_api_key="test-key",
+            openai_api_base="https://api.cerebras.ai/v1",
+        )
+
+    def test_create_llm_google_genai(self, monkeypatch):
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+
+        fake_genai_mod = ModuleType("langchain_google_genai")
+        fake_llm = MagicMock()
+        fake_genai_mod.ChatGoogleGenerativeAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_google_genai", fake_genai_mod)
+
+        result = adapter._create_llm("google_genai:gemini-2.5-flash")
+        assert result is fake_llm
+        fake_genai_mod.ChatGoogleGenerativeAI.assert_called_once_with(model="gemini-2.5-flash")
+
+    def test_create_llm_ollama(self, monkeypatch):
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+
+        fake_ollama_mod = ModuleType("langchain_ollama")
+        fake_llm = MagicMock()
+        fake_ollama_mod.ChatOllama = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_ollama", fake_ollama_mod)
+
+        result = adapter._create_llm("ollama:llama3")
+        assert result is fake_llm
+        fake_ollama_mod.ChatOllama.assert_called_once_with(model="llama3")
+
+    def test_create_llm_unknown_provider_raises(self):
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+
+        with pytest.raises(ValueError, match="Unsupported model provider"):
+            adapter._create_llm("badprovider:some-model")
+
+    def test_create_llm_default_provider_is_anthropic(self, monkeypatch):
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+
+        fake_anthropic_mod = ModuleType("langchain_anthropic")
+        fake_llm = MagicMock()
+        fake_anthropic_mod.ChatAnthropic = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_anthropic", fake_anthropic_mod)
+
+        result = adapter._create_llm("claude-sonnet-4-6")
+        assert result is fake_llm
+
+    @pytest.mark.asyncio
+    async def test_create_executor_raises_without_setup(self, monkeypatch):
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        fake_a2a_executor_mod = MagicMock()
+        monkeypatch.setitem(sys.modules, "a2a_executor", fake_a2a_executor_mod)
+
+        adapter = DeepAgentsAdapter()
+        with pytest.raises(RuntimeError, match="setup\\(\\) must be called"):
+            await adapter.create_executor(_make_config())
+
 
 # ============================================================================
 # 6. OpenClaw Adapter
@@ -1004,19 +1077,19 @@ class TestCrewAIExecute:
 
 class TestDeepAgentsCreateLlmBranches:
 
-    def test_create_llm_no_colon_defaults_to_openai(self, monkeypatch):
-        """Model string without ':' defaults to openai provider."""
+    def test_create_llm_no_colon_defaults_to_anthropic(self, monkeypatch):
+        """Model string without ':' defaults to anthropic provider."""
         from types import ModuleType
-        fake_openai = ModuleType("langchain_openai")
+        fake_anthropic = ModuleType("langchain_anthropic")
         fake_llm = MagicMock()
-        fake_openai.ChatOpenAI = MagicMock(return_value=fake_llm)
-        monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+        fake_anthropic.ChatAnthropic = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_anthropic", fake_anthropic)
 
         from adapters.deepagents.adapter import DeepAgentsAdapter
         adapter = DeepAgentsAdapter()
-        result = adapter._create_llm("gpt-4o-mini")
+        result = adapter._create_llm("claude-sonnet-4-6")
 
-        fake_openai.ChatOpenAI.assert_called_once_with(model="gpt-4o-mini")
+        fake_anthropic.ChatAnthropic.assert_called_once_with(model="claude-sonnet-4-6")
         assert result is fake_llm
 
     def test_create_llm_openai_with_base_url(self, monkeypatch):
@@ -1089,20 +1162,143 @@ class TestDeepAgentsCreateLlmBranches:
         assert call_kwargs.get("anthropic_api_url") == "http://proxy:8080"
         assert result is fake_llm
 
-    def test_create_llm_unknown_provider_fallback(self, monkeypatch):
-        """Unknown provider falls back to ChatOpenAI with model_name only."""
+    def test_create_llm_unknown_provider_raises(self):
+        """Unknown provider raises ValueError instead of silently falling back."""
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+
+        with pytest.raises(ValueError, match="Unsupported model provider"):
+            adapter._create_llm("someunknown:my-model")
+
+    def test_create_llm_multiple_colons_preserves_model(self, monkeypatch):
+        """Model like 'google_genai:models/gemini-2.5-flash' splits on first colon only."""
+        from types import ModuleType
+        fake_genai = ModuleType("langchain_google_genai")
+        fake_llm = MagicMock()
+        fake_genai.ChatGoogleGenerativeAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_google_genai", fake_genai)
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        result = adapter._create_llm("google_genai:models/gemini-2.5-flash:latest")
+
+        fake_genai.ChatGoogleGenerativeAI.assert_called_once_with(model="models/gemini-2.5-flash:latest")
+        assert result is fake_llm
+
+    def test_create_llm_openrouter_fallback_to_openai_key(self, monkeypatch):
+        """When OPENROUTER_API_KEY is unset, falls back to OPENAI_API_KEY."""
         from types import ModuleType
         fake_openai = ModuleType("langchain_openai")
         fake_llm = MagicMock()
         fake_openai.ChatOpenAI = MagicMock(return_value=fake_llm)
         monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-fallback-key")
 
         from adapters.deepagents.adapter import DeepAgentsAdapter
         adapter = DeepAgentsAdapter()
-        result = adapter._create_llm("someunknown:my-model")
+        adapter._create_llm("openrouter:meta-llama/llama-3-8b")
 
-        fake_openai.ChatOpenAI.assert_called_once_with(model="my-model")
-        assert result is fake_llm
+        call_kwargs = fake_openai.ChatOpenAI.call_args[1]
+        assert call_kwargs["openai_api_key"] == "sk-fallback-key"
+
+    def test_create_llm_openrouter_both_keys_unset(self, monkeypatch):
+        """When both OPENROUTER_API_KEY and OPENAI_API_KEY are unset, empty string is used."""
+        from types import ModuleType
+        fake_openai = ModuleType("langchain_openai")
+        fake_llm = MagicMock()
+        fake_openai.ChatOpenAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        adapter._create_llm("openrouter:meta-llama/llama-3-8b")
+
+        call_kwargs = fake_openai.ChatOpenAI.call_args[1]
+        assert call_kwargs["openai_api_key"] == ""
+
+    def test_create_llm_openai_without_base_url(self, monkeypatch):
+        """When OPENAI_BASE_URL is not set, openai_api_base should NOT be passed."""
+        from types import ModuleType
+        fake_openai = ModuleType("langchain_openai")
+        fake_llm = MagicMock()
+        fake_openai.ChatOpenAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        adapter._create_llm("openai:gpt-4o")
+
+        call_kwargs = fake_openai.ChatOpenAI.call_args[1]
+        assert "openai_api_base" not in call_kwargs
+
+    def test_create_llm_anthropic_without_base_url(self, monkeypatch):
+        """When ANTHROPIC_BASE_URL is not set, anthropic_api_url should NOT be passed."""
+        from types import ModuleType
+        fake_anthropic = ModuleType("langchain_anthropic")
+        fake_llm = MagicMock()
+        fake_anthropic.ChatAnthropic = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_anthropic", fake_anthropic)
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        adapter._create_llm("anthropic:claude-sonnet-4-6")
+
+        call_kwargs = fake_anthropic.ChatAnthropic.call_args[1]
+        assert "anthropic_api_url" not in call_kwargs
+
+    def test_create_llm_groq_empty_api_key(self, monkeypatch):
+        """When GROQ_API_KEY is not set, empty string is passed."""
+        from types import ModuleType
+        fake_openai = ModuleType("langchain_openai")
+        fake_llm = MagicMock()
+        fake_openai.ChatOpenAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        adapter._create_llm("groq:llama3-8b")
+
+        call_kwargs = fake_openai.ChatOpenAI.call_args[1]
+        assert call_kwargs["openai_api_key"] == ""
+
+    def test_create_llm_cerebras_empty_api_key(self, monkeypatch):
+        """When CEREBRAS_API_KEY is not set, empty string is passed."""
+        from types import ModuleType
+        fake_openai = ModuleType("langchain_openai")
+        fake_llm = MagicMock()
+        fake_openai.ChatOpenAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        adapter._create_llm("cerebras:llama3.1-8b")
+
+        call_kwargs = fake_openai.ChatOpenAI.call_args[1]
+        assert call_kwargs["openai_api_key"] == ""
+
+    def test_create_llm_openrouter_max_tokens(self, monkeypatch):
+        """OpenRouter reads MAX_TOKENS env var."""
+        from types import ModuleType
+        fake_openai = ModuleType("langchain_openai")
+        fake_llm = MagicMock()
+        fake_openai.ChatOpenAI = MagicMock(return_value=fake_llm)
+        monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test")
+        monkeypatch.setenv("MAX_TOKENS", "4096")
+
+        from adapters.deepagents.adapter import DeepAgentsAdapter
+        adapter = DeepAgentsAdapter()
+        adapter._create_llm("openrouter:meta-llama/llama-3-8b")
+
+        call_kwargs = fake_openai.ChatOpenAI.call_args[1]
+        assert call_kwargs["max_tokens"] == 4096
 
 
 # ============================================================================

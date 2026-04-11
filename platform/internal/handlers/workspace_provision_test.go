@@ -236,6 +236,137 @@ func TestEnsureDefaultConfig_SpecialCharsInName(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaultConfig_OpenClawGetsRuntimeConfig(t *testing.T) {
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	payload := models.CreateWorkspacePayload{
+		Name:    "OpenClaw Agent",
+		Tier:    1,
+		Runtime: "openclaw",
+		Model:   "openai:gpt-4o",
+	}
+
+	files := handler.ensureDefaultConfig("ws-openclaw", payload)
+	configYAML := string(files["config.yaml"])
+	if !contains(configYAML, "runtime_config:") {
+		t.Errorf("openclaw should have runtime_config, got:\n%s", configYAML)
+	}
+	if !contains(configYAML, "model: openai:gpt-4o") {
+		t.Errorf("model should be at top level, got:\n%s", configYAML)
+	}
+}
+
+func TestEnsureDefaultConfig_CrewAIGetsRuntimeConfig(t *testing.T) {
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	payload := models.CreateWorkspacePayload{
+		Name:    "CrewAI Agent",
+		Tier:    1,
+		Runtime: "crewai",
+	}
+
+	files := handler.ensureDefaultConfig("ws-crewai", payload)
+	configYAML := string(files["config.yaml"])
+	if !contains(configYAML, "runtime_config:") {
+		t.Errorf("crewai should have runtime_config, got:\n%s", configYAML)
+	}
+	if !contains(configYAML, "auth_token_file: .auth-token") {
+		t.Errorf("crewai should have auth_token_file in runtime_config, got:\n%s", configYAML)
+	}
+}
+
+func TestEnsureDefaultConfig_EmptyRuntimeDefaultsToLangGraph(t *testing.T) {
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	payload := models.CreateWorkspacePayload{
+		Name: "Default Agent",
+		Tier: 1,
+	}
+
+	files := handler.ensureDefaultConfig("ws-empty-rt", payload)
+	configYAML := string(files["config.yaml"])
+	if !contains(configYAML, "runtime: langgraph") {
+		t.Errorf("empty runtime should default to langgraph, got:\n%s", configYAML)
+	}
+	if !contains(configYAML, "model: anthropic:claude-sonnet-4-6") {
+		t.Errorf("langgraph default model should be anthropic, got:\n%s", configYAML)
+	}
+}
+
+func TestEnsureDefaultConfig_EmptyNameAndRole(t *testing.T) {
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	payload := models.CreateWorkspacePayload{
+		Tier:    1,
+		Runtime: "langgraph",
+	}
+
+	files := handler.ensureDefaultConfig("ws-empty-name", payload)
+	configYAML := string(files["config.yaml"])
+	// Should not panic — empty name/role produce valid YAML
+	if !contains(configYAML, "name: ") {
+		t.Errorf("config.yaml should have name field, got:\n%s", configYAML)
+	}
+	if !contains(configYAML, "runtime: langgraph") {
+		t.Errorf("config.yaml should have runtime, got:\n%s", configYAML)
+	}
+}
+
+func TestEnsureDefaultConfig_DeepAgents(t *testing.T) {
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	payload := models.CreateWorkspacePayload{
+		Name:    "Deep Agent",
+		Tier:    2,
+		Runtime: "deepagents",
+		Model:   "google_genai:gemini-2.5-flash",
+	}
+
+	files := handler.ensureDefaultConfig("ws-deep", payload)
+
+	configYAML := string(files["config.yaml"])
+	if !contains(configYAML, "runtime: deepagents") {
+		t.Errorf("config.yaml missing runtime, got:\n%s", configYAML)
+	}
+	if !contains(configYAML, "model: google_genai:gemini-2.5-flash") {
+		t.Errorf("config.yaml should have model at top level, got:\n%s", configYAML)
+	}
+	// deepagents should NOT have runtime_config block
+	if contains(configYAML, "runtime_config:") {
+		t.Errorf("config.yaml should NOT have runtime_config for deepagents, got:\n%s", configYAML)
+	}
+	// Should NOT have auth token
+	if _, ok := files[".auth-token"]; ok {
+		t.Error("deepagents should not get .auth-token")
+	}
+}
+
+func TestEnsureDefaultConfig_ModelAlwaysTopLevel(t *testing.T) {
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+
+	for _, runtime := range []string{"langgraph", "deepagents", "claude-code"} {
+		t.Run(runtime, func(t *testing.T) {
+			payload := models.CreateWorkspacePayload{
+				Name:    "Agent",
+				Tier:    1,
+				Runtime: runtime,
+				Model:   "test-model",
+			}
+			files := handler.ensureDefaultConfig("ws-"+runtime, payload)
+			configYAML := string(files["config.yaml"])
+			if !contains(configYAML, "model: test-model") {
+				t.Errorf("config.yaml missing top-level model for runtime %s, got:\n%s", runtime, configYAML)
+			}
+		})
+	}
+}
+
 // ==================== buildProvisionerConfig ====================
 
 func TestBuildProvisionerConfig_BasicFields(t *testing.T) {

@@ -15,7 +15,6 @@ Supports: anthropic, openai, openrouter, groq, cerebras, google_genai, ollama.
 import os
 import glob as globmod
 import logging
-from pathlib import Path
 
 from adapters.base import BaseAdapter, AdapterConfig
 from a2a.server.agent_execution import AgentExecutor
@@ -58,7 +57,7 @@ class DeepAgentsAdapter(BaseAdapter):
         if ":" in model_str:
             provider, model_name = model_str.split(":", 1)
         else:
-            provider, model_name = "openai", model_str
+            provider, model_name = "anthropic", model_str
 
         if provider == "openai":
             from langchain_openai import ChatOpenAI
@@ -103,13 +102,7 @@ class DeepAgentsAdapter(BaseAdapter):
             from langchain_ollama import ChatOllama
             return ChatOllama(model=model_name)
         else:
-            try:
-                from langchain.chat_models import init_chat_model
-                return init_chat_model(model_str)
-            except Exception:
-                from langchain_openai import ChatOpenAI
-                logger.warning("Unknown provider %s, falling back to OpenAI", provider)
-                return ChatOpenAI(model=model_name)
+            raise ValueError(f"Unsupported model provider: {provider}")
 
     async def setup(self, config: AdapterConfig) -> None:
         try:
@@ -173,5 +166,7 @@ class DeepAgentsAdapter(BaseAdapter):
         )
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
+        if self.agent is None:
+            raise RuntimeError("setup() must be called before create_executor()")
         from a2a_executor import LangGraphA2AExecutor
         return LangGraphA2AExecutor(self.agent, heartbeat=config.heartbeat, model=config.model)
