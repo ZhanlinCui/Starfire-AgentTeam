@@ -16,9 +16,12 @@ defaults:
   initial_prompt: |
     You just started. Set up your environment silently — do NOT contact other agents yet.
     1. Clone the repo: git clone https://github.com/${GITHUB_REPO}.git /workspace/repo 2>/dev/null || (cd /workspace/repo && git pull)
-    2. Read /workspace/repo/CLAUDE.md to understand the project
-    3. Read your system prompt at /configs/system-prompt.md to understand your role
-    4. You are now ready. Wait for tasks from your parent — do not initiate contact.
+    2. Set up git hooks: cd /workspace/repo && git config core.hooksPath .githooks
+    3. Read /workspace/repo/CLAUDE.md to understand the project
+    4. Read your system prompt at /configs/system-prompt.md to understand your role
+    5. Save key conventions to memory so you recall them on every future task:
+       Use commit_memory to save: "CONVENTIONS: (1) Every canvas .tsx using hooks needs 'use client' as first line — run the grep check before committing. (2) Dark zinc theme only — never white/light. (3) Zustand selectors must not create new objects. (4) Always run npm test + npm run build before reporting done. (5) Use delegate_task to ask peers questions directly — don't guess API shapes. (6) Pre-commit hook at .githooks/pre-commit enforces these — commits will be rejected if violated."
+    6. You are now ready. Wait for tasks from your parent — do not initiate contact.
 
 workspaces:
   - name: PM
