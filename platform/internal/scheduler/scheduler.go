@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,6 +72,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 // tick queries all due schedules and fires each in a goroutine.
+// Waits for all goroutines to finish before returning so the next tick
+// doesn't re-fire schedules whose next_run_at hasn't been updated yet.
 func (s *Scheduler) tick(ctx context.Context) {
 	rows, err := db.DB.QueryContext(ctx, `
 		SELECT id, workspace_id, name, cron_expr, timezone, prompt
@@ -85,6 +88,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 	}
 	defer rows.Close()
 
+	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxConcurrent)
 	for rows.Next() {
 		var sched scheduleRow
@@ -92,8 +96,10 @@ func (s *Scheduler) tick(ctx context.Context) {
 			log.Printf("Scheduler: scan error: %v", err)
 			continue
 		}
+		wg.Add(1)
 		sem <- struct{}{}
 		go func(s2 scheduleRow) {
+			defer wg.Done()
 			defer func() { <-sem }()
 			s.fireSchedule(ctx, s2)
 		}(sched)
@@ -101,6 +107,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 	if err := rows.Err(); err != nil {
 		log.Printf("Scheduler: rows error: %v", err)
 	}
+	wg.Wait()
 }
 
 // fireSchedule sends the A2A message and updates the schedule row.
@@ -108,7 +115,11 @@ func (s *Scheduler) fireSchedule(ctx context.Context, sched scheduleRow) {
 	fireCtx, cancel := context.WithTimeout(ctx, fireTimeout)
 	defer cancel()
 
-	msgID := fmt.Sprintf("cron-%s-%s", sched.ID[:8], uuid.New().String()[:8])
+	idPrefix := sched.ID
+	if len(idPrefix) > 8 {
+		idPrefix = idPrefix[:8]
+	}
+	msgID := fmt.Sprintf("cron-%s-%s", idPrefix, uuid.New().String()[:8])
 
 	a2aBody, _ := json.Marshal(map[string]interface{}{
 		"method": "message/send",
@@ -159,6 +170,19 @@ func (s *Scheduler) fireSchedule(ctx context.Context, sched scheduleRow) {
 		log.Printf("Scheduler: update error for %s: %v", sched.ID, err)
 	}
 
+	// Log a dedicated cron_run activity entry with schedule metadata so the
+	// history endpoint can query by schedule_id.
+	cronMeta, _ := json.Marshal(map[string]interface{}{
+		"schedule_id":   sched.ID,
+		"schedule_name": sched.Name,
+		"cron_expr":     sched.CronExpr,
+		"prompt":        truncate(sched.Prompt, 200),
+	})
+	_, _ = db.DB.ExecContext(ctx, `
+		INSERT INTO activity_logs (workspace_id, activity_type, source_id, method, summary, request_body, status, created_at)
+		VALUES ($1, 'cron_run', 'system:scheduler', 'cron', $2, $3::jsonb, $4, now())
+	`, sched.WorkspaceID, "Cron: "+sched.Name, string(cronMeta), lastStatus)
+
 	if s.broadcaster != nil {
 		s.broadcaster.RecordAndBroadcast(ctx, "CRON_EXECUTED", sched.WorkspaceID, map[string]interface{}{
 			"schedule_id":   sched.ID,
@@ -166,6 +190,13 @@ func (s *Scheduler) fireSchedule(ctx context.Context, sched scheduleRow) {
 			"status":        lastStatus,
 		})
 	}
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 // ComputeNextRun parses a cron expression and returns the next fire time

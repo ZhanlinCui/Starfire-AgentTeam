@@ -120,7 +120,8 @@ export function ScheduleTab({ workspaceId }: Props) {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Delete schedule "${name || "Unnamed"}"? This cannot be undone.`)) return;
     await api.del(`/workspaces/${workspaceId}/schedules/${id}`);
     fetchSchedules();
   };
@@ -342,7 +343,7 @@ export function ScheduleTab({ workspaceId }: Props) {
                     ✎
                   </button>
                   <button
-                    onClick={() => handleDelete(sched.id)}
+                    onClick={() => handleDelete(sched.id, sched.name)}
                     className="text-[8px] px-1.5 py-0.5 text-red-400 hover:bg-red-600/20 rounded transition-colors"
                     title="Delete"
                   >

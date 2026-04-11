@@ -3,7 +3,6 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -136,23 +135,29 @@ func (h *ScheduleHandler) Create(c *gin.Context) {
 	})
 }
 
-// Update modifies a schedule.
+type updateScheduleRequest struct {
+	Name     *string `json:"name"`
+	CronExpr *string `json:"cron_expr"`
+	Timezone *string `json:"timezone"`
+	Prompt   *string `json:"prompt"`
+	Enabled  *bool   `json:"enabled"`
+}
+
+// Update modifies a schedule. Uses a fixed UPDATE with COALESCE so only
+// provided fields are changed — no dynamic SQL construction.
 func (h *ScheduleHandler) Update(c *gin.Context) {
 	scheduleID := c.Param("scheduleId")
 	ctx := c.Request.Context()
 
-	var body map[string]interface{}
+	var body updateScheduleRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
 		return
 	}
 
 	// If cron_expr or timezone changed, revalidate and recompute next_run
-	cronExpr, cronChanged := body["cron_expr"].(string)
-	tz, tzChanged := body["timezone"].(string)
-
-	if cronChanged || tzChanged {
-		// Get current values for any unchanged fields
+	var nextRunAt *time.Time
+	if body.CronExpr != nil || body.Timezone != nil {
 		var currentCron, currentTZ string
 		err := db.DB.QueryRowContext(ctx,
 			`SELECT cron_expr, timezone FROM workspace_schedules WHERE id = $1`, scheduleID,
@@ -161,11 +166,13 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "schedule not found"})
 			return
 		}
-		if !cronChanged {
-			cronExpr = currentCron
+		cronExpr := currentCron
+		if body.CronExpr != nil {
+			cronExpr = *body.CronExpr
 		}
-		if !tzChanged {
-			tz = currentTZ
+		tz := currentTZ
+		if body.Timezone != nil {
+			tz = *body.Timezone
 		}
 		if _, err := time.LoadLocation(tz); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid timezone: " + tz})
@@ -176,37 +183,20 @@ func (h *ScheduleHandler) Update(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		body["next_run_at"] = nextRun
+		nextRunAt = &nextRun
 	}
 
-	// Build dynamic UPDATE
-	setClauses := ""
-	args := []interface{}{}
-	argIdx := 1
-	allowedFields := map[string]bool{
-		"name": true, "cron_expr": true, "timezone": true,
-		"prompt": true, "enabled": true, "next_run_at": true,
-	}
-	for key, val := range body {
-		if !allowedFields[key] {
-			continue
-		}
-		if setClauses != "" {
-			setClauses += ", "
-		}
-		setClauses += key + " = $" + itoa(argIdx)
-		args = append(args, val)
-		argIdx++
-	}
-	if setClauses == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid fields to update"})
-		return
-	}
-	setClauses += ", updated_at = now()"
-	args = append(args, scheduleID)
-
-	query := "UPDATE workspace_schedules SET " + setClauses + " WHERE id = $" + itoa(argIdx)
-	result, err := db.DB.ExecContext(ctx, query, args...)
+	result, err := db.DB.ExecContext(ctx, `
+		UPDATE workspace_schedules SET
+			name      = COALESCE($2, name),
+			cron_expr = COALESCE($3, cron_expr),
+			timezone  = COALESCE($4, timezone),
+			prompt    = COALESCE($5, prompt),
+			enabled   = COALESCE($6, enabled),
+			next_run_at = COALESCE($7, next_run_at),
+			updated_at = now()
+		WHERE id = $1
+	`, scheduleID, body.Name, body.CronExpr, body.Timezone, body.Prompt, body.Enabled, nextRunAt)
 	if err != nil {
 		log.Printf("Schedules.Update: error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update schedule"})
@@ -314,6 +304,3 @@ func (h *ScheduleHandler) History(c *gin.Context) {
 	c.JSON(http.StatusOK, entries)
 }
 
-func itoa(n int) string {
-	return fmt.Sprintf("%d", n)
-}
