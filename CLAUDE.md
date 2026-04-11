@@ -72,6 +72,18 @@ Templates are framework presets in `workspace-configs-templates/`: `claude-code-
 
 For Claude Code runtime, write your OAuth token to `workspace-configs-templates/claude-code-default/.auth-token`.
 
+### Pre-commit Hook
+```bash
+git config core.hooksPath .githooks            # Install hooks (agents do this via initial_prompt)
+```
+Enforces: `'use client'` on hook-using `.tsx` files, dark theme (no white/light), no SQL injection (`fmt.Sprintf` with SQL), no leaked secrets (`sk-ant-`, `ghp_`, `AKIA`). Commit is rejected until violations are fixed — agents cannot bypass this.
+
+### Plugins
+Shared plugins in `plugins/` are auto-loaded by every workspace:
+- **`starfire-dev`**: Codebase conventions (rules injected into CLAUDE.md) + `review-loop` skill for multi-round QA cycles
+- **`superpowers`**: `verification-before-completion`, `test-driven-development`, `systematic-debugging`, `writing-plans`
+- **`ecc`**: General Claude Code guardrails
+
 ### Scripts
 ```bash
 bash scripts/setup-default-org.sh              # Create PM + 3 teams (Marketing/Research/Dev) via API
@@ -83,7 +95,7 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 ```bash
 cd platform && go test -race ./...               # 370+ Go tests (handlers, registry, provisioner, CLI, delegation, org — sqlmock + miniredis)
 cd canvas && npm test                            # 325 Vitest tests (store, components, hydration, buildTree, secrets API)
-cd workspace-template && python -m pytest -v     # 955 pytest tests (config, heartbeat, prompt, skills, a2a, executor, sdk-executor, memory, mcp, plugins, cli, delegation)
+cd workspace-template && python -m pytest -v     # 960 pytest tests (config, heartbeat, prompt, skills, a2a, executor, sdk-executor, memory, mcp, plugins, cli, delegation)
 ```
 
 ### Integration Tests

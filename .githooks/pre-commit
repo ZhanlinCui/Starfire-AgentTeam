@@ -101,8 +101,8 @@ fi
 ALL_STAGED=$(git diff --cached --name-only --diff-filter=ACM || true)
 if [ -n "$ALL_STAGED" ]; then
   for f in $ALL_STAGED; do
-    # Skip binary, known safe files, and the hook itself
-    if echo "$f" | grep -qE '\.png$|\.jpg$|\.ico$|\.woff|node_modules|\.lock$|\.githooks/'; then
+    # Skip binary, known safe files, hooks, docs, and markdown
+    if echo "$f" | grep -qE '\.png$|\.jpg$|\.ico$|\.woff|node_modules|\.lock$|\.githooks/|\.md$|docs/'; then
       continue
     fi
     DIFF=$(git diff --cached "$f" 2>/dev/null | grep '^+' | grep -v '^+++' || true)
