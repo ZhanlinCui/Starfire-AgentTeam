@@ -9,7 +9,12 @@
 # (cloned repos, scratch files). Fix ownership once at startup so every
 # future file operation works without per-file chown hacks.
 if [ "$(id -u)" = "0" ]; then
-    chown -R agent:agent /configs /workspace 2>/dev/null
+    # Fix /configs recursively (plugins, CLAUDE.md, skills — small directory)
+    chown -R agent:agent /configs 2>/dev/null
+    # Fix /workspace top-level only — it may be a bind-mounted host repo with
+    # thousands of files. Recursive chown would take minutes and change the
+    # host filesystem's ownership. The agent only needs to write at the top level.
+    chown agent:agent /workspace 2>/dev/null
     # Re-exec this script as the agent user via gosu (clean PID 1 handoff)
     exec gosu agent "$0" "$@"
 fi

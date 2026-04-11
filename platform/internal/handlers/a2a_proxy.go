@@ -57,6 +57,17 @@ func (e *proxyA2AError) Error() string {
 	return "proxy a2a error"
 }
 
+// ProxyA2ARequest is the public wrapper for proxyA2ARequest, used by the
+// cron scheduler and other internal callers that need to send A2A messages
+// to workspaces programmatically (not from an HTTP handler).
+func (h *WorkspaceHandler) ProxyA2ARequest(ctx context.Context, workspaceID string, body []byte, callerID string, logActivity bool) (int, []byte, error) {
+	status, resp, proxyErr := h.proxyA2ARequest(ctx, workspaceID, body, callerID, logActivity)
+	if proxyErr != nil {
+		return status, resp, proxyErr
+	}
+	return status, resp, nil
+}
+
 // ProxyA2A handles POST /workspaces/:id/a2a
 // Proxies A2A JSON-RPC requests from the canvas to workspace agents,
 // avoiding CORS and Docker network issues.
