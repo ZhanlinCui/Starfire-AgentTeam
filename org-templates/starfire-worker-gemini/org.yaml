@@ -4,14 +4,12 @@
 # Platform tools add: delegate_task, list_peers, commit_memory, etc.
 # ~20x cheaper than Claude Opus, suitable for daily operations.
 #
-# NOTE: DeepAgents runtime has richer built-in tools (filesystem, sub-agents,
 # planning) but requires Anthropic API key for internal middleware even when
-# using non-Anthropic models. Use langgraph for pure Gemini deployments.
 name: Starfire Worker Team (Gemini)
-description: Cost-optimized AI agent team using LangGraph + Gemini 2.5 Flash
+description: Cost-optimized AI agent team using DeepAgents + Gemini 2.5 Flash
 
 defaults:
-  runtime: langgraph
+  runtime: deepagents
   tier: 2
   model: google_genai:gemini-2.5-flash
 

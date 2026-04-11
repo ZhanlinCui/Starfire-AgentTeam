@@ -233,10 +233,11 @@ func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload model
 	configYAML := fmt.Sprintf("name: %s\ndescription: %s\nversion: 1.0.0\ntier: %d\nruntime: %s\n",
 		quoteName, quoteRole, payload.Tier, runtime)
 
+	// Model always goes at top level — config.py reads raw["model"].
+	// For CLI runtimes, also add runtime_config for backwards compatibility.
+	configYAML += fmt.Sprintf("model: %s\n", model)
 	if runtime != "langgraph" {
 		configYAML += fmt.Sprintf("runtime_config:\n  model: %s\n  auth_token_file: .auth-token\n  timeout: 0\n", model)
-	} else {
-		configYAML += fmt.Sprintf("model: %s\n", model)
 	}
 
 	files["config.yaml"] = []byte(configYAML)
