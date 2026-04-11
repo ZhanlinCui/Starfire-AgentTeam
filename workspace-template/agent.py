@@ -27,7 +27,7 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
     try:
         if provider in ("anthropic",):
             from langchain_anthropic import ChatAnthropic as LLMClass
-        elif provider in ("openai", "openrouter", "groq"):
+        elif provider in ("openai", "openrouter", "groq", "cerebras"):
             from langchain_openai import ChatOpenAI as LLMClass
         elif provider == "google_genai":
             from langchain_google_genai import ChatGoogleGenerativeAI as LLMClass
@@ -61,6 +61,13 @@ def create_agent(model_str: str, tools: list, system_prompt: str):
             model=model_name,
             openai_api_key=api_key,
             openai_api_base="https://api.groq.com/openai/v1",
+        )
+    elif provider == "cerebras":
+        api_key = os.environ.get("CEREBRAS_API_KEY", "")
+        llm = LLMClass(
+            model=model_name,
+            openai_api_key=api_key,
+            openai_api_base="https://api.cerebras.ai/v1",
         )
     elif provider == "openai":
         llm_kwargs = {"model": model_name}

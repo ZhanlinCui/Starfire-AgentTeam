@@ -56,6 +56,7 @@ type OrgTemplate struct {
 type OrgDefaults struct {
 	Runtime       string   `yaml:"runtime" json:"runtime"`
 	Tier          int      `yaml:"tier" json:"tier"`
+	Model         string   `yaml:"model" json:"model"`
 	Plugins       []string `yaml:"plugins" json:"plugins"`
 	InitialPrompt string   `yaml:"initial_prompt" json:"initial_prompt"`
 }
@@ -200,6 +201,10 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 	if runtime == "" {
 		runtime = "langgraph"
 	}
+	model := ws.Model
+	if model == "" {
+		model = defaults.Model
+	}
 	tier := ws.Tier
 	if tier == 0 {
 		tier = defaults.Tier
@@ -258,7 +263,7 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 	} else if h.provisioner != nil {
 		// Provision container
 		payload := models.CreateWorkspacePayload{
-			Name: ws.Name, Tier: tier, Runtime: runtime, Model: ws.Model,
+			Name: ws.Name, Tier: tier, Runtime: runtime, Model: model,
 			WorkspaceDir: ws.WorkspaceDir,
 		}
 		templatePath := ""

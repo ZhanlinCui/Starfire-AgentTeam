@@ -1,15 +1,21 @@
-"""DeepAgents adapter — LangChain deep research agent with full platform integration.
+"""DeepAgents adapter — fully utilizing the DeepAgents SDK.
 
-Uses `deepagents.create_deep_agent()` which provides automatic task planning,
-filesystem access, and sub-agent spawning on top of LangGraph.
-All platform tools (delegation, memory, sandbox, approval), skills, plugins,
-and coordinator support are included via _common_setup().
+Uses create_deep_agent() with:
+- FilesystemBackend(/workspace) — persistent file access across messages
+- MemorySaver checkpointer — session continuity
+- Memory files — CLAUDE.md loaded natively
+- Filesystem permissions — restrict writes to /workspace and /configs
+- InMemoryCache — avoid repeat API calls
+- All built-in tools: write_todos, read_file, write_file, edit_file,
+  ls, glob, grep, execute, task
 
-Requires: pip install deepagents
+Supports: anthropic, openai, openrouter, groq, cerebras, google_genai, ollama.
 """
 
 import os
+import glob as globmod
 import logging
+from pathlib import Path
 
 from adapters.base import BaseAdapter, AdapterConfig
 from a2a.server.agent_execution import AgentExecutor
@@ -21,6 +27,7 @@ class DeepAgentsAdapter(BaseAdapter):
 
     def __init__(self):
         self.agent = None
+        self._checkpointer = None
 
     @staticmethod
     def name() -> str:
@@ -32,18 +39,22 @@ class DeepAgentsAdapter(BaseAdapter):
 
     @staticmethod
     def description() -> str:
-        return "LangChain DeepAgents — deep research with planning, sub-agents, and filesystem access"
+        return "LangChain DeepAgents — planning, filesystem, sub-agents, shell execution, session persistence"
 
     @staticmethod
     def get_config_schema() -> dict:
         return {
-            "model": {"type": "string", "description": "LangChain model string (e.g. openai:gpt-4.1-mini)"},
-            "skills": {"type": "array", "items": {"type": "string"}, "description": "Skill folder names to load"},
-            "tools": {"type": "array", "items": {"type": "string"}, "description": "Built-in tools"},
+            "model": {
+                "type": "string",
+                "description": "provider:model (e.g. google_genai:gemini-2.5-flash, groq:llama-3.3-70b-versatile)",
+                "default": "google_genai:gemini-2.5-flash",
+            },
+            "skills": {"type": "array", "items": {"type": "string"}},
+            "tools": {"type": "array", "items": {"type": "string"}},
         }
 
     def _create_llm(self, model_str: str):
-        """Create a LangChain LLM instance from a provider:model string."""
+        """Create a LangChain LLM from a provider:model string."""
         if ":" in model_str:
             provider, model_name = model_str.split(":", 1)
         else:
@@ -51,17 +62,18 @@ class DeepAgentsAdapter(BaseAdapter):
 
         if provider == "openai":
             from langchain_openai import ChatOpenAI
-            llm_kwargs = {"model": model_name}
+            kwargs = {"model": model_name}
             base_url = os.environ.get("OPENAI_BASE_URL", "")
             if base_url:
-                llm_kwargs["openai_api_base"] = base_url
-            return ChatOpenAI(**llm_kwargs)
+                kwargs["openai_api_base"] = base_url
+            return ChatOpenAI(**kwargs)
         elif provider == "openrouter":
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 model=model_name,
-                openai_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+                openai_api_key=os.environ.get("OPENROUTER_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
                 openai_api_base="https://openrouter.ai/api/v1",
+                max_tokens=int(os.environ.get("MAX_TOKENS", "2048")),
             )
         elif provider == "groq":
             from langchain_openai import ChatOpenAI
@@ -70,36 +82,96 @@ class DeepAgentsAdapter(BaseAdapter):
                 openai_api_key=os.environ.get("GROQ_API_KEY", ""),
                 openai_api_base="https://api.groq.com/openai/v1",
             )
+        elif provider == "cerebras":
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model=model_name,
+                openai_api_key=os.environ.get("CEREBRAS_API_KEY", ""),
+                openai_api_base="https://api.cerebras.ai/v1",
+            )
         elif provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
-            llm_kwargs = {"model": model_name}
+            kwargs = {"model": model_name}
             base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
             if base_url:
-                llm_kwargs["anthropic_api_url"] = base_url
-            return ChatAnthropic(**llm_kwargs)
+                kwargs["anthropic_api_url"] = base_url
+            return ChatAnthropic(**kwargs)
+        elif provider == "google_genai":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(model=model_name)
+        elif provider == "ollama":
+            from langchain_ollama import ChatOllama
+            return ChatOllama(model=model_name)
         else:
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(model=model_name)
+            try:
+                from langchain.chat_models import init_chat_model
+                return init_chat_model(model_str)
+            except Exception:
+                from langchain_openai import ChatOpenAI
+                logger.warning("Unknown provider %s, falling back to OpenAI", provider)
+                return ChatOpenAI(model=model_name)
 
     async def setup(self, config: AdapterConfig) -> None:
         try:
-            from deepagents import create_deep_agent
-        except ImportError:
-            raise RuntimeError("deepagents not installed. Ensure adapters/deepagents/requirements.txt is correct.")
+            from deepagents import create_deep_agent, FilesystemPermission
+            from deepagents.backends import FilesystemBackend
+            from langgraph.checkpoint.memory import MemorySaver
+            from langchain_core.caches import InMemoryCache
+        except ImportError as e:
+            raise RuntimeError(f"deepagents not installed: {e}")
 
-        # Full platform setup: plugins, skills, tools, coordinator, system prompt
         result = await self._common_setup(config)
-        logger.info(f"DeepAgents tools: {[t.name for t in result.langchain_tools]}")
+        logger.info("DeepAgents platform tools: %s", [t.name for t in result.langchain_tools])
 
-        # DeepAgents uses LangChain tools natively — no conversion needed
         llm = self._create_llm(config.model)
+
+        # FilesystemBackend — persistent file access
+        workspace_dir = "/workspace" if os.path.isdir("/workspace") else "/configs"
+        backend = FilesystemBackend(root_dir=workspace_dir, virtual_mode=True)
+
+        # MemorySaver — session continuity
+        self._checkpointer = MemorySaver()
+
+        # Memory — load CLAUDE.md natively
+        memory_files = []
+        claude_md = os.path.join(config.config_path, "CLAUDE.md")
+        if os.path.exists(claude_md):
+            memory_files.append(claude_md)
+
+        # Filesystem permissions
+        permissions = [
+            FilesystemPermission(operations=["read", "write"], paths=["/workspace/**"], mode="allow"),
+            FilesystemPermission(operations=["read", "write"], paths=["/configs/**"], mode="allow"),
+        ]
+
+        # Native skills from /configs/skills/*.py
+        deepagent_skills = []
+        skills_dir = os.path.join(config.config_path, "skills")
+        if os.path.isdir(skills_dir):
+            deepagent_skills = globmod.glob(os.path.join(skills_dir, "**", "*.py"), recursive=True)
+
+        # LLM cache
+        cache = InMemoryCache()
+
         self.agent = create_deep_agent(
             model=llm,
             tools=result.langchain_tools,
             system_prompt=result.system_prompt,
+            backend=backend,
+            checkpointer=self._checkpointer,
+            memory=memory_files if memory_files else None,
+            permissions=permissions,
+            skills=deepagent_skills if deepagent_skills else None,
+            cache=cache,
         )
-        logger.info("DeepAgents agent created with %d tools", len(result.langchain_tools))
+
+        logger.info(
+            "DeepAgents: %d tools, backend=%s, checkpointer=MemorySaver, "
+            "cache=InMemoryCache, memory=%d, permissions=%d, skills=%d",
+            len(result.langchain_tools), type(backend).__name__,
+            len(memory_files), len(permissions), len(deepagent_skills),
+        )
 
     async def create_executor(self, config: AdapterConfig) -> AgentExecutor:
         from a2a_executor import LangGraphA2AExecutor
-        return LangGraphA2AExecutor(self.agent, heartbeat=config.heartbeat)
+        return LangGraphA2AExecutor(self.agent, heartbeat=config.heartbeat, model=config.model)
