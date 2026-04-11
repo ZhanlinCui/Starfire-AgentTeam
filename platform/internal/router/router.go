@@ -139,6 +139,15 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/workspaces/:id/config", cfgh.Get)
 	r.PATCH("/workspaces/:id/config", cfgh.Patch)
 
+	// Schedules (cron tasks)
+	schedh := handlers.NewScheduleHandler()
+	r.GET("/workspaces/:id/schedules", schedh.List)
+	r.POST("/workspaces/:id/schedules", schedh.Create)
+	r.PATCH("/workspaces/:id/schedules/:scheduleId", schedh.Update)
+	r.DELETE("/workspaces/:id/schedules/:scheduleId", schedh.Delete)
+	r.POST("/workspaces/:id/schedules/:scheduleId/run", schedh.RunNow)
+	r.GET("/workspaces/:id/schedules/:scheduleId/history", schedh.History)
+
 	// Memory
 	memh := handlers.NewMemoryHandler()
 	r.GET("/workspaces/:id/memory", memh.List)

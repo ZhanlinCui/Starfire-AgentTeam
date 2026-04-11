@@ -16,6 +16,7 @@ import (
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/models"
 	"github.com/agent-molecule/platform/internal/provisioner"
+	"github.com/agent-molecule/platform/internal/scheduler"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -59,6 +60,14 @@ type OrgDefaults struct {
 	InitialPrompt string   `yaml:"initial_prompt" json:"initial_prompt"`
 }
 
+type OrgSchedule struct {
+	Name     string `yaml:"name" json:"name"`
+	CronExpr string `yaml:"cron_expr" json:"cron_expr"`
+	Timezone string `yaml:"timezone" json:"timezone"`
+	Prompt   string `yaml:"prompt" json:"prompt"`
+	Enabled  *bool  `yaml:"enabled" json:"enabled"`
+}
+
 type OrgWorkspace struct {
 	Name          string         `yaml:"name" json:"name"`
 	Role          string         `yaml:"role" json:"role"`
@@ -71,6 +80,7 @@ type OrgWorkspace struct {
 	WorkspaceDir  string         `yaml:"workspace_dir" json:"workspace_dir"`
 	Plugins       []string       `yaml:"plugins" json:"plugins"`
 	InitialPrompt string         `yaml:"initial_prompt" json:"initial_prompt"`
+	Schedules     []OrgSchedule  `yaml:"schedules" json:"schedules"`
 	External      bool           `yaml:"external" json:"external"`
 	URL           string         `yaml:"url" json:"url"`
 	Canvas        struct {
@@ -372,6 +382,27 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		}
 
 		go h.workspace.provisionWorkspace(id, templatePath, configFiles, payload)
+	}
+
+	// Insert schedules if defined
+	for _, sched := range ws.Schedules {
+		tz := sched.Timezone
+		if tz == "" {
+			tz = "UTC"
+		}
+		enabled := true
+		if sched.Enabled != nil {
+			enabled = *sched.Enabled
+		}
+		nextRun, _ := scheduler.ComputeNextRun(sched.CronExpr, tz, time.Now())
+		if _, err := db.DB.ExecContext(context.Background(), `
+			INSERT INTO workspace_schedules (workspace_id, name, cron_expr, timezone, prompt, enabled, next_run_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, id, sched.Name, sched.CronExpr, tz, sched.Prompt, enabled, nextRun); err != nil {
+			log.Printf("Org import: failed to create schedule '%s' for %s: %v", sched.Name, ws.Name, err)
+		} else {
+			log.Printf("Org import: schedule '%s' (%s) created for %s", sched.Name, sched.CronExpr, ws.Name)
+		}
 	}
 
 	*results = append(*results, map[string]interface{}{

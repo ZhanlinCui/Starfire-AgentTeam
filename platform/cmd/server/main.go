@@ -18,6 +18,7 @@ import (
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/registry"
 	"github.com/agent-molecule/platform/internal/router"
+	"github.com/agent-molecule/platform/internal/scheduler"
 	"github.com/agent-molecule/platform/internal/ws"
 )
 
@@ -122,6 +123,10 @@ func main() {
 	if prov != nil {
 		go registry.StartHealthSweep(ctx, prov, 15*time.Second, onWorkspaceOffline)
 	}
+
+	// Cron Scheduler — fires A2A messages to workspaces on user-defined schedules
+	cronSched := scheduler.New(wh, broadcaster)
+	go cronSched.Start(ctx)
 
 	// Router
 	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir, wh)

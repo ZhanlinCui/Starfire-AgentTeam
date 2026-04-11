@@ -133,6 +133,15 @@ workspaces:
               4. Read /workspace/repo/platform/internal/crypto/aes.go
               5. Use commit_memory to save security patterns and concerns
               6. Wait for tasks from Dev Lead.
+            schedules:
+              - name: Daily security scan
+                cron_expr: "0 9 * * *"
+                prompt: |
+                  Daily security audit. Pull latest code (cd /workspace/repo && git pull).
+                  Scan for: leaked secrets, SQL injection, XSS, missing input validation,
+                  hardcoded credentials, missing access control checks.
+                  Report findings to Dev Lead via delegate_task with file:line references.
+                enabled: true
           - name: QA Engineer
             role: Testing, quality assurance, test automation
             tier: 3
