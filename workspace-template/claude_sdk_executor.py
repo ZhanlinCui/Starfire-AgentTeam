@@ -62,6 +62,19 @@ logger = logging.getLogger(__name__)
 
 _NO_TEXT_MSG = "Error: message contained no text content."
 _NO_RESPONSE_MSG = "(no response generated)"
+_MAX_RETRIES = 3
+_BASE_RETRY_DELAY_S = 5
+
+# Substrings in error messages that indicate a transient failure worth retrying.
+_RETRYABLE_PATTERNS = (
+    "rate",
+    "limit",
+    "429",
+    "overloaded",
+    "capacity",
+    "exit code 1",
+    "try again",
+)
 
 
 @dataclass
@@ -216,8 +229,19 @@ class ClaudeSDKExecutor(AgentExecutor):
         # ordering is preserved per-queue by the A2A server, so no races.
         await event_queue.enqueue_event(new_agent_text_message(response_text))
 
+    @staticmethod
+    def _is_retryable(exc: BaseException) -> bool:
+        """Check if an SDK exception looks like a transient rate-limit or
+        capacity error that's worth retrying with backoff."""
+        msg = str(exc).lower()
+        return any(p in msg for p in _RETRYABLE_PATTERNS)
+
     async def _execute_locked(self, user_input: str) -> str:
-        """Body of execute() that runs under the run lock."""
+        """Body of execute() that runs under the run lock.
+
+        Retries transient errors (rate limits, capacity, exit-code-1) up to
+        _MAX_RETRIES times with exponential backoff (5s, 10s, 20s).
+        """
         # Keep a clean copy of the user's actual message for the memory record,
         # BEFORE any delegation or memory injection.
         original_input = user_input
@@ -226,16 +250,31 @@ class ClaudeSDKExecutor(AgentExecutor):
 
         prompt = self._prepare_prompt(user_input)
         prompt = await self._inject_memories_if_first_turn(prompt)
-        options = self._build_options()
 
+        response_text: str = ""
         try:
-            result = await self._run_query(prompt=prompt, options=options)
-            if result.session_id:
-                self._session_id = result.session_id
-            response_text = result.text
-        except Exception as exc:
-            logger.exception("SDK agent error [claude-code]")
-            response_text = sanitize_agent_error(exc)
+            for attempt in range(_MAX_RETRIES):
+                options = self._build_options()
+                try:
+                    result = await self._run_query(prompt=prompt, options=options)
+                    if result.session_id:
+                        self._session_id = result.session_id
+                    response_text = result.text
+                    break  # success
+                except Exception as exc:
+                    if attempt < _MAX_RETRIES - 1 and self._is_retryable(exc):
+                        delay = _BASE_RETRY_DELAY_S * (2 ** attempt)
+                        logger.warning(
+                            "SDK agent [claude-code] transient error (attempt %d/%d), "
+                            "retrying in %ds: %s",
+                            attempt + 1, _MAX_RETRIES, delay, exc,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    # Non-retryable or exhausted retries
+                    logger.exception("SDK agent error [claude-code]")
+                    response_text = sanitize_agent_error(exc)
+                    break
         finally:
             await set_current_task(self.heartbeat, "")
             await commit_memory(

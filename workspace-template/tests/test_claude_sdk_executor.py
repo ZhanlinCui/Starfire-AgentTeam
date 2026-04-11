@@ -659,3 +659,111 @@ async def test_cancel_unwinds_async_generator_with_finally_cleanup():
     # not leak an active stream reference
     eq.enqueue_event.assert_called_once()
     assert e._active_stream is None
+
+
+# ---------- Retry logic ----------
+
+
+def test_is_retryable_matches_known_patterns():
+    """Transient errors containing rate-limit keywords are retryable."""
+    assert ClaudeSDKExecutor._is_retryable(Exception("429 rate limit exceeded"))
+    assert ClaudeSDKExecutor._is_retryable(Exception("Server overloaded"))
+    assert ClaudeSDKExecutor._is_retryable(Exception("Command failed with exit code 1"))
+    assert ClaudeSDKExecutor._is_retryable(Exception("capacity reached, try again later"))
+
+
+def test_is_retryable_rejects_non_transient():
+    """Non-transient errors should not be retried."""
+    assert not ClaudeSDKExecutor._is_retryable(Exception("invalid api key"))
+    assert not ClaudeSDKExecutor._is_retryable(Exception("permission denied"))
+    assert not ClaudeSDKExecutor._is_retryable(Exception("file not found"))
+
+
+@pytest.mark.asyncio
+async def test_execute_retries_on_transient_error_then_succeeds():
+    """A rate-limit error on attempt 1 retries, and attempt 2 succeeds."""
+    e = _make_executor()
+    ctx = _make_context(["do something"])
+    eq = _make_event_queue()
+
+    call_count = 0
+
+    async def flaky_query(prompt, options):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("Command failed with exit code 1 (exit code: 1)")
+        yield _FakeAssistantMessage([_FakeTextBlock("recovered")])
+        yield _FakeResultMessage(session_id="s-retry", result="recovered answer")
+
+    with patch("claude_sdk_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("claude_sdk_executor.read_delegation_results", return_value=""), \
+         patch("claude_sdk_executor.commit_memory", new=AsyncMock()), \
+         patch("claude_sdk_executor.set_current_task", new=AsyncMock()), \
+         patch("claude_agent_sdk.query", new=flaky_query), \
+         patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        await e.execute(ctx, eq)
+
+    # Should have retried once
+    assert call_count == 2
+    # Sleep was called with the backoff delay
+    mock_sleep.assert_called_once_with(5)  # _BASE_RETRY_DELAY_S * 2^0
+    # Final response is the recovered answer
+    eq.enqueue_event.assert_called_once()
+    assert "recovered" in str(eq.enqueue_event.call_args[0][0])
+    assert e._session_id == "s-retry"
+
+
+@pytest.mark.asyncio
+async def test_execute_exhausts_retries_then_returns_error():
+    """All retries fail → sanitized error returned."""
+    e = _make_executor()
+    ctx = _make_context(["do something"])
+    eq = _make_event_queue()
+
+    async def always_fail(prompt, options):
+        if False:
+            yield  # pragma: no cover
+        raise Exception("Command failed with exit code 1 (exit code: 1)")
+
+    with patch("claude_sdk_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("claude_sdk_executor.read_delegation_results", return_value=""), \
+         patch("claude_sdk_executor.commit_memory", new=AsyncMock()), \
+         patch("claude_sdk_executor.set_current_task", new=AsyncMock()), \
+         patch("claude_agent_sdk.query", new=always_fail), \
+         patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        await e.execute(ctx, eq)
+
+    # Should have slept twice (attempts 1→2 and 2→3)
+    assert mock_sleep.call_count == 2
+    assert mock_sleep.call_args_list[0].args == (5,)   # 5 * 2^0
+    assert mock_sleep.call_args_list[1].args == (10,)  # 5 * 2^1
+    # Final response is the sanitized error
+    eq.enqueue_event.assert_called_once()
+    assert "Agent error" in str(eq.enqueue_event.call_args[0][0])
+
+
+@pytest.mark.asyncio
+async def test_execute_no_retry_on_non_transient_error():
+    """Non-transient errors fail immediately without retry."""
+    e = _make_executor()
+    ctx = _make_context(["do something"])
+    eq = _make_event_queue()
+
+    async def auth_fail(prompt, options):
+        if False:
+            yield  # pragma: no cover
+        raise Exception("invalid authentication credentials")
+
+    with patch("claude_sdk_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("claude_sdk_executor.read_delegation_results", return_value=""), \
+         patch("claude_sdk_executor.commit_memory", new=AsyncMock()), \
+         patch("claude_sdk_executor.set_current_task", new=AsyncMock()), \
+         patch("claude_agent_sdk.query", new=auth_fail), \
+         patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        await e.execute(ctx, eq)
+
+    # No sleep — failed immediately without retry
+    mock_sleep.assert_not_called()
+    eq.enqueue_event.assert_called_once()
+    assert "Agent error" in str(eq.enqueue_event.call_args[0][0])
