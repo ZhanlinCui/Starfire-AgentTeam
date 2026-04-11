@@ -232,6 +232,10 @@ Agents can auto-execute a prompt on startup before any user interaction. Configu
 | POST | /workspaces/:id/a2a | workspace.go |
 | POST | /workspaces/:id/delegate | delegation.go (async fire-and-forget) |
 | GET | /workspaces/:id/delegations | delegation.go (list delegation status) |
+| GET/POST | /workspaces/:id/schedules | schedules.go (cron CRUD) |
+| PATCH/DELETE | /workspaces/:id/schedules/:scheduleId | schedules.go |
+| POST | /workspaces/:id/schedules/:scheduleId/run | schedules.go (manual trigger) |
+| GET | /workspaces/:id/schedules/:scheduleId/history | schedules.go (past runs) |
 | GET | /workspaces/:id/shared-context | templates.go |
 | GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
 | GET/PUT | /canvas/viewport | viewport.go |
@@ -253,7 +257,7 @@ Agents can auto-execute a prompt on startup before any user interaction. Configu
 
 ## Database
 
-14 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
+15 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `workspace_schedules` (cron tasks with expression, timezone, prompt, run history), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
 

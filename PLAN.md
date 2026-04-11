@@ -28,6 +28,7 @@
 | 18 | File Browser Lazy Loading | PR #37 — depth=1, path traversal protection |
 | 19 | MCP Full Coverage | PR #40 — 52 tools (plugins, global secrets, pause/resume, org) |
 | 21 | Claude Agent SDK Migration | `feat/claude-agent-sdk` — `ClaudeSDKExecutor` replaces CLI subprocess |
+| 22 | Cron Scheduling | `feat/cron-scheduler` — recurring tasks via cron expressions, Canvas Schedule tab |
 
 ---
 
