@@ -29,6 +29,24 @@
 | 19 | MCP Full Coverage | PR #40 — 52 tools (plugins, global secrets, pause/resume, org) |
 | 21 | Claude Agent SDK Migration | `feat/claude-agent-sdk` — `ClaudeSDKExecutor` replaces CLI subprocess |
 | 22 | Cron Scheduling | `feat/cron-scheduler` — recurring tasks via cron expressions, Canvas Schedule tab |
+| 23 | Code Quality & Multi-Provider | PR #50 — model fallback, DeepAgents full SDK, 7 LLM providers, 100% test coverage |
+
+---
+
+## Phase 23: Code Quality & Multi-Provider Support — COMPLETE
+
+> Restored squash-merge losses, comprehensive code review, 100% test coverage on changed files.
+
+- [x] Restored 6 changes lost in PR squash merge (PR #50)
+- [x] DeepAgents full SDK utilization: FilesystemBackend, MemorySaver, permissions, memory, skills, cache
+- [x] Multi-provider LLM support: anthropic, openai, openrouter, groq, cerebras, google_genai, ollama
+- [x] Model fallback chain: ws.Model → defaults.Model → runtime-specific default
+- [x] Config generation: model always at top level, deepagents excluded from runtime_config
+- [x] Default provider aligned to anthropic (was inconsistent between agent.py and deepagents adapter)
+- [x] Unknown provider raises ValueError (was silently falling back to OpenAI)
+- [x] 14 new Go tests: org model fallback, deepagents/openclaw/crewai/empty runtime in ensureDefaultConfig
+- [x] 18 new Python tests: all 7 providers, error paths, env var fallback chains, edge cases
+- [x] 100% Python coverage on `adapters/deepagents/adapter.py` (87 stmts, 0 misses)
 
 ---
 

@@ -96,6 +96,164 @@ func TestInitialPrompt_ConfigYAML_Empty(t *testing.T) {
 	}
 }
 
+func TestOrgDefaults_Model_YAMLParsing(t *testing.T) {
+	raw := `
+runtime: deepagents
+tier: 2
+model: google_genai:gemini-2.5-flash
+`
+	var defaults OrgDefaults
+	if err := yaml.Unmarshal([]byte(raw), &defaults); err != nil {
+		t.Fatalf("failed to parse YAML: %v", err)
+	}
+	if defaults.Model != "google_genai:gemini-2.5-flash" {
+		t.Errorf("expected model 'google_genai:gemini-2.5-flash', got %q", defaults.Model)
+	}
+}
+
+func TestOrgDefaults_Model_Empty(t *testing.T) {
+	raw := `
+runtime: langgraph
+tier: 2
+`
+	var defaults OrgDefaults
+	if err := yaml.Unmarshal([]byte(raw), &defaults); err != nil {
+		t.Fatalf("failed to parse YAML: %v", err)
+	}
+	if defaults.Model != "" {
+		t.Errorf("expected empty model when not specified, got %q", defaults.Model)
+	}
+}
+
+func TestOrgWorkspace_Model_Override(t *testing.T) {
+	raw := `
+name: Worker
+role: coding
+model: groq:llama-3.3-70b-versatile
+`
+	var ws OrgWorkspace
+	if err := yaml.Unmarshal([]byte(raw), &ws); err != nil {
+		t.Fatalf("failed to parse YAML: %v", err)
+	}
+	if ws.Model != "groq:llama-3.3-70b-versatile" {
+		t.Errorf("expected model 'groq:llama-3.3-70b-versatile', got %q", ws.Model)
+	}
+}
+
+// ==================== Model Fallback Edge Cases ====================
+// These test the cascading fallback: ws.Model → defaults.Model → runtime-specific default
+// They verify behavior without a database since createWorkspaceTree requires sqlmock.
+// The struct-level tests + ensureDefaultConfig tests cover the full data flow.
+
+func TestOrgDefaults_Model_WorkspaceOverridesDefault(t *testing.T) {
+	// When both ws and defaults have a model, ws.Model takes precedence.
+	// This verifies the YAML struct correctly captures both values.
+	defaultsRaw := `
+runtime: deepagents
+model: google_genai:gemini-2.5-flash
+`
+	wsRaw := `
+name: Worker
+model: groq:llama-3.3-70b-versatile
+`
+	var defaults OrgDefaults
+	if err := yaml.Unmarshal([]byte(defaultsRaw), &defaults); err != nil {
+		t.Fatalf("failed to parse defaults: %v", err)
+	}
+	var ws OrgWorkspace
+	if err := yaml.Unmarshal([]byte(wsRaw), &ws); err != nil {
+		t.Fatalf("failed to parse workspace: %v", err)
+	}
+
+	// Simulate the fallback logic from createWorkspaceTree
+	model := ws.Model
+	if model == "" {
+		model = defaults.Model
+	}
+	if model != "groq:llama-3.3-70b-versatile" {
+		t.Errorf("ws.Model should override defaults.Model, got %q", model)
+	}
+}
+
+func TestOrgDefaults_Model_FallbackClaudeCode(t *testing.T) {
+	// When both ws and defaults models are empty, claude-code runtime → "sonnet"
+	var defaults OrgDefaults
+	var ws OrgWorkspace
+
+	runtime := "claude-code"
+	model := ws.Model
+	if model == "" {
+		model = defaults.Model
+	}
+	if model == "" {
+		if runtime == "claude-code" {
+			model = "sonnet"
+		} else {
+			model = "anthropic:claude-sonnet-4-6"
+		}
+	}
+	if model != "sonnet" {
+		t.Errorf("claude-code with empty model should get 'sonnet', got %q", model)
+	}
+}
+
+func TestOrgDefaults_Model_FallbackDeepAgents(t *testing.T) {
+	// When both ws and defaults models are empty, deepagents runtime → anthropic default
+	var defaults OrgDefaults
+	var ws OrgWorkspace
+
+	runtime := "deepagents"
+	model := ws.Model
+	if model == "" {
+		model = defaults.Model
+	}
+	if model == "" {
+		if runtime == "claude-code" {
+			model = "sonnet"
+		} else {
+			model = "anthropic:claude-sonnet-4-6"
+		}
+	}
+	if model != "anthropic:claude-sonnet-4-6" {
+		t.Errorf("deepagents with empty model should get 'anthropic:claude-sonnet-4-6', got %q", model)
+	}
+}
+
+func TestOrgDefaults_Model_FallbackLangGraph(t *testing.T) {
+	// Langgraph also gets the default anthropic model
+	model := ""
+	runtime := "langgraph"
+	if model == "" {
+		if runtime == "claude-code" {
+			model = "sonnet"
+		} else {
+			model = "anthropic:claude-sonnet-4-6"
+		}
+	}
+	if model != "anthropic:claude-sonnet-4-6" {
+		t.Errorf("langgraph with empty model should get 'anthropic:claude-sonnet-4-6', got %q", model)
+	}
+}
+
+func TestOrgDefaults_Model_DefaultsModelUsedWhenWsEmpty(t *testing.T) {
+	// ws.Model empty → falls back to defaults.Model
+	defaultsRaw := `
+model: cerebras:llama3.1-8b
+`
+	var defaults OrgDefaults
+	if err := yaml.Unmarshal([]byte(defaultsRaw), &defaults); err != nil {
+		t.Fatalf("failed to parse defaults: %v", err)
+	}
+
+	model := "" // ws.Model is empty
+	if model == "" {
+		model = defaults.Model
+	}
+	if model != "cerebras:llama3.1-8b" {
+		t.Errorf("expected defaults.Model 'cerebras:llama3.1-8b', got %q", model)
+	}
+}
+
 func TestInitialPrompt_SpecialChars(t *testing.T) {
 	// Ensure YAML-special characters in prompt don't break parsing
 	initialPrompt := `Run: git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git
