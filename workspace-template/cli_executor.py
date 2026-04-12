@@ -159,15 +159,29 @@ class CLIAgentExecutor(AgentExecutor):
             logger.warning(f"CLI command '{cmd}' not found in PATH")
 
     def _resolve_auth_token(self) -> str | None:
-        """Resolve auth token from env var or file."""
-        # 1. Explicit env var from config
+        """Resolve auth token from env var or file.
+
+        Resolution order:
+        1. required_env — first entry that exists in the environment
+        2. auth_token_env (deprecated) — explicit env var name
+        3. Preset default_auth_env — adapter-declared fallback
+        4. auth_token_file (deprecated) — file on disk
+        5. Preset default_auth_file — adapter-declared file fallback
+        """
+        # 1. New path: required_env (first match wins)
+        for env_name in (self.config.required_env or []):
+            token = os.environ.get(env_name)
+            if token:
+                return token
+
+        # 2. Legacy: explicit env var from config
         env_name = self.config.auth_token_env or self.preset.get("default_auth_env", "")
         if env_name:
             token = os.environ.get(env_name)
             if token:
                 return token
 
-        # 2. Token file from config
+        # 3. Legacy: token file from config
         file_name = self.config.auth_token_file or self.preset.get("default_auth_file", "")
         if file_name:
             token_path = Path(self.config_path) / file_name
@@ -283,7 +297,9 @@ class CLIAgentExecutor(AgentExecutor):
         # Build env — pass through auth env var if using env pattern
         env = dict(os.environ)
         if self._auth_token and self.preset.get("auth_pattern") == "env":
-            auth_env = self.config.auth_token_env or self.preset.get("default_auth_env", "")
+            # Use first required_env entry, or fall back to legacy auth_token_env
+            auth_env = (self.config.required_env or [None])[0] if self.config.required_env else None
+            auth_env = auth_env or self.config.auth_token_env or self.preset.get("default_auth_env", "")
             if auth_env:
                 env[auth_env] = self._auth_token
 

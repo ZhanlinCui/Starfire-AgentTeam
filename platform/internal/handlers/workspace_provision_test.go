@@ -154,14 +154,8 @@ func TestEnsureDefaultConfig_LangGraph(t *testing.T) {
 }
 
 func TestEnsureDefaultConfig_ClaudeCode(t *testing.T) {
-	tmpDir := t.TempDir()
-	// Create a mock auth token
-	ccDir := filepath.Join(tmpDir, "claude-code-default")
-	os.MkdirAll(ccDir, 0755)
-	os.WriteFile(filepath.Join(ccDir, ".auth-token"), []byte("test-token"), 0644)
-
 	broadcaster := newTestBroadcaster()
-	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", tmpDir)
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
 
 	payload := models.CreateWorkspacePayload{
 		Name:    "Code Agent",
@@ -186,14 +180,15 @@ func TestEnsureDefaultConfig_ClaudeCode(t *testing.T) {
 	if !contains(content, "runtime_config:") {
 		t.Errorf("config.yaml should have runtime_config section for claude-code, got:\n%s", content)
 	}
-
-	// Check auth token was copied
-	authToken, ok := files[".auth-token"]
-	if !ok {
-		t.Fatal("expected .auth-token in generated files")
+	if !contains(content, "required_env:") {
+		t.Errorf("config.yaml should have required_env for claude-code, got:\n%s", content)
 	}
-	if string(authToken) != "test-token" {
-		t.Errorf("expected auth token 'test-token', got %q", string(authToken))
+	if !contains(content, "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("config.yaml should require CLAUDE_CODE_OAUTH_TOKEN, got:\n%s", content)
+	}
+	// Should NOT have .auth-token file
+	if _, ok := files[".auth-token"]; ok {
+		t.Error("claude-code should not generate .auth-token file — use env vars via secrets API")
 	}
 }
 
@@ -272,8 +267,9 @@ func TestEnsureDefaultConfig_CrewAIGetsRuntimeConfig(t *testing.T) {
 	if !contains(configYAML, "runtime_config:") {
 		t.Errorf("crewai should have runtime_config, got:\n%s", configYAML)
 	}
-	if !contains(configYAML, "auth_token_file: .auth-token") {
-		t.Errorf("crewai should have auth_token_file in runtime_config, got:\n%s", configYAML)
+	// crewai falls into the default case — runtime_config with timeout only, no required_env
+	if !contains(configYAML, "timeout: 0") {
+		t.Errorf("crewai should have timeout in runtime_config, got:\n%s", configYAML)
 	}
 }
 

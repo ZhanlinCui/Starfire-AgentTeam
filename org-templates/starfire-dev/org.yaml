@@ -5,7 +5,8 @@ description: AI agent company for building Agent Molecule
 defaults:
   runtime: claude-code
   tier: 2
-  auth_token_file: .auth-token  # gitignored, placed in each workspace folder
+  required_env:
+    - CLAUDE_CODE_OAUTH_TOKEN
   # workspace_dir: not set by default — each agent gets an isolated Docker volume
   # Set per-workspace to bind-mount a host directory as /workspace
 

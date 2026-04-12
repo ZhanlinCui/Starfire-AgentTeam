@@ -6,5 +6,6 @@ tier: 2
 runtime: claude-code
 runtime_config:
   model: sonnet
-  auth_token_file: .auth-token
+  required_env:
+    - CLAUDE_CODE_OAUTH_TOKEN
   timeout: 0

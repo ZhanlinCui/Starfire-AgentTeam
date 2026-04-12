@@ -51,19 +51,153 @@ def test_run_preflight_unsupported_runtime_fails(tmp_path):
     assert any(issue.title == "Runtime" for issue in report.failures)
 
 
-def test_run_preflight_missing_auth_token_fails(tmp_path):
-    """Missing auth token files should stop startup."""
-    (tmp_path / "system-prompt.md").write_text("Base prompt.")
+# ---------- required_env checks ----------
+
+
+def test_required_env_present_passes(tmp_path, monkeypatch):
+    """When all required_env vars are set, preflight passes."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-test")
+
+    config = make_config(
+        runtime="claude-code",
+        runtime_config=RuntimeConfig(required_env=["CLAUDE_CODE_OAUTH_TOKEN"]),
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is True
+    assert not any(issue.title == "Required env" for issue in report.failures)
+
+
+def test_required_env_missing_fails(tmp_path, monkeypatch):
+    """When a required_env var is missing, preflight fails."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    config = make_config(
+        runtime="claude-code",
+        runtime_config=RuntimeConfig(required_env=["CLAUDE_CODE_OAUTH_TOKEN"]),
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is False
+    assert any(
+        issue.title == "Required env" and "CLAUDE_CODE_OAUTH_TOKEN" in issue.detail
+        for issue in report.failures
+    )
+
+
+def test_required_env_multiple_all_present_passes(tmp_path, monkeypatch):
+    """Multiple required_env vars all present should pass."""
+    monkeypatch.setenv("API_KEY_A", "key-a")
+    monkeypatch.setenv("API_KEY_B", "key-b")
+
+    config = make_config(
+        runtime_config=RuntimeConfig(required_env=["API_KEY_A", "API_KEY_B"]),
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is True
+
+
+def test_required_env_multiple_one_missing_fails(tmp_path, monkeypatch):
+    """If any required_env var is missing, preflight fails with that var named."""
+    monkeypatch.setenv("API_KEY_A", "key-a")
+    monkeypatch.delenv("API_KEY_B", raising=False)
+
+    config = make_config(
+        runtime_config=RuntimeConfig(required_env=["API_KEY_A", "API_KEY_B"]),
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is False
+    assert any(
+        issue.title == "Required env" and "API_KEY_B" in issue.detail
+        for issue in report.failures
+    )
+
+
+def test_required_env_empty_list_passes(tmp_path):
+    """Empty required_env means no env checks — always passes."""
+    config = make_config(
+        runtime_config=RuntimeConfig(required_env=[]),
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is True
+
+
+# ---------- Legacy auth_token_file backward compat ----------
+
+
+def test_legacy_auth_token_file_missing_no_env_fails(tmp_path, monkeypatch):
+    """Legacy: missing auth_token_file with no env var should fail."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 
     config = make_config(
         runtime_config=RuntimeConfig(auth_token_file="secrets/token.txt"),
-        prompt_files=["system-prompt.md"],
     )
 
     report = run_preflight(config, str(tmp_path))
 
     assert report.ok is False
     assert any(issue.title == "Auth token" for issue in report.failures)
+
+
+def test_legacy_auth_token_file_missing_but_auth_token_env_passes(tmp_path, monkeypatch):
+    """Legacy: missing file but auth_token_env set should pass."""
+    monkeypatch.setenv("MY_AUTH_TOKEN", "fake-token")
+
+    config = make_config(
+        runtime_config=RuntimeConfig(
+            auth_token_file="secrets/token.txt",
+            auth_token_env="MY_AUTH_TOKEN",
+        ),
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is True
+
+
+def test_legacy_auth_token_file_missing_but_required_env_passes(tmp_path, monkeypatch):
+    """Legacy: missing file but required_env satisfied should pass."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-test")
+
+    config = make_config(
+        runtime="claude-code",
+        runtime_config=RuntimeConfig(
+            auth_token_file=".auth-token",
+            required_env=["CLAUDE_CODE_OAUTH_TOKEN"],
+        ),
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is True
+
+
+def test_legacy_auth_token_file_exists_passes(tmp_path):
+    """Legacy: when the file exists, it passes with no auth warnings."""
+    (tmp_path / ".auth-token").write_text("sk-from-file")
+    (tmp_path / "system-prompt.md").write_text("prompt")
+
+    config = make_config(
+        runtime_config=RuntimeConfig(auth_token_file=".auth-token"),
+        prompt_files=["system-prompt.md"],
+    )
+
+    report = run_preflight(config, str(tmp_path))
+
+    assert report.ok is True
+    assert not any(issue.title == "Auth token" for issue in report.warnings)
+    assert report.failures == []
+
+
+# ---------- Other checks ----------
 
 
 def test_run_preflight_missing_prompts_and_skills_warn(tmp_path):
@@ -91,7 +225,7 @@ def test_run_preflight_valid_config_passes(tmp_path):
     config = make_config(
         prompt_files=["system-prompt.md"],
         skills=["writing"],
-        runtime_config=RuntimeConfig(auth_token_file=""),
+        runtime_config=RuntimeConfig(),
     )
 
     report = run_preflight(config, str(tmp_path))

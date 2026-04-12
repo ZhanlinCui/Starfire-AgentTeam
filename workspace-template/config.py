@@ -93,10 +93,12 @@ class RuntimeConfig:
     """Configuration for CLI-based agent runtimes (claude-code, codex, ollama, custom)."""
     command: str = ""          # e.g. "claude", "codex", "ollama" (model goes in model field)
     args: list[str] = field(default_factory=list)  # additional CLI args
-    auth_token_env: str = ""   # env var name for auth token
-    auth_token_file: str = ""  # file path for auth token (relative to config dir)
+    required_env: list[str] = field(default_factory=list)  # env vars required to run (e.g. ["CLAUDE_CODE_OAUTH_TOKEN"])
     timeout: int = 0           # seconds (0 = no timeout — agents wait until done)
     model: str = ""            # model override for the CLI
+    # Deprecated — use required_env + secrets API instead. Kept for backward compat.
+    auth_token_env: str = ""
+    auth_token_file: str = ""
 
 
 @dataclass
@@ -260,10 +262,12 @@ def load_config(config_path: Optional[str] = None) -> WorkspaceConfig:
         runtime_config=RuntimeConfig(
             command=runtime_raw.get("command", ""),
             args=runtime_raw.get("args", []),
-            auth_token_env=runtime_raw.get("auth_token_env", ""),
-            auth_token_file=runtime_raw.get("auth_token_file", ""),
+            required_env=runtime_raw.get("required_env", []),
             timeout=runtime_raw.get("timeout", 0),
             model=runtime_raw.get("model", ""),
+            # Deprecated fields — kept for backward compat
+            auth_token_env=runtime_raw.get("auth_token_env", ""),
+            auth_token_file=runtime_raw.get("auth_token_file", ""),
         ),
         skills=raw.get("skills", []),
         plugins=raw.get("plugins", []),
