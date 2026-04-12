@@ -339,6 +339,73 @@ func TestChannelHandler_Webhook_UnknownType(t *testing.T) {
 	}
 }
 
+// ==================== Discover ====================
+
+func TestChannelHandler_Discover_MissingToken(t *testing.T) {
+	handler := NewChannelHandler(newTestChannelManager())
+
+	body, _ := json.Marshal(map[string]interface{}{"channel_type": "telegram"})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest("POST", "/channels/discover", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Discover(c)
+
+	if w.Code != 400 {
+		t.Errorf("expected 400 for missing token, got %d", w.Code)
+	}
+}
+
+func TestChannelHandler_Discover_UnsupportedType(t *testing.T) {
+	handler := NewChannelHandler(newTestChannelManager())
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"channel_type": "whatsapp",
+		"bot_token":    "fake",
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest("POST", "/channels/discover", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Discover(c)
+
+	if w.Code != 400 {
+		t.Errorf("expected 400 for unsupported type, got %d", w.Code)
+	}
+}
+
+func TestChannelHandler_Discover_InvalidBotToken(t *testing.T) {
+	handler := NewChannelHandler(newTestChannelManager())
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"channel_type": "telegram",
+		"bot_token":    "clearly-not-a-real-token",
+	})
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest("POST", "/channels/discover", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Discover(c)
+
+	if w.Code != 400 {
+		t.Errorf("expected 400 for invalid token, got %d", w.Code)
+	}
+
+	// Verify error is user-friendly (not a raw tgbotapi error)
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	errMsg, _ := resp["error"].(string)
+	if errMsg == "" {
+		t.Error("expected error field in response")
+	}
+}
+
 // ==================== System Caller Prefix ====================
 
 func TestSystemCallerPrefix_ChannelIncluded(t *testing.T) {

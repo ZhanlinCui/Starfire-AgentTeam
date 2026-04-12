@@ -14,7 +14,10 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-const telegramPollInterval = 2 * time.Second
+const (
+	telegramPollInterval    = 2 * time.Second
+	telegramDiscoverTimeout = 5 // seconds — for getUpdates long-poll during discovery
+)
 
 // TelegramAdapter implements ChannelAdapter for Telegram Bot API.
 type TelegramAdapter struct{}
@@ -35,19 +38,30 @@ func (t *TelegramAdapter) ValidateConfig(config map[string]interface{}) error {
 // welcomeMessage is sent when a user sends /start to the bot (acknowledgment only).
 const welcomeMessage = "✅ Bot connected and ready.\n\nYour chat ID: `%d`\n\nPaste this ID in Starfire to link this chat to an agent, or use 'Detect Chats' to auto-fill it."
 
+// DiscoverResult is returned from DiscoverChats — includes bot info and detected chats.
+type DiscoverResult struct {
+	BotUsername string
+	Chats       []map[string]interface{}
+}
+
 // DiscoverChats calls Telegram getUpdates to find groups/chats the bot has been added to.
-// It also auto-replies to any /start commands so the user knows the bot is alive.
-func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) ([]map[string]interface{}, error) {
+//
+// SIDE EFFECT: Auto-replies to any /start messages seen during discovery so the user
+// gets immediate feedback that the bot is working. This is intentional — it's the
+// moment users most need confirmation.
+func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) (*DiscoverResult, error) {
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		return nil, fmt.Errorf("invalid bot token: %w", err)
 	}
 
 	// Remove webhook so getUpdates works
-	bot.Request(tgbotapi.DeleteWebhookConfig{})
+	if _, reqErr := bot.Request(tgbotapi.DeleteWebhookConfig{}); reqErr != nil {
+		log.Printf("Channels: Telegram discover — delete webhook failed (may be ok): %v", reqErr)
+	}
 
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 5 // Short timeout — just grab what's available
+	u.Timeout = telegramDiscoverTimeout
 	u.Limit = 100
 
 	updates, err := bot.GetUpdates(u)
@@ -71,7 +85,9 @@ func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) ([
 			if _, sendErr := bot.Send(reply); sendErr != nil {
 				// Retry without Markdown
 				reply.ParseMode = ""
-				bot.Send(reply)
+				if _, fallbackErr := bot.Send(reply); fallbackErr != nil {
+					log.Printf("Channels: Telegram /start auto-reply failed (both attempts): markdown=%v plain=%v", sendErr, fallbackErr)
+				}
 			}
 		}
 
@@ -95,7 +111,10 @@ func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) ([
 		})
 	}
 
-	return chats, nil
+	return &DiscoverResult{
+		BotUsername: bot.Self.UserName,
+		Chats:       chats,
+	}, nil
 }
 
 // parseChatIDs splits a comma-separated chat_id string into individual IDs.
@@ -252,7 +271,9 @@ func (t *TelegramAdapter) StartPolling(ctx context.Context, config map[string]in
 			// Auto-reply to /start without forwarding to the agent
 			if strings.HasPrefix(update.Message.Text, "/start") {
 				reply := tgbotapi.NewMessage(update.Message.Chat.ID, "✅ Connected to Starfire agent. Send a message and I'll forward it.")
-				bot.Send(reply)
+				if _, sendErr := bot.Send(reply); sendErr != nil {
+					log.Printf("Channels: Telegram /start reply failed for chat %s: %v", chatID, sendErr)
+				}
 				continue
 			}
 

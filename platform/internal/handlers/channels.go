@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -289,15 +290,22 @@ func (h *ChannelHandler) Discover(c *gin.Context) {
 		return
 	}
 
-	chats, err := tg.DiscoverChats(c.Request.Context(), body.BotToken)
+	result, err := tg.DiscoverChats(c.Request.Context(), body.BotToken)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// Map known errors to user-friendly messages
+		msg := err.Error()
+		userMsg := "Failed to connect to Telegram. Check your bot token and try again."
+		if strings.Contains(msg, "invalid bot token") || strings.Contains(msg, "Unauthorized") || strings.Contains(msg, "Not Found") {
+			userMsg = "Invalid bot token. Check the token from @BotFather and try again."
+		}
+		log.Printf("Channels: discover error: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": userMsg})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"bot_username": "",
-		"chats":        chats,
+		"bot_username": result.BotUsername,
+		"chats":        result.Chats,
 		"hint":         "For groups: add bot and send a message. For DMs: send /start to the bot. Then retry.",
 	})
 }

@@ -398,6 +398,26 @@ func TestTruncID_Empty(t *testing.T) {
 	}
 }
 
+// ==================== DiscoverChats Tests ====================
+
+func TestDiscoverChats_InvalidToken(t *testing.T) {
+	a := &TelegramAdapter{}
+	// tgbotapi.NewBotAPI with empty token calls the API and fails
+	_, err := a.DiscoverChats(context.Background(), "")
+	if err == nil {
+		t.Error("expected error for empty bot token")
+	}
+}
+
+func TestDiscoverChats_MalformedToken(t *testing.T) {
+	a := &TelegramAdapter{}
+	// Clearly malformed tokens return an error from tgbotapi
+	_, err := a.DiscoverChats(context.Background(), "not-a-real-token")
+	if err == nil {
+		t.Error("expected error for malformed token")
+	}
+}
+
 // ==================== Multi-Chat ID Tests ====================
 
 func TestParseChatIDs_Single(t *testing.T) {
