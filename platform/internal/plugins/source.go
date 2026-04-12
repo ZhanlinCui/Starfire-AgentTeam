@@ -1,0 +1,127 @@
+// Package plugins owns the plugin-install source layer.
+//
+// A plugin "source" is where the platform fetches plugin files from before
+// it hands them to a workspace container. Sources are pluggable by scheme
+// so new registries (ClawHub, enterprise private registries, direct HTTP
+// tarballs, etc.) can be added without touching install handlers.
+//
+// The on-disk SHAPE of a plugin (agentskills.io format, MCP server,
+// DeepAgents sub-agent, custom) is a separate concern handled by the
+// per-runtime adapter layer inside the workspace — see
+// workspace-template/plugins_registry.
+package plugins
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+// SourceResolver fetches a plugin from a remote or local source into a
+// local directory that the install handler can then tar+copy into the
+// workspace container.
+//
+// Implementations MUST:
+//   - Return an absolute path to a directory containing the plugin's
+//     top-level files (plugin.yaml, adapters/, rules/, skills/, etc.).
+//   - Clean up any intermediate state on error.
+//   - Honour ctx cancellation for long-running fetches (git clone, http
+//     download, …).
+//
+// Registered at router wiring time via Registry.Register.
+type SourceResolver interface {
+	// Scheme is the URL scheme this resolver handles ("local", "github",
+	// "clawhub", "https", …). Must be unique per platform.
+	Scheme() string
+
+	// Fetch retrieves the plugin identified by `spec` (scheme-specific
+	// path, e.g. "org/repo#v1.0" for github) and writes its contents to
+	// `dst`, which the caller creates and owns. Returns the resolved
+	// plugin name (used for /configs/plugins/<name>/).
+	Fetch(ctx context.Context, spec string, dst string) (pluginName string, err error)
+}
+
+// Source is a parsed plugin spec of the form "<scheme>://<spec>". Bare
+// names are treated as "local://<name>".
+type Source struct {
+	Scheme string
+	Spec   string
+}
+
+// Raw returns the original string form ("scheme://spec").
+func (s Source) Raw() string {
+	return s.Scheme + "://" + s.Spec
+}
+
+// schemeRE matches "<scheme>://" where scheme is the usual URL-scheme
+// grammar (ASCII letters, digits, +, -, .).
+var schemeRE = regexp.MustCompile(`^([a-zA-Z][a-zA-Z0-9+\-.]*)://(.+)$`)
+
+// ParseSource parses a plugin source spec.
+//
+// Accepted forms:
+//
+//	"my-plugin"              → Source{Scheme: "local", Spec: "my-plugin"}
+//	"local://my-plugin"      → Source{Scheme: "local", Spec: "my-plugin"}
+//	"github://foo/bar"       → Source{Scheme: "github", Spec: "foo/bar"}
+//	"github://foo/bar#v1.0"  → Source{Scheme: "github", Spec: "foo/bar#v1.0"}
+//	"clawhub://sonoscli@1.2" → Source{Scheme: "clawhub", Spec: "sonoscli@1.2"}
+//
+// An empty input returns an error.
+func ParseSource(input string) (Source, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return Source{}, fmt.Errorf("empty source spec")
+	}
+	m := schemeRE.FindStringSubmatch(input)
+	if m == nil {
+		// Bare name → local.
+		return Source{Scheme: "local", Spec: input}, nil
+	}
+	return Source{Scheme: m[1], Spec: m[2]}, nil
+}
+
+// Registry holds the set of registered SourceResolvers keyed by scheme.
+// Not goroutine-safe for writes; wire all resolvers at startup.
+type Registry struct {
+	resolvers map[string]SourceResolver
+}
+
+// NewRegistry returns an empty Registry.
+func NewRegistry() *Registry {
+	return &Registry{resolvers: map[string]SourceResolver{}}
+}
+
+// Register adds a resolver. Overwrites any existing resolver for the
+// same scheme; a log line in the router surface is the right place to
+// warn on accidental double-registration.
+func (r *Registry) Register(resolver SourceResolver) {
+	r.resolvers[resolver.Scheme()] = resolver
+}
+
+// Resolve returns the resolver for a source's scheme, or an error if
+// no resolver has been registered for that scheme.
+func (r *Registry) Resolve(source Source) (SourceResolver, error) {
+	resolver, ok := r.resolvers[source.Scheme]
+	if !ok {
+		return nil, fmt.Errorf("no resolver registered for scheme %q", source.Scheme)
+	}
+	return resolver, nil
+}
+
+// Schemes returns the sorted list of registered schemes — useful for
+// surfacing supported sources via the API.
+func (r *Registry) Schemes() []string {
+	out := make([]string, 0, len(r.resolvers))
+	for s := range r.resolvers {
+		out = append(out, s)
+	}
+	// Sort for stable output.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j-1] > out[j]; j-- {
+			out[j-1], out[j] = out[j], out[j-1]
+		}
+	}
+	return out
+}

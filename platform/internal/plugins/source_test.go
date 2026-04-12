@@ -1,0 +1,135 @@
+package plugins
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// ---- ParseSource ----
+
+func TestParseSource_BareNameBecomesLocal(t *testing.T) {
+	s, err := ParseSource("my-plugin")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if s.Scheme != "local" || s.Spec != "my-plugin" {
+		t.Errorf("got %+v", s)
+	}
+}
+
+func TestParseSource_ExplicitScheme(t *testing.T) {
+	cases := map[string]Source{
+		"local://foo":             {Scheme: "local", Spec: "foo"},
+		"github://org/repo":       {Scheme: "github", Spec: "org/repo"},
+		"github://org/repo#v1.0":  {Scheme: "github", Spec: "org/repo#v1.0"},
+		"clawhub://name@1.2.3":    {Scheme: "clawhub", Spec: "name@1.2.3"},
+		"https://example.com/x":   {Scheme: "https", Spec: "example.com/x"},
+	}
+	for in, want := range cases {
+		t.Run(in, func(t *testing.T) {
+			got, err := ParseSource(in)
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("ParseSource(%q) = %+v, want %+v", in, got, want)
+			}
+		})
+	}
+}
+
+func TestParseSource_EmptyRejected(t *testing.T) {
+	if _, err := ParseSource(""); err == nil {
+		t.Error("expected error on empty input")
+	}
+	if _, err := ParseSource("   "); err == nil {
+		t.Error("expected error on whitespace input")
+	}
+}
+
+func TestParseSource_StripsWhitespace(t *testing.T) {
+	s, err := ParseSource("  my-plugin  ")
+	if err != nil || s.Spec != "my-plugin" {
+		t.Errorf("got %+v, err=%v", s, err)
+	}
+}
+
+func TestSource_Raw(t *testing.T) {
+	s := Source{Scheme: "github", Spec: "foo/bar#v1"}
+	if s.Raw() != "github://foo/bar#v1" {
+		t.Errorf("got %q", s.Raw())
+	}
+}
+
+// ---- Registry ----
+
+type fakeResolver struct {
+	scheme string
+	calls  int
+}
+
+func (f *fakeResolver) Scheme() string { return f.scheme }
+func (f *fakeResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
+	f.calls++
+	return spec, nil
+}
+
+func TestRegistry_RegisterAndResolve(t *testing.T) {
+	reg := NewRegistry()
+	local := &fakeResolver{scheme: "local"}
+	gh := &fakeResolver{scheme: "github"}
+	reg.Register(local)
+	reg.Register(gh)
+
+	r, err := reg.Resolve(Source{Scheme: "github", Spec: "x/y"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r != gh {
+		t.Errorf("got wrong resolver: %+v", r)
+	}
+}
+
+func TestRegistry_UnknownScheme(t *testing.T) {
+	reg := NewRegistry()
+	_, err := reg.Resolve(Source{Scheme: "mystery", Spec: "x"})
+	if err == nil {
+		t.Error("expected error for unknown scheme")
+	}
+	if !strings.Contains(err.Error(), "mystery") {
+		t.Errorf("error should name the missing scheme: %v", err)
+	}
+}
+
+func TestRegistry_OverwriteSameScheme(t *testing.T) {
+	reg := NewRegistry()
+	a := &fakeResolver{scheme: "local"}
+	b := &fakeResolver{scheme: "local"}
+	reg.Register(a)
+	reg.Register(b)
+	r, _ := reg.Resolve(Source{Scheme: "local", Spec: "x"})
+	if r != b {
+		t.Error("second registration should overwrite the first")
+	}
+}
+
+func TestRegistry_SchemesSorted(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&fakeResolver{scheme: "local"})
+	reg.Register(&fakeResolver{scheme: "clawhub"})
+	reg.Register(&fakeResolver{scheme: "github"})
+	got := reg.Schemes()
+	want := []string{"clawhub", "github", "local"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Schemes() = %v, want %v", got, want)
+	}
+}
+
+func TestRegistry_EmptyReturnsEmpty(t *testing.T) {
+	reg := NewRegistry()
+	if s := reg.Schemes(); len(s) != 0 {
+		t.Errorf("empty registry should return empty slice, got %v", s)
+	}
+}

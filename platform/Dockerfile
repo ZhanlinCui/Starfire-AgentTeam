@@ -6,7 +6,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /platform ./cmd/server
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+# git is required by the `github` SourceResolver for plugin installs from
+# GitHub URLs (POST /workspaces/:id/plugins {"source": "github://..."}).
+RUN apk add --no-cache ca-certificates git
 COPY --from=builder /platform /platform
 COPY migrations /migrations
 EXPOSE 8080

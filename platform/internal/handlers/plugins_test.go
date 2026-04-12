@@ -556,3 +556,124 @@ func TestCheckRuntimeCompatibility_TriviallyCompatibleWhenContainerMissing(t *te
 		t.Errorf("target_runtime mismatch: %v", body["target_runtime"])
 	}
 }
+
+
+// ---------- ListSources ----------
+
+func TestPluginListSources_ReturnsRegisteredSchemes(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/plugins/sources", nil)
+	h.ListSources(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d", w.Code)
+	}
+	var body map[string][]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	hasLocal, hasGithub := false, false
+	for _, s := range body["schemes"] {
+		if s == "local" {
+			hasLocal = true
+		}
+		if s == "github" {
+			hasGithub = true
+		}
+	}
+	if !hasLocal || !hasGithub {
+		t.Errorf("expected local+github by default, got %v", body["schemes"])
+	}
+}
+
+// ---------- Install — source routing ----------
+
+func TestPluginInstall_RejectsEmptyBody(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x", bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPluginInstall_RejectsUnknownScheme(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"mystery://thing"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("available_schemes")) {
+		t.Errorf("response should list available_schemes: %s", w.Body.String())
+	}
+}
+
+func TestPluginInstall_BareNameBackCompatRoutesToLocal(t *testing.T) {
+	base := t.TempDir()
+	pluginDir := filepath.Join(base, "demo")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := NewPluginsHandler(base, nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"name":"demo"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	// No docker client configured → resolves source, then 503 on container
+	// lookup. That's enough to prove the source dispatch works.
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("want 503 (no container), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPluginInstall_LocalSchemeAlias(t *testing.T) {
+	base := t.TempDir()
+	pluginDir := filepath.Join(base, "demo")
+	_ = os.MkdirAll(pluginDir, 0o755)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: demo\n"), 0o644)
+	h := NewPluginsHandler(base, nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"local://demo"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("local:// should reach container lookup: got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPluginInstall_InvalidSourceString(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"   "}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("whitespace-only source should be rejected: got %d", w.Code)
+	}
+}

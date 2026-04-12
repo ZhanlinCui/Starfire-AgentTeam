@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agent-molecule/platform/internal/plugins"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -43,14 +44,35 @@ type RuntimeLookup func(workspaceID string) (string, error)
 
 // PluginsHandler manages the plugin registry and per-workspace plugin installation.
 type PluginsHandler struct {
-	pluginsDir    string         // host path to plugins/ registry
-	docker        *client.Client // Docker client for container operations
-	restartFunc   func(string)   // auto-restart workspace after install/uninstall
-	runtimeLookup RuntimeLookup  // workspace_id → runtime (optional)
+	pluginsDir    string             // host path to plugins/ registry
+	docker        *client.Client     // Docker client for container operations
+	restartFunc   func(string)       // auto-restart workspace after install/uninstall
+	runtimeLookup RuntimeLookup      // workspace_id → runtime (optional)
+	sources       *plugins.Registry  // pluggable install sources (local, github, clawhub, …)
 }
 
 func NewPluginsHandler(pluginsDir string, docker *client.Client, restartFunc func(string)) *PluginsHandler {
-	return &PluginsHandler{pluginsDir: pluginsDir, docker: docker, restartFunc: restartFunc}
+	// Default source registry ships with the local filesystem resolver
+	// (legacy behaviour) and the github resolver (new). Deployments can
+	// register additional schemes via WithSourceResolver before routes
+	// are wired — e.g. a private enterprise registry or ClawHub.
+	sources := plugins.NewRegistry()
+	sources.Register(plugins.NewLocalResolver(pluginsDir))
+	sources.Register(plugins.NewGithubResolver())
+	return &PluginsHandler{
+		pluginsDir:  pluginsDir,
+		docker:      docker,
+		restartFunc: restartFunc,
+		sources:     sources,
+	}
+}
+
+// WithSourceResolver registers a custom source resolver (e.g. a ClawHub
+// client) alongside the defaults. Call during router wiring, before the
+// first request. Chainable.
+func (h *PluginsHandler) WithSourceResolver(resolver plugins.SourceResolver) *PluginsHandler {
+	h.sources.Register(resolver)
+	return h
 }
 
 // WithRuntimeLookup installs a workspace-runtime resolver. Used by the
@@ -125,6 +147,13 @@ func (h *PluginsHandler) listRegistryFiltered(runtime string) []pluginInfo {
 		plugins = append(plugins, info)
 	}
 	return plugins
+}
+
+// ListSources handles GET /plugins/sources — returns the list of
+// registered install-source schemes so clients can show users which
+// kinds of plugin sources they can install from.
+func (h *PluginsHandler) ListSources(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"schemes": h.sources.Schemes()})
 }
 
 // ListAvailableForWorkspace handles GET /workspaces/:id/plugins/available —
@@ -260,63 +289,126 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 	})
 }
 
-// Install handles POST /workspaces/:id/plugins — installs a plugin from the registry.
+// Install handles POST /workspaces/:id/plugins — installs a plugin.
+//
+// Accepts EITHER:
+//
+//   - {"name": "my-plugin"}                         → local registry (back-compat)
+//   - {"source": "local://my-plugin"}               → explicit local
+//   - {"source": "github://owner/repo"}             → install from GitHub
+//   - {"source": "github://owner/repo#v1.2.0"}      → pinned ref
+//   - {"source": "clawhub://sonoscli@1.2.0"}        → when a ClawHub resolver is registered
+//
+// The shape of the plugin (agentskills.io format, MCP server, DeepAgents
+// sub-agent, …) is orthogonal and handled by the per-runtime adapter
+// inside the workspace at startup.
 func (h *PluginsHandler) Install(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
 	var body struct {
-		Name string `json:"name" binding:"required"`
+		Name   string `json:"name"`
+		Source string `json:"source"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Back-compat: accept bare `name` and promote it to a local source.
+	rawSource := body.Source
+	if rawSource == "" {
+		rawSource = body.Name
+	}
+	if rawSource == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "either 'name' or 'source' is required"})
+		return
+	}
 
-	if err := validatePluginName(body.Name); err != nil {
+	source, err := plugins.ParseSource(rawSource)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	resolver, err := h.sources.Resolve(source)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             err.Error(),
+			"available_schemes": h.sources.Schemes(),
+		})
+		return
+	}
+	// Front-run obvious input validation for local sources so path-
+	// traversal attempts yield 400 rather than a resolver-level 502.
+	// Other schemes do their own spec validation inside Fetch.
+	if source.Scheme == "local" {
+		if err := validatePluginName(source.Spec); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
 
-	// Validate plugin exists in registry
-	pluginSrc := filepath.Join(h.pluginsDir, body.Name)
-	info, err := os.Stat(pluginSrc)
-	if err != nil || !info.IsDir() {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("plugin '%s' not found in registry", body.Name)})
+	// Fetch first so a missing plugin yields 404 regardless of whether a
+	// container is up. For remote resolvers (github, clawhub, …) this
+	// means we do the network round-trip before the container check, but
+	// the cost is bounded by the fetch resolver's own timeouts and we
+	// don't want to confuse "plugin doesn't exist" with "workspace down."
+	fetchDst, err := os.MkdirTemp("", "starfire-plugin-fetch-*")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create staging dir"})
+		return
+	}
+	defer os.RemoveAll(fetchDst)
+
+	pluginName, err := resolver.Fetch(ctx, source.Spec, fetchDst)
+	if err != nil {
+		log.Printf("Plugin install: resolver %s failed for %s: %v", source.Scheme, source.Spec, err)
+		// Local "not found" is a 404 (back-compat); other resolver
+		// failures (network, auth, bad ref, …) are 502.
+		status := http.StatusBadGateway
+		if source.Scheme == "local" && strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{
+			"error":  fmt.Sprintf("failed to fetch plugin from %s: %v", source.Scheme, err),
+			"source": source.Raw(),
+		})
 		return
 	}
 
-	// Find container
 	containerName := h.findRunningContainer(ctx, workspaceID)
 	if containerName == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace container not running"})
 		return
 	}
-
-	// Copy plugin into /configs/plugins/<name>/ — tar is prefixed with plugins/<name>/ so
-	// Docker creates the directory structure automatically under /configs
-	if err := h.copyPluginToContainer(ctx, containerName, pluginSrc, body.Name); err != nil {
-		log.Printf("Plugin install: failed to copy %s to %s: %v", body.Name, workspaceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to copy plugin to container"})
+	// The pluginName flows into /configs/plugins/<name>/; validate it
+	// before we hand it to the tar prefix (prevents a malicious resolver
+	// from returning a traversal name).
+	if err := validatePluginName(pluginName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  fmt.Sprintf("resolver returned invalid plugin name %q: %v", pluginName, err),
+			"source": source.Raw(),
+		})
 		return
 	}
 
-	// Fix ownership of the newly copied plugin dir so the agent user can
-	// read it. The entrypoint handles /configs broadly on startup, but
-	// mid-run plugin installs copy files as root into a running container.
+	if err := h.copyPluginToContainer(ctx, containerName, fetchDst, pluginName); err != nil {
+		log.Printf("Plugin install: failed to copy %s to %s: %v", pluginName, workspaceID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to copy plugin to container"})
+		return
+	}
 	h.execAsRoot(ctx, containerName, []string{
-		"chown", "-R", "1000:1000", "/configs/plugins/" + body.Name,
+		"chown", "-R", "1000:1000", "/configs/plugins/" + pluginName,
 	})
 
-	// Auto-restart workspace to pick up the plugin
 	if h.restartFunc != nil {
 		go h.restartFunc(workspaceID)
 	}
 
-	log.Printf("Plugin install: %s → workspace %s (restarting)", body.Name, workspaceID)
+	log.Printf("Plugin install: %s via %s → workspace %s (restarting)", pluginName, source.Scheme, workspaceID)
 	c.JSON(http.StatusOK, gin.H{
 		"status": "installed",
-		"plugin": body.Name,
+		"plugin": pluginName,
+		"source": source.Raw(),
 	})
 }
 

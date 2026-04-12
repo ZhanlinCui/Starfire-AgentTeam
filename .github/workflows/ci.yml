@@ -89,13 +89,14 @@ jobs:
       - run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov
       - run: python -m pytest --tb=short -q --cov=. --cov-report=term-missing
 
-      # agentskills.io spec validation — every first-party plugin must pass
-      # the open standard so our skills remain installable in Claude Code,
-      # Cursor, Codex, and the ~35 other skills-compatible agent products.
+      # Lint first-party plugins. The validator checks each plugin
+      # against the format it declares — currently agentskills.io for all
+      # of ours, but the same command covers any future shape that lands
+      # under a sibling adapter (MCP, DeepAgents sub-agent, etc.).
       - name: Install starfire-plugin SDK
         working-directory: sdk/python
         run: pip install -e .
-      - name: Validate first-party plugins against agentskills.io spec
+      - name: Lint first-party plugins
         working-directory: ${{ github.workspace }}
         run: python -m starfire_plugin validate plugins/starfire-dev plugins/superpowers plugins/ecc
       - name: Run SDK tests
