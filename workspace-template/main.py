@@ -295,30 +295,40 @@ async def main():  # pragma: no cover
             import urllib.request
 
             def _do_send_sync():
-                try:
-                    payload = _json.dumps({
-                        "method": "message/send",
-                        "params": {
-                            "message": {
-                                "role": "user",
-                                "messageId": f"initial-{_uuid.uuid4().hex[:8]}",
-                                "parts": [{"kind": "text", "text": config.initial_prompt}],
-                            },
+                import time as _time
+                payload = _json.dumps({
+                    "method": "message/send",
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "messageId": f"initial-{_uuid.uuid4().hex[:8]}",
+                            "parts": [{"kind": "text", "text": config.initial_prompt}],
                         },
-                    }).encode()
+                    },
+                }).encode()
 
-                    req = urllib.request.Request(
-                        f"{platform_url}/workspaces/{workspace_id}/a2a",
-                        data=payload,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    with urllib.request.urlopen(req, timeout=600) as resp:
-                        resp.read()  # consume body
-                    print(f"Initial prompt: completed (status={resp.status})", flush=True)
-
-                except Exception as e:
-                    print(f"Initial prompt: failed — {e}", flush=True)
-                    return
+                # Retry with backoff — the platform proxy may not be able to
+                # reach us yet (container networking takes a moment to settle).
+                max_retries = 5
+                for attempt in range(max_retries):
+                    try:
+                        req = urllib.request.Request(
+                            f"{platform_url}/workspaces/{workspace_id}/a2a",
+                            data=payload,
+                            headers={"Content-Type": "application/json"},
+                        )
+                        with urllib.request.urlopen(req, timeout=600) as resp:
+                            resp.read()
+                        print(f"Initial prompt: completed (status={resp.status})", flush=True)
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            delay = 2 ** attempt  # 1, 2, 4, 8, 16 seconds
+                            print(f"Initial prompt: attempt {attempt + 1} failed ({e}), retrying in {delay}s...", flush=True)
+                            _time.sleep(delay)
+                        else:
+                            print(f"Initial prompt: failed after {max_retries} attempts — {e}", flush=True)
+                            return
 
                 # Write marker
                 try:
