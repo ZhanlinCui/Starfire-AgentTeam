@@ -26,6 +26,12 @@ from builtin_tools.telemetry import setup_telemetry, make_trace_middleware
 from policies.namespaces import resolve_awareness_namespace
 
 
+from initial_prompt import (
+    mark_initial_prompt_attempted,
+    resolve_initial_prompt_marker,
+)
+
+
 def get_machine_ip() -> str:  # pragma: no cover
     """Get the machine's IP for A2A discovery."""
     try:
@@ -261,12 +267,19 @@ async def main():  # pragma: no cover
     # 10b. Schedule initial_prompt self-message after server is ready.
     # Only runs on first boot — creates a marker file to prevent re-execution on restart.
     initial_prompt_task = None
-    # Marker file to prevent re-execution on restart. Try /configs first (persists),
-    # fall back to /workspace (also persists as a Docker volume).
-    initial_prompt_marker = os.path.join(config_path, ".initial_prompt_done")
-    if not os.access(config_path, os.W_OK):
-        initial_prompt_marker = "/workspace/.initial_prompt_done"
+    initial_prompt_marker = resolve_initial_prompt_marker(config_path)
     if config.initial_prompt and not os.path.exists(initial_prompt_marker):
+        # Write the marker UP FRONT (#71): if the prompt later crashes or
+        # times out, we do NOT replay on next boot — that created a
+        # ProcessError cascade where every message kept crashing. Operators
+        # can always re-send via chat. Log loudly if the marker write
+        # fails so the situation is visible.
+        if not mark_initial_prompt_attempted(initial_prompt_marker):
+            print(
+                f"Initial prompt: WARNING — could not write marker at "
+                f"{initial_prompt_marker}; this boot may replay if it crashes.",
+                flush=True,
+            )
         async def _send_initial_prompt():
             """Wait for server to be ready, then send initial_prompt as self-message."""
             # Wait for the A2A server to accept connections
@@ -330,12 +343,7 @@ async def main():  # pragma: no cover
                             print(f"Initial prompt: failed after {max_retries} attempts — {e}", flush=True)
                             return
 
-                # Write marker
-                try:
-                    with open(initial_prompt_marker, "w") as f:
-                        f.write("done")
-                except OSError:
-                    pass
+                # Marker was already written up front (#71). Nothing to do here.
 
             print("Initial prompt: sending via platform proxy...", flush=True)
             loop = asyncio.get_event_loop()
