@@ -114,7 +114,7 @@ async def route_task_to_team(
         task: The task description to route.
         preferred_member_id: Optional — directly delegate to this member.
     """
-    from tools.delegation import delegate_to_workspace as delegate
+    from builtin_tools.delegation import delegate_to_workspace as delegate
 
     children = await get_children()
     decision = build_team_routing_payload(

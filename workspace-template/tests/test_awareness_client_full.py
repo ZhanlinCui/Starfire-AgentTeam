@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS_DIR = ROOT / "tools"
+TOOLS_DIR = ROOT / "builtin_tools"
 
 
 def _load_awareness_client(monkeypatch):
@@ -356,7 +356,7 @@ class TestResolveAsyncClient:
         fake_memory_mod = MagicMock()
         fake_memory_mod.httpx = fake_memory_httpx
 
-        monkeypatch.setitem(sys.modules, "tools.memory", fake_memory_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.memory", fake_memory_mod)
 
         result = mod._resolve_async_client()
         assert result is fake_async_client
@@ -367,7 +367,7 @@ class TestResolveAsyncClient:
 
         monkeypatch.setattr(mod.httpx, "AsyncClient", None)
         # Make sure tools.memory is not in sys.modules
-        monkeypatch.delitem(sys.modules, "tools.memory", raising=False)
+        monkeypatch.delitem(sys.modules, "builtin_tools.memory", raising=False)
 
         with pytest.raises(RuntimeError, match="httpx.AsyncClient is unavailable"):
             mod._resolve_async_client()
@@ -383,7 +383,7 @@ class TestResolveAsyncClient:
         fake_memory_mod = MagicMock()
         fake_memory_mod.httpx = fake_memory_httpx
 
-        monkeypatch.setitem(sys.modules, "tools.memory", fake_memory_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.memory", fake_memory_mod)
 
         with pytest.raises(RuntimeError, match="httpx.AsyncClient is unavailable"):
             mod._resolve_async_client()

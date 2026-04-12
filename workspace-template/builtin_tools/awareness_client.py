@@ -112,7 +112,7 @@ def _resolve_async_client():
     if client_cls is not None:
         return client_cls
 
-    memory_module = sys.modules.get("tools.memory")
+    memory_module = sys.modules.get("builtin_tools.memory")
     if memory_module is not None:
         memory_httpx = getattr(memory_module, "httpx", None)
         client_cls = getattr(memory_httpx, "AsyncClient", None)

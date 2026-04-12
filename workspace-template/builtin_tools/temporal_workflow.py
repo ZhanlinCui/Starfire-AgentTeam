@@ -501,7 +501,7 @@ def create_wrapper() -> TemporalWorkflowWrapper:
 
     Example (in main.py)::
 
-        from tools.temporal_workflow import create_wrapper as create_temporal_wrapper
+        from builtin_tools.temporal_workflow import create_wrapper as create_temporal_wrapper
         temporal_wrapper = create_temporal_wrapper()
         await temporal_wrapper.start()          # connects + starts worker
         try:

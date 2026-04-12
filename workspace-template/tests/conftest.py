@@ -111,40 +111,40 @@ def _make_langchain_mocks():
 
 def _make_tools_mocks():
     """Create mock modules for tools.* so adapters can be imported in tests."""
-    tools_mod = ModuleType("tools")
+    tools_mod = ModuleType("builtin_tools")
     tools_mod.__path__ = []  # Make it a proper package
 
-    tools_delegation_mod = ModuleType("tools.delegation")
+    tools_delegation_mod = ModuleType("builtin_tools.delegation")
     tools_delegation_mod.delegate_to_workspace = MagicMock()
     tools_delegation_mod.delegate_to_workspace.name = "delegate_to_workspace"
     tools_delegation_mod.check_delegation_status = MagicMock()
     tools_delegation_mod.check_delegation_status.name = "check_delegation_status"
 
-    tools_approval_mod = ModuleType("tools.approval")
+    tools_approval_mod = ModuleType("builtin_tools.approval")
     tools_approval_mod.request_approval = MagicMock()
     tools_approval_mod.request_approval.name = "request_approval"
 
-    tools_memory_mod = ModuleType("tools.memory")
+    tools_memory_mod = ModuleType("builtin_tools.memory")
     tools_memory_mod.commit_memory = MagicMock()
     tools_memory_mod.commit_memory.name = "commit_memory"
     tools_memory_mod.search_memory = MagicMock()
     tools_memory_mod.search_memory.name = "search_memory"
 
-    tools_sandbox_mod = ModuleType("tools.sandbox")
+    tools_sandbox_mod = ModuleType("builtin_tools.sandbox")
     tools_sandbox_mod.run_code = MagicMock()
     tools_sandbox_mod.run_code.name = "run_code"
 
-    tools_a2a_mod = ModuleType("tools.a2a_tools")
+    tools_a2a_mod = ModuleType("builtin_tools.a2a_tools")
     tools_a2a_mod.delegate_task = MagicMock()
     tools_a2a_mod.list_peers = MagicMock()
     tools_a2a_mod.get_peers_summary = MagicMock()
 
-    tools_awareness_mod = ModuleType("tools.awareness_client")
+    tools_awareness_mod = ModuleType("builtin_tools.awareness_client")
     tools_awareness_mod.get_awareness_config = MagicMock(return_value=None)
 
     # tools.telemetry — provide constants and no-op callables used by a2a_executor
     from contextvars import ContextVar
-    tools_telemetry_mod = ModuleType("tools.telemetry")
+    tools_telemetry_mod = ModuleType("builtin_tools.telemetry")
     tools_telemetry_mod.GEN_AI_SYSTEM = "gen_ai.system"
     tools_telemetry_mod.GEN_AI_REQUEST_MODEL = "gen_ai.request.model"
     tools_telemetry_mod.GEN_AI_OPERATION_NAME = "gen_ai.operation.name"
@@ -168,7 +168,7 @@ def _make_tools_mocks():
     tools_telemetry_mod.record_llm_token_usage = MagicMock()
 
     # tools.audit — provide RBAC helpers and log_event as no-ops
-    tools_audit_mod = ModuleType("tools.audit")
+    tools_audit_mod = ModuleType("builtin_tools.audit")
     tools_audit_mod.log_event = MagicMock(return_value="mock-trace-id")
     tools_audit_mod.check_permission = MagicMock(return_value=True)
     tools_audit_mod.get_workspace_roles = MagicMock(return_value=(["operator"], {}))
@@ -179,7 +179,7 @@ def _make_tools_mocks():
     }
 
     # tools.hitl — lightweight stubs for the HITL tools
-    tools_hitl_mod = ModuleType("tools.hitl")
+    tools_hitl_mod = ModuleType("builtin_tools.hitl")
     tools_hitl_mod.pause_task = MagicMock()
     tools_hitl_mod.pause_task.name = "pause_task"
     tools_hitl_mod.resume_task = MagicMock()
@@ -189,16 +189,16 @@ def _make_tools_mocks():
     tools_hitl_mod.requires_approval = MagicMock(side_effect=lambda *a, **kw: (lambda f: f))
     tools_hitl_mod.pause_registry = MagicMock()
 
-    sys.modules["tools"] = tools_mod
-    sys.modules["tools.delegation"] = tools_delegation_mod
-    sys.modules["tools.approval"] = tools_approval_mod
-    sys.modules["tools.memory"] = tools_memory_mod
-    sys.modules["tools.sandbox"] = tools_sandbox_mod
-    sys.modules["tools.a2a_tools"] = tools_a2a_mod
-    sys.modules["tools.awareness_client"] = tools_awareness_mod
-    sys.modules["tools.telemetry"] = tools_telemetry_mod
-    sys.modules["tools.audit"] = tools_audit_mod
-    sys.modules["tools.hitl"] = tools_hitl_mod
+    sys.modules["builtin_tools"] = tools_mod
+    sys.modules["builtin_tools.delegation"] = tools_delegation_mod
+    sys.modules["builtin_tools.approval"] = tools_approval_mod
+    sys.modules["builtin_tools.memory"] = tools_memory_mod
+    sys.modules["builtin_tools.sandbox"] = tools_sandbox_mod
+    sys.modules["builtin_tools.a2a_tools"] = tools_a2a_mod
+    sys.modules["builtin_tools.awareness_client"] = tools_awareness_mod
+    sys.modules["builtin_tools.telemetry"] = tools_telemetry_mod
+    sys.modules["builtin_tools.audit"] = tools_audit_mod
+    sys.modules["builtin_tools.hitl"] = tools_hitl_mod
 
 
 def _make_claude_agent_sdk_mock():
@@ -252,7 +252,7 @@ if "claude_agent_sdk" not in sys.modules:
 if "langchain_core" not in sys.modules:
     _make_langchain_mocks()
 
-if "tools" not in sys.modules or not hasattr(sys.modules.get("tools"), "__path__"):
+if "builtin_tools" not in sys.modules or not hasattr(sys.modules.get("builtin_tools"), "__path__"):
     _make_tools_mocks()
 
 # Mock additional modules needed by _common_setup in base.py
@@ -261,7 +261,7 @@ if "plugins" not in sys.modules:
     plugins_mod.load_plugins = MagicMock()
     sys.modules["plugins"] = plugins_mod
 
-if "skills" not in sys.modules:
+if "skill_loader" not in sys.modules:
     # Add workspace-template to path so real skills.loader can be imported
     import importlib.util
     _ws_root = str(MagicMock.__module__).replace("unittest.mock", "")  # just a trick to get path
@@ -270,12 +270,12 @@ if "skills" not in sys.modules:
     if _ws_root not in sys.path:
         sys.path.insert(0, _ws_root)
     # Import real skills module so LoadedSkill/SkillMetadata are available
-    skills_mod = ModuleType("skills")
-    skills_mod.__path__ = [_os.path.join(_ws_root, "skills")]
-    sys.modules["skills"] = skills_mod
-    _spec = importlib.util.spec_from_file_location("skills.loader", _os.path.join(_ws_root, "skills", "loader.py"))
+    skills_mod = ModuleType("skill_loader")
+    skills_mod.__path__ = [_os.path.join(_ws_root, "skill_loader")]
+    sys.modules["skill_loader"] = skills_mod
+    _spec = importlib.util.spec_from_file_location("skill_loader.loader", _os.path.join(_ws_root, "skill_loader", "loader.py"))
     _loader_mod = importlib.util.module_from_spec(_spec)
-    sys.modules["skills.loader"] = _loader_mod
+    sys.modules["skill_loader.loader"] = _loader_mod
     _spec.loader.exec_module(_loader_mod)
 
 if "coordinator" not in sys.modules:

@@ -190,13 +190,13 @@ class BaseAdapter(ABC):
         convert to their native format if needed.
         """
         from plugins import load_plugins
-        from skills.loader import load_skills
+        from skill_loader.loader import load_skills
         from coordinator import get_children, get_parent_context, build_children_description
         from prompt import build_system_prompt, get_peer_capabilities
-        from tools.approval import request_approval
-        from tools.delegation import delegate_to_workspace, check_delegation_status
-        from tools.memory import commit_memory, search_memory
-        from tools.sandbox import run_code
+        from builtin_tools.approval import request_approval
+        from builtin_tools.delegation import delegate_to_workspace, check_delegation_status
+        from builtin_tools.memory import commit_memory, search_memory
+        from builtin_tools.sandbox import run_code
 
         platform_url = os.environ.get("PLATFORM_URL", "http://platform:8080")
 

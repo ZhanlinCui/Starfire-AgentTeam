@@ -30,14 +30,14 @@ def real_security_scan(monkeypatch):
     """Load the real tools/security_scan.py, injecting a mock tools.audit."""
     mock_audit = MagicMock()
     mock_audit.log_event = MagicMock(return_value="trace-sec")
-    monkeypatch.setitem(sys.modules, "tools.audit", mock_audit)
-    monkeypatch.delitem(sys.modules, "tools.security_scan", raising=False)
+    monkeypatch.setitem(sys.modules, "builtin_tools.audit", mock_audit)
+    monkeypatch.delitem(sys.modules, "builtin_tools.security_scan", raising=False)
     spec = importlib.util.spec_from_file_location(
-        "tools.security_scan",
-        os.path.join(os.path.dirname(__file__), "..", "tools/security_scan.py"),
+        "builtin_tools.security_scan",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools/security_scan.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.security_scan", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.security_scan", mod)
     spec.loader.exec_module(mod)
     return mod, mock_audit
 

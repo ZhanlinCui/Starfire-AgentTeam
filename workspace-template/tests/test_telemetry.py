@@ -2,7 +2,7 @@ import os
 """Tests for tools/telemetry.py.
 
 Loads the real module via importlib so the conftest.py mock at
-sys.modules["tools.telemetry"] does not interfere.  Each test operates on
+sys.modules["builtin_tools.telemetry"] does not interfere.  Each test operates on
 a freshly exec'd copy with _initialized=False so there is no cross-test
 state pollution.
 """
@@ -21,13 +21,13 @@ import pytest
 
 @pytest.fixture
 def real_telemetry(monkeypatch):
-    monkeypatch.delitem(sys.modules, "tools.telemetry", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.telemetry", raising=False)
     spec = importlib.util.spec_from_file_location(
-        "tools.telemetry",
-        os.path.join(os.path.dirname(__file__), "..", "tools/telemetry.py"),
+        "builtin_tools.telemetry",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools/telemetry.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.telemetry", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.telemetry", mod)
     spec.loader.exec_module(mod)
     # Reset global state so tests are independent
     mod._initialized = False
@@ -570,13 +570,13 @@ def otel_mocked_telemetry(monkeypatch):
         if not key.startswith("_"):
             monkeypatch.setitem(sys.modules, key, val)
 
-    monkeypatch.delitem(sys.modules, "tools.telemetry", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.telemetry", raising=False)
     spec = importlib.util.spec_from_file_location(
-        "tools.telemetry_otel",
-        os.path.join(os.path.dirname(__file__), "..", "tools/telemetry.py"),
+        "builtin_tools.telemetry_otel",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools/telemetry.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.telemetry_otel", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.telemetry_otel", mod)
     spec.loader.exec_module(mod)
     mod._initialized = False
     mod._tracer = None

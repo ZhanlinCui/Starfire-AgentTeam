@@ -440,7 +440,7 @@ def test_compliance_available_true_when_module_importable():
     from unittest.mock import MagicMock
 
     # Build a minimal tools.compliance mock that exports the required symbols
-    compliance_mod = ModuleType("tools.compliance")
+    compliance_mod = ModuleType("builtin_tools.compliance")
     compliance_mod.AgencyTracker = MagicMock()
     compliance_mod.ExcessiveAgencyError = type("ExcessiveAgencyError", (RuntimeError,), {})
     compliance_mod.PromptInjectionError = type("PromptInjectionError", (ValueError,), {})
@@ -448,8 +448,8 @@ def test_compliance_available_true_when_module_importable():
     compliance_mod.sanitize_input = MagicMock(side_effect=lambda text, **kw: text)
 
     # Inject the mock and reload the module
-    original = sys.modules.get("tools.compliance")
-    sys.modules["tools.compliance"] = compliance_mod
+    original = sys.modules.get("builtin_tools.compliance")
+    sys.modules["builtin_tools.compliance"] = compliance_mod
     try:
         import a2a_executor as _mod
         importlib.reload(_mod)
@@ -457,9 +457,9 @@ def test_compliance_available_true_when_module_importable():
     finally:
         # Restore original state so other tests are not affected
         if original is None:
-            sys.modules.pop("tools.compliance", None)
+            sys.modules.pop("builtin_tools.compliance", None)
         else:
-            sys.modules["tools.compliance"] = original
+            sys.modules["builtin_tools.compliance"] = original
         # Re-reload to restore _COMPLIANCE_AVAILABLE = False for subsequent tests
         importlib.reload(_mod)
 
@@ -546,14 +546,14 @@ async def test_execute_routes_through_temporal_wrapper_when_available():
 
     # Build a fake temporal_workflow module with a get_wrapper that returns an
     # available wrapper.
-    tw_mod = ModuleType("tools.temporal_workflow")
+    tw_mod = ModuleType("builtin_tools.temporal_workflow")
     fake_wrapper = MagicMock()
     fake_wrapper.is_available.return_value = True
     fake_wrapper.run = AsyncMock(return_value="temporal-result")
     tw_mod.get_wrapper = MagicMock(return_value=fake_wrapper)
 
-    original_tw = sys.modules.get("tools.temporal_workflow")
-    sys.modules["tools.temporal_workflow"] = tw_mod
+    original_tw = sys.modules.get("builtin_tools.temporal_workflow")
+    sys.modules["builtin_tools.temporal_workflow"] = tw_mod
 
     try:
         agent = MagicMock()
@@ -572,9 +572,9 @@ async def test_execute_routes_through_temporal_wrapper_when_available():
         agent.astream_events.assert_not_called()
     finally:
         if original_tw is None:
-            sys.modules.pop("tools.temporal_workflow", None)
+            sys.modules.pop("builtin_tools.temporal_workflow", None)
         else:
-            sys.modules["tools.temporal_workflow"] = original_tw
+            sys.modules["builtin_tools.temporal_workflow"] = original_tw
 
 
 @pytest.mark.asyncio
@@ -583,13 +583,13 @@ async def test_execute_falls_back_when_temporal_wrapper_not_available():
     import sys
     from types import ModuleType
 
-    tw_mod = ModuleType("tools.temporal_workflow")
+    tw_mod = ModuleType("builtin_tools.temporal_workflow")
     fake_wrapper = MagicMock()
     fake_wrapper.is_available.return_value = False
     tw_mod.get_wrapper = MagicMock(return_value=fake_wrapper)
 
-    original_tw = sys.modules.get("tools.temporal_workflow")
-    sys.modules["tools.temporal_workflow"] = tw_mod
+    original_tw = sys.modules.get("builtin_tools.temporal_workflow")
+    sys.modules["builtin_tools.temporal_workflow"] = tw_mod
 
     try:
         agent = MagicMock()
@@ -607,9 +607,9 @@ async def test_execute_falls_back_when_temporal_wrapper_not_available():
         agent.astream_events.assert_called_once()
     finally:
         if original_tw is None:
-            sys.modules.pop("tools.temporal_workflow", None)
+            sys.modules.pop("builtin_tools.temporal_workflow", None)
         else:
-            sys.modules["tools.temporal_workflow"] = original_tw
+            sys.modules["builtin_tools.temporal_workflow"] = original_tw
 
 
 # ---------------------------------------------------------------------------
@@ -769,7 +769,7 @@ async def test_core_execute_on_chat_model_end_captures_last_ai_message():
         await executor._core_execute(context, eq)
 
     # record_llm_token_usage should have been called with last_ai_message
-    import tools.telemetry as _tel
+    import builtin_tools.telemetry as _tel
     _tel.record_llm_token_usage.assert_called()
     call_args = _tel.record_llm_token_usage.call_args
     assert call_args[0][1]["messages"][0] is fake_ai_output
@@ -779,7 +779,7 @@ async def test_core_execute_on_chat_model_end_captures_last_ai_message():
 async def test_core_execute_on_chat_model_end_output_none_skips_telemetry():
     """on_chat_model_end with output=None does not call record_llm_token_usage."""
     import a2a_executor
-    import tools.telemetry as _tel
+    import builtin_tools.telemetry as _tel
     from unittest.mock import patch
 
     _tel.record_llm_token_usage.reset_mock()
@@ -816,7 +816,7 @@ async def test_core_execute_pii_redaction_when_pii_found():
     """When _redact_pii finds PII types, audit log_event is called."""
     import a2a_executor
     from unittest.mock import patch, MagicMock
-    import tools.audit as _audit
+    import builtin_tools.audit as _audit
 
     fake_compliance_cfg = MagicMock()
     fake_compliance_cfg.mode = "owasp_agentic"
@@ -854,7 +854,7 @@ async def test_core_execute_pii_redaction_no_pii_skips_audit():
     """When _redact_pii finds no PII, audit log_event is not called."""
     import a2a_executor
     from unittest.mock import patch, MagicMock
-    import tools.audit as _audit
+    import builtin_tools.audit as _audit
 
     fake_compliance_cfg = MagicMock()
     fake_compliance_cfg.mode = "owasp_agentic"

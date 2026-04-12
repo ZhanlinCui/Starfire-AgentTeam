@@ -18,8 +18,8 @@ from typing import Optional
 import httpx
 from langchain_core.tools import tool
 
-from tools.audit import check_permission, get_workspace_roles, log_event
-from tools.telemetry import (
+from builtin_tools.audit import check_permission, get_workspace_roles, log_event
+from builtin_tools.telemetry import (
     A2A_SOURCE_WORKSPACE,
     A2A_TARGET_WORKSPACE,
     A2A_TASK_ID,

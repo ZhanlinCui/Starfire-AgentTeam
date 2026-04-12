@@ -25,7 +25,7 @@ import pytest
 
 import importlib.util as _ilu
 _ROOT = Path(__file__).resolve().parents[1]
-_spec = _ilu.spec_from_file_location("skills.watcher", _ROOT / "skills" / "watcher.py")
+_spec = _ilu.spec_from_file_location("skill_loader.watcher", _ROOT / "skill_loader" / "watcher.py")
 _watcher_mod = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_watcher_mod)
 SkillsWatcher = _watcher_mod.SkillsWatcher
@@ -174,7 +174,7 @@ class TestReloadSkill:
         w = SkillsWatcher(str(tmp_path), ["sk"], on_reload=_on_reload)
 
         # Monkey-patch load_skills to return a fake skill
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="sk", name="TestSkill", description="test"),
             instructions="Instruction",
@@ -188,9 +188,9 @@ class TestReloadSkill:
                             fake_load_skills, raising=False)
 
         # Patch the import inside _reload_skill
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = fake_load_skills
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         await w._reload_skill("sk", ["sk/SKILL.md"])
 
@@ -210,16 +210,16 @@ class TestReloadSkill:
 
         w = SkillsWatcher(str(tmp_path), ["sk2"], on_reload=_sync_on_reload)
 
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="sk2", name="SK2", description="d"),
             instructions="",
             tools=[],
         )
 
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: [fake_skill]
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         await w._reload_skill("sk2", ["sk2/SKILL.md"])
 
@@ -232,21 +232,21 @@ class TestReloadSkill:
 
         audit_events = []
 
-        audit_mod = ModuleType("tools.audit")
+        audit_mod = ModuleType("builtin_tools.audit")
         audit_mod.log_event = lambda **kwargs: audit_events.append(kwargs)
-        monkeypatch.setitem(sys.modules, "tools.audit", audit_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", audit_mod)
 
         w = SkillsWatcher(str(tmp_path), ["audited"])
 
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="audited", name="Audited", description="a"),
             instructions="",
             tools=[],
         )
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: [fake_skill]
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         await w._reload_skill("audited", ["audited/SKILL.md"])
 
@@ -258,16 +258,16 @@ class TestReloadSkill:
     @pytest.mark.asyncio
     async def test_emits_audit_event_on_failure(self, tmp_path, monkeypatch):
         audit_events = []
-        audit_mod = ModuleType("tools.audit")
+        audit_mod = ModuleType("builtin_tools.audit")
         audit_mod.log_event = lambda **kwargs: audit_events.append(kwargs)
-        monkeypatch.setitem(sys.modules, "tools.audit", audit_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", audit_mod)
 
         w = SkillsWatcher(str(tmp_path), ["broken"])
 
         # Make load_skills blow up
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = MagicMock(side_effect=RuntimeError("bad skill"))
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         await w._reload_skill("broken", ["broken/SKILL.md"])
 
@@ -310,15 +310,15 @@ class TestWatcherLifecycle:
             reloads.append(skill)
             w.stop()   # stop after first reload
 
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="live", name="Live", description="l"),
             instructions="",
             tools=[],
         )
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: [fake_skill]
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         _watcher_mod.POLL_INTERVAL  = 0.01
         _watcher_mod.DEBOUNCE_SECS  = 0.01
@@ -371,15 +371,15 @@ class TestEvictStaleModules:
         stale_mod = ModuleType("skill_tool_old_thing")
         monkeypatch.setitem(sys.modules, "skill_tool_old_thing", stale_mod)
 
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="sk", name="SK", description="d"),
             instructions="",
             tools=[],
         )
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: [fake_skill]
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         w = SkillsWatcher(str(tmp_path), ["sk"])
         await w._reload_skill("sk", ["sk/SKILL.md"])
@@ -394,20 +394,20 @@ class TestAuditEventExceptionSuppressed:
     @pytest.mark.asyncio
     async def test_audit_import_error_suppressed_on_success(self, tmp_path, monkeypatch):
         """Audit log_event exceptions are silently suppressed on skill reload success."""
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="sk", name="SK", description="d"),
             instructions="",
             tools=[],
         )
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: [fake_skill]
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         # Make tools.audit.log_event raise an exception
-        audit_mod = ModuleType("tools.audit")
+        audit_mod = ModuleType("builtin_tools.audit")
         audit_mod.log_event = MagicMock(side_effect=RuntimeError("audit DB down"))
-        monkeypatch.setitem(sys.modules, "tools.audit", audit_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", audit_mod)
 
         w = SkillsWatcher(str(tmp_path), ["sk"])
         # Should not raise even though audit throws
@@ -422,15 +422,15 @@ class TestOnReloadCallbackException:
         self, tmp_path, monkeypatch
     ):
         """Exceptions in sync on_reload callback are caught and logged."""
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="sk", name="SK", description="d"),
             instructions="",
             tools=[],
         )
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: [fake_skill]
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         def failing_callback(skill):
             raise ValueError("callback blew up")
@@ -444,15 +444,15 @@ class TestOnReloadCallbackException:
         self, tmp_path, monkeypatch
     ):
         """Exceptions in async on_reload callback are caught and logged."""
-        from skills.loader import LoadedSkill, SkillMetadata
+        from skill_loader.loader import LoadedSkill, SkillMetadata
         fake_skill = LoadedSkill(
             metadata=SkillMetadata(id="sk", name="SK", description="d"),
             instructions="",
             tools=[],
         )
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: [fake_skill]
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         async def failing_async_callback(skill):
             raise RuntimeError("async callback blew up")
@@ -465,13 +465,13 @@ class TestOnReloadCallbackException:
     async def test_no_skill_returned_calls_audit_failure(self, tmp_path, monkeypatch):
         """When load_skills returns empty list, _audit_failure is called."""
         audit_events = []
-        audit_mod = ModuleType("tools.audit")
+        audit_mod = ModuleType("builtin_tools.audit")
         audit_mod.log_event = lambda **kwargs: audit_events.append(kwargs)
-        monkeypatch.setitem(sys.modules, "tools.audit", audit_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", audit_mod)
 
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: []  # empty result
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         w = SkillsWatcher(str(tmp_path), ["sk"])
         await w._reload_skill("sk", ["sk/SKILL.md"])
@@ -488,9 +488,9 @@ class TestOnReloadCallbackException:
         def callback(skill):
             callback_calls.append(skill)
 
-        skills_mod = ModuleType("skills.loader")
+        skills_mod = ModuleType("skill_loader.loader")
         skills_mod.load_skills = lambda cp, names: []
-        monkeypatch.setitem(sys.modules, "skills.loader", skills_mod)
+        monkeypatch.setitem(sys.modules, "skill_loader.loader", skills_mod)
 
         w = SkillsWatcher(str(tmp_path), ["sk"], on_reload=callback)
         await w._reload_skill("sk", ["sk/SKILL.md"])
@@ -504,7 +504,7 @@ class TestAuditFailureExceptionSuppressed:
     def test_audit_failure_suppresses_import_error(self, tmp_path, monkeypatch):
         """_audit_failure silently handles ImportError when tools.audit unavailable."""
         # Remove tools.audit from sys.modules to force ImportError
-        monkeypatch.delitem(sys.modules, "tools.audit", raising=False)
+        monkeypatch.delitem(sys.modules, "builtin_tools.audit", raising=False)
         monkeypatch.delitem(sys.modules, "tools", raising=False)
 
         # Should not raise
@@ -512,9 +512,9 @@ class TestAuditFailureExceptionSuppressed:
 
     def test_audit_failure_suppresses_log_event_exception(self, tmp_path, monkeypatch):
         """_audit_failure suppresses exceptions raised by log_event."""
-        audit_mod = ModuleType("tools.audit")
+        audit_mod = ModuleType("builtin_tools.audit")
         audit_mod.log_event = MagicMock(side_effect=RuntimeError("db write failed"))
-        monkeypatch.setitem(sys.modules, "tools.audit", audit_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", audit_mod)
 
         # Should not raise
         SkillsWatcher._audit_failure("myskill", ["myskill/SKILL.md"], "error msg")

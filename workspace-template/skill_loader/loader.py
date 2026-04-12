@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 try:
-    from tools.security_scan import SkillSecurityError, scan_skill_dependencies
+    from builtin_tools.security_scan import SkillSecurityError, scan_skill_dependencies
     _SECURITY_SCAN_AVAILABLE = True
 except ImportError:  # lightweight test environments without tools/ on sys.path
     _SECURITY_SCAN_AVAILABLE = False

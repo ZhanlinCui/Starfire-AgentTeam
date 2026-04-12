@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS_DIR = ROOT / "tools"
+TOOLS_DIR = ROOT / "builtin_tools"
 
 
 def _load_a2a_tools(monkeypatch, *, platform_url="http://platform.test", workspace_id="ws-test"):

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from skills.loader import LoadedSkill
+from skill_loader.loader import LoadedSkill
 from adapters.shared_runtime import build_peer_section
 
 DEFAULT_MEMORY_SNAPSHOT_FILES = ("MEMORY.md", "USER.md")

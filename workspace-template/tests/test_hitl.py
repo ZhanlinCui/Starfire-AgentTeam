@@ -44,24 +44,24 @@ def _load_hitl(monkeypatch):
     monkeypatch.setenv("PLATFORM_URL", "http://platform.test")
     monkeypatch.setenv("WORKSPACE_ID", "ws-test")
 
-    monkeypatch.setitem(sys.modules, "tools.audit", MagicMock(
+    monkeypatch.setitem(sys.modules, "builtin_tools.audit", MagicMock(
         log_event=MagicMock(return_value="trace-id"),
         check_permission=MagicMock(return_value=True),
         get_workspace_roles=MagicMock(return_value=(["operator"], {})),
     ))
-    monkeypatch.setitem(sys.modules, "tools.approval", MagicMock(
+    monkeypatch.setitem(sys.modules, "builtin_tools.approval", MagicMock(
         request_approval=MagicMock(ainvoke=AsyncMock(return_value={"approved": True, "approval_id": "appr-1"})),
     ))
 
     # Remove any cached hitl module
-    monkeypatch.setitem(sys.modules, "tools.hitl", None)  # force reload
-    sys.modules.pop("tools.hitl", None)
+    monkeypatch.setitem(sys.modules, "builtin_tools.hitl", None)  # force reload
+    sys.modules.pop("builtin_tools.hitl", None)
 
     spec = importlib.util.spec_from_file_location(
-        "tools.hitl", ROOT / "tools" / "hitl.py"
+        "builtin_tools.hitl", ROOT / "builtin_tools" / "hitl.py"
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.hitl", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.hitl", mod)
     spec.loader.exec_module(mod)
     return mod
 
@@ -222,7 +222,7 @@ class TestRequiresApproval:
             "approved": True, "approval_id": "appr-ok"
         })
         monkeypatch.setitem(
-            sys.modules, "tools.approval",
+            sys.modules, "builtin_tools.approval",
             MagicMock(request_approval=approval_mock)
         )
 
@@ -247,7 +247,7 @@ class TestRequiresApproval:
             "approved": False, "approval_id": "appr-no", "message": "Denied by human"
         })
         monkeypatch.setitem(
-            sys.modules, "tools.approval",
+            sys.modules, "builtin_tools.approval",
             MagicMock(request_approval=approval_mock)
         )
 
@@ -273,13 +273,13 @@ class TestRequiresApproval:
         audit_mock.get_workspace_roles = MagicMock(return_value=(["admin"], {}))
         audit_mock.check_permission = MagicMock(return_value=True)
         audit_mock.log_event = MagicMock(return_value="tid")
-        monkeypatch.setitem(sys.modules, "tools.audit", audit_mock)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", audit_mock)
 
         approval_called = []
 
         approval_mock = MagicMock()
         approval_mock.ainvoke = AsyncMock(side_effect=lambda _: approval_called.append(1) or {"approved": True})
-        monkeypatch.setitem(sys.modules, "tools.approval",
+        monkeypatch.setitem(sys.modules, "builtin_tools.approval",
                             MagicMock(request_approval=approval_mock))
 
         @mod.requires_approval("Danger", bypass_roles=["admin"])
@@ -302,7 +302,7 @@ class TestRequiresApproval:
 
         approval_mock = MagicMock()
         approval_mock.ainvoke = fake_ainvoke
-        monkeypatch.setitem(sys.modules, "tools.approval",
+        monkeypatch.setitem(sys.modules, "builtin_tools.approval",
                             MagicMock(request_approval=approval_mock))
 
         @mod.requires_approval("Delete record",
@@ -320,7 +320,7 @@ class TestRequiresApproval:
 
         approval_mock = MagicMock()
         approval_mock.ainvoke = AsyncMock(side_effect=ConnectionError("platform down"))
-        monkeypatch.setitem(sys.modules, "tools.approval",
+        monkeypatch.setitem(sys.modules, "builtin_tools.approval",
                             MagicMock(request_approval=approval_mock))
 
         @mod.requires_approval("Risky op")
@@ -584,12 +584,12 @@ class TestRequiresApprovalEdgeCases:
         audit_mock.get_workspace_roles = MagicMock(side_effect=RuntimeError("rbac unavailable"))
         audit_mock.check_permission = MagicMock(return_value=True)
         audit_mock.log_event = MagicMock(return_value="tid")
-        monkeypatch.setitem(sys.modules, "tools.audit", audit_mock)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", audit_mock)
 
         approval_mock = MagicMock()
         approval_mock.ainvoke = AsyncMock(return_value={"approved": True, "approval_id": "a1"})
         monkeypatch.setitem(
-            sys.modules, "tools.approval",
+            sys.modules, "builtin_tools.approval",
             MagicMock(request_approval=approval_mock),
         )
 
@@ -616,7 +616,7 @@ class TestAuditImportErrors:
         mod = _load_hitl(monkeypatch)
 
         # Make tools.audit unavailable so the import inside pause_task fails
-        monkeypatch.setitem(sys.modules, "tools.audit", None)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", None)
 
         reg = mod._TaskPauseRegistry()
         monkeypatch.setattr(mod, "pause_registry", reg)
@@ -638,7 +638,7 @@ class TestAuditImportErrors:
         """resume_task still works even if tools.audit import raises."""
         mod = _load_hitl(monkeypatch)
 
-        monkeypatch.setitem(sys.modules, "tools.audit", None)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", None)
 
         reg = mod._TaskPauseRegistry()
         monkeypatch.setattr(mod, "pause_registry", reg)
@@ -669,7 +669,7 @@ class TestRequiresApprovalReasonTemplate:
 
         approval_mock = MagicMock()
         approval_mock.ainvoke = fake_ainvoke
-        monkeypatch.setitem(sys.modules, "tools.approval",
+        monkeypatch.setitem(sys.modules, "builtin_tools.approval",
                             MagicMock(request_approval=approval_mock))
 
         # reason_template references {nonexistent_field} which is not in kwargs
@@ -723,12 +723,12 @@ class TestPauseTaskTimeoutAuditFails:
                             lambda: mod.HITLConfig(default_timeout=0.01))
 
         # Make tools.audit.log_event raise an exception — only affects the import
-        # inside the timeout handler (from tools.audit import log_event)
+        # inside the timeout handler (from builtin_tools.audit import log_event)
         raising_audit = MagicMock()
         raising_audit.log_event = MagicMock(side_effect=RuntimeError("audit exploded"))
         raising_audit.check_permission = MagicMock(return_value=True)
         raising_audit.get_workspace_roles = MagicMock(return_value=(["operator"], {}))
-        monkeypatch.setitem(sys.modules, "tools.audit", raising_audit)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", raising_audit)
 
         # Should timeout and swallow the audit exception
         result = await mod.pause_task("timeout-audit-fail", "will timeout")

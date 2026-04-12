@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from tools.audit import log_event
+from builtin_tools.audit import log_event
 
 logger = logging.getLogger(__name__)
 

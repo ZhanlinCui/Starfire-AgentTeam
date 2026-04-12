@@ -27,19 +27,19 @@ import pytest
 def real_audit(monkeypatch, tmp_path):
     """Load the real tools/audit.py, bypassing the conftest mock."""
     # Remove mocks so the real module is loaded fresh
-    monkeypatch.delitem(sys.modules, "tools.audit", raising=False)
-    monkeypatch.delitem(sys.modules, "tools.compliance", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.audit", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.compliance", raising=False)
 
     # Point audit log at a temp file so tests don't hit the filesystem
     monkeypatch.setenv("AUDIT_LOG_PATH", str(tmp_path / "audit.jsonl"))
     monkeypatch.setenv("WORKSPACE_ID", "test-ws")
 
     spec = importlib.util.spec_from_file_location(
-        "tools.audit",
-        os.path.join(os.path.dirname(__file__), "..", "tools/audit.py"),
+        "builtin_tools.audit",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools/audit.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.audit", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.audit", mod)
     spec.loader.exec_module(mod)
 
     # Re-read env vars into the module-level constants (they are read at import)
