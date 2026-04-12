@@ -132,6 +132,8 @@ point for "what else is out there."
 10. **More channel adapters** — Slack (OAuth + Events API), Discord (Bot + Gateway), WhatsApp (Cloud API)
 11. **Delegations list endpoint mismatch** — #64. `GET /workspaces/:id/delegations` returns `[]` while the agent's internal `check_delegation_status` shows active/completed delegations. One source of truth.
 12. **YAML-configurable per-agent repo access** — #65. New `workspace_access: none|read_only|read_write` field in `org.yaml` + `:ro` bind-mount for research agents; eliminates the "PM couriers documents to reports" workaround.
+13. **SDK executor swallows subprocess stderr** — #66. `workspace-template/claude_sdk_executor.py` surfaces only "Command failed with exit code 1 / Check stderr output for details" when the `claude` CLI crashes, making every failure opaque. Capture stderr, log at ERROR, include first ~1 KB in the A2A error response. **High priority** — blocked real debugging during PLAN.md coordination on 2026-04-12.
+14. **Agent MCP client defaults to `localhost:8080`** — #67. Inside a workspace container, `localhost` is the container itself, not the platform — so `mcp__starfire__*` tools fail with "platform unreachable." Inject `STARFIRE_URL=${PLATFORM_URL}` into every container at provision time and change the MCP client default to `http://host.docker.internal:8080`. **High priority** — blocks agents from calling platform tools (e.g. PM couldn't restart its own reports).
 
 ---
 
@@ -140,9 +142,10 @@ point for "what else is out there."
 | Stack | Tests | Framework |
 |-------|-------|-----------|
 | Go (platform) | 476 | `go test -race` |
-| Python (workspace) | 990 | pytest |
+| Python (workspace) | 1,040 | pytest |
 | Canvas (frontend) | 345 | Vitest |
-| **Total** | **1,811** | |
+| SDK (python) | 50 | pytest |
+| **Total** | **1,911** | |
 
 E2E: 68/68 comprehensive checks passing, 62 API tests.
 
