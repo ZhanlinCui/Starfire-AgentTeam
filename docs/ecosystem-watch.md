@@ -143,6 +143,76 @@ workspaces.
 
 ---
 
+### gstack — `garrytan/gstack`
+
+**Pitch:** "Use Garry Tan's exact Claude Code setup: 23 opinionated tools
+that serve as CEO, Designer, Eng Manager, Release Manager, Doc Engineer,
+and QA." Claude Code skills bundle, MIT, ~70k⭐ and going viral on X.
+
+**Shape:** A single directory of Markdown slash-command definitions
+installed at `~/.claude/skills/gstack/`, invoked inside one Claude Code
+session: `/office-hours`, `/plan-ceo-review`, `/review`, `/qa`, `/ship`,
+`/land-and-deploy`, `/cso` (security), `/retro`, etc. No services, no
+containers, no DB — just prompts and scripts that the Claude Code CLI
+executes in whatever repo the user has open.
+
+**Overlap with us:**
+- **Same role metaphor as starfire-dev.** Both cast AI work as a cast of
+  roles (CEO, Eng Manager, Designer, Security, QA). The naming overlap is
+  nearly 1:1 with our org template.
+- **Claude Code-native**, Markdown-driven config, "skills" as the unit.
+- Team-mode auto-updates shared repos — same instinct as our org templates.
+
+**Differentiation:** gstack is **sequential, single-session, single-repo.**
+One Claude Code session runs each slash command in turn; the "team" is a
+persona switch, not separate processes. We're **parallel, multi-session,
+hierarchical**: real containers, A2A between siblings, a visual canvas,
+real-time WebSocket updates, schedules, org bundles. gstack has no
+multi-agent coordination, no A2A, no canvas, no workspace persistence
+beyond git — it's a brilliant prompt library, not an orchestration platform.
+
+**Worth borrowing:**
+- **`/retro` command**: generates a weekly retrospective from git history
+  ("140,751 lines added, 362 commits, ~115k net LOC in one week"). Would
+  be a natural addition to our PM agent's toolbox — `commit_memory` +
+  git log synthesis. Cheap win.
+- **`/autoplan` and `/freeze` / `/guard` / `/unfreeze`** for architectural
+  guardrails during a risky change. Maps cleanly onto our approval flow —
+  could turn into a `/freeze` hook that sets a workspace-level policy flag
+  preventing certain tool calls during a migration.
+- **Role-prompt library.** gstack has spent a lot of effort on the CEO /
+  Designer / Eng Manager personas. Even without adopting their runtime,
+  we could lift the prompt text into our starfire-dev system-prompt.md
+  files with attribution. Their CSO (OWASP + STRIDE audit) and Designer
+  (AI-slop detection) personas are both stronger than ours today.
+- **Team-mode auto-update** (throttled once/hour, network-failure-safe,
+  silent) — good pattern for keeping plugins in sync across an org
+  without requiring manual `/plugins/install` calls.
+
+**Terminology collisions:**
+- "Skills" — gstack ships everything as Claude Code skills (filesystem
+  convention `~/.claude/skills/<name>/`). Same filesystem shape as
+  ours AND Hermes AND Holaboss. Four projects, one spec shape — should
+  formalize with [agentskills.io](https://agentskills.io).
+- "Ship / Release" — their `/ship` is a local PR-and-merge flow;
+  nothing to do with our A2A lifecycle.
+- Mentions "OpenClaw" (247k ⭐ claim) as inspiration — tracks with the
+  Hermes entry's note that the OpenClaw name is alive in multiple
+  ecosystems.
+
+**Signals to react to:**
+- If gstack adds multi-session / parallel execution (spawning multiple
+  Claude Code workers and routing between them) → direct competitor
+  with a 70k⭐ head start. Revisit our differentiation messaging.
+- If their `/plan-ceo-review` prompt or `/qa` browser flow becomes an
+  informal standard → copy it into starfire-dev's system prompts.
+- If Garry Tan posts a video deploying gstack on a new use case →
+  high-signal about what "everyone" will ask us to support next week.
+
+**Last reviewed:** 2026-04-12 · **Stars / activity:** ~70k ⭐, pushed yesterday
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
