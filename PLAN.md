@@ -130,6 +130,8 @@ point for "what else is out there."
    - Canvas toggle to enable webhook mode (only when PUBLIC_URL is set)
    - Polling works fine for ≤hundreds of bots; webhook needed at thousands+ scale or for serverless
 10. **More channel adapters** — Slack (OAuth + Events API), Discord (Bot + Gateway), WhatsApp (Cloud API)
+11. **Delegations list endpoint mismatch** — #64. `GET /workspaces/:id/delegations` returns `[]` while the agent's internal `check_delegation_status` shows active/completed delegations. One source of truth.
+12. **YAML-configurable per-agent repo access** — #65. New `workspace_access: none|read_only|read_write` field in `org.yaml` + `:ro` bind-mount for research agents; eliminates the "PM couriers documents to reports" workaround.
 
 ---
 
