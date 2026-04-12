@@ -28,7 +28,7 @@ async def test_route_task_to_team_delegates_preferred_member(monkeypatch):
 
     delegate = MagicMock()
     delegate.ainvoke = AsyncMock(return_value={"ok": True})
-    monkeypatch.setattr(sys.modules["tools.delegation"], "delegate_to_workspace", delegate)
+    monkeypatch.setattr(sys.modules["builtin_tools.delegation"], "delegate_to_workspace", delegate)
 
     result = await coordinator.route_task_to_team(
         "Do the thing",

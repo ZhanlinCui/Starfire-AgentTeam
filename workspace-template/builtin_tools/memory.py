@@ -32,9 +32,9 @@ from types import SimpleNamespace
 from typing import Any
 
 from langchain_core.tools import tool
-from tools.awareness_client import build_awareness_client
-from tools.audit import check_permission, get_workspace_roles, log_event
-from tools.telemetry import MEMORY_QUERY, MEMORY_SCOPE, WORKSPACE_ID_ATTR, get_tracer
+from builtin_tools.awareness_client import build_awareness_client
+from builtin_tools.audit import check_permission, get_workspace_roles, log_event
+from builtin_tools.telemetry import MEMORY_QUERY, MEMORY_SCOPE, WORKSPACE_ID_ATTR, get_tracer
 
 try:  # pragma: no cover - optional runtime dependency in lightweight test envs
     import httpx  # type: ignore

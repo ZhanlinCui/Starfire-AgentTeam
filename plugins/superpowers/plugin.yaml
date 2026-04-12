@@ -4,6 +4,10 @@ description: Agent superpowers — systematic debugging, test-driven development
 author: Starfire
 tags: [debugging, testing, planning, verification]
 
+runtimes:
+  - claude_code
+  - deepagents
+
 skills:
   - executing-plans
   - systematic-debugging

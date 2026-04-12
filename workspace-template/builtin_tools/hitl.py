@@ -317,7 +317,7 @@ def requires_approval(
             active_bypass = bypass_roles if bypass_roles is not None else hitl_cfg.bypass_roles
             if active_bypass:
                 try:
-                    from tools.audit import get_workspace_roles
+                    from builtin_tools.audit import get_workspace_roles
                     roles, _ = get_workspace_roles()
                     if any(r in active_bypass for r in roles):
                         logger.info(
@@ -344,7 +344,7 @@ def requires_approval(
 
             # --- Request approval via approval tool --------------------------
             try:
-                from tools.approval import request_approval
+                from builtin_tools.approval import request_approval
                 approval_result = await request_approval.ainvoke(
                     {"action": action, "reason": reason}
                 )
@@ -391,7 +391,7 @@ async def pause_task(task_id: str, reason: str = "") -> dict:
         reason:  Human-readable description of why the task is pausing.
     """
     try:
-        from tools.audit import log_event
+        from builtin_tools.audit import log_event
         log_event(
             event_type="hitl",
             action="pause",
@@ -412,7 +412,7 @@ async def pause_task(task_id: str, reason: str = "") -> dict:
         result = pause_registry.pop_result(task_id)
         logger.info("HITL: task %s resumed", task_id)
         try:
-            from tools.audit import log_event
+            from builtin_tools.audit import log_event
             log_event(
                 event_type="hitl",
                 action="resume",
@@ -427,7 +427,7 @@ async def pause_task(task_id: str, reason: str = "") -> dict:
     except asyncio.TimeoutError:
         logger.warning("HITL: task %s timed out after %.0fs", task_id, timeout)
         try:
-            from tools.audit import log_event
+            from builtin_tools.audit import log_event
             log_event(
                 event_type="hitl",
                 action="pause",
@@ -465,7 +465,7 @@ async def resume_task(task_id: str, message: str = "") -> dict:
     if success:
         logger.info("HITL: resume signal sent for task %s", task_id)
         try:
-            from tools.audit import log_event
+            from builtin_tools.audit import log_event
             log_event(
                 event_type="hitl",
                 action="resume",

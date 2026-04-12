@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS_DIR = ROOT / "tools"
+TOOLS_DIR = ROOT / "builtin_tools"
 
 
 def _load_module(module_name: str, file_path: Path):
@@ -31,27 +31,27 @@ def memory_modules(monkeypatch):
     monkeypatch.delenv("AWARENESS_URL", raising=False)
     monkeypatch.delenv("AWARENESS_NAMESPACE", raising=False)
 
-    tools_pkg = sys.modules.get("tools")
-    original_tools_memory = sys.modules.pop("tools.memory", None)
-    original_tools_awareness = sys.modules.pop("tools.awareness_client", None)
+    tools_pkg = sys.modules.get("builtin_tools")
+    original_tools_memory = sys.modules.pop("builtin_tools.memory", None)
+    original_tools_awareness = sys.modules.pop("builtin_tools.awareness_client", None)
 
     if tools_pkg is not None:
         monkeypatch.setattr(tools_pkg, "__path__", [str(TOOLS_DIR)], raising=False)
 
-    awareness_client = _load_module("tools.awareness_client", TOOLS_DIR / "awareness_client.py")
-    memory = _load_module("tools.memory", TOOLS_DIR / "memory.py")
+    awareness_client = _load_module("builtin_tools.awareness_client", TOOLS_DIR / "awareness_client.py")
+    memory = _load_module("builtin_tools.memory", TOOLS_DIR / "memory.py")
 
     yield memory, awareness_client
 
     if original_tools_memory is not None:
-        sys.modules["tools.memory"] = original_tools_memory
+        sys.modules["builtin_tools.memory"] = original_tools_memory
     else:
-        sys.modules.pop("tools.memory", None)
+        sys.modules.pop("builtin_tools.memory", None)
 
     if original_tools_awareness is not None:
-        sys.modules["tools.awareness_client"] = original_tools_awareness
+        sys.modules["builtin_tools.awareness_client"] = original_tools_awareness
     else:
-        sys.modules.pop("tools.awareness_client", None)
+        sys.modules.pop("builtin_tools.awareness_client", None)
 
 
 class _FakeResponse:
@@ -238,14 +238,14 @@ def memory_modules_with_mocks(monkeypatch):
     monkeypatch.delenv("AWARENESS_NAMESPACE", raising=False)
 
     # --- audit mock -----------------------------------------------------------
-    mock_audit = ModuleType("tools.audit")
+    mock_audit = ModuleType("builtin_tools.audit")
     mock_audit.check_permission = MagicMock(return_value=True)
     mock_audit.get_workspace_roles = MagicMock(return_value=(["operator"], {}))
     mock_audit.log_event = MagicMock(return_value="trace-id")
-    monkeypatch.setitem(sys.modules, "tools.audit", mock_audit)
+    monkeypatch.setitem(sys.modules, "builtin_tools.audit", mock_audit)
 
     # --- telemetry mock -------------------------------------------------------
-    mock_telemetry = ModuleType("tools.telemetry")
+    mock_telemetry = ModuleType("builtin_tools.telemetry")
     mock_span = MagicMock()
     mock_span.__enter__ = MagicMock(return_value=mock_span)
     mock_span.__exit__ = MagicMock(return_value=False)
@@ -255,28 +255,28 @@ def memory_modules_with_mocks(monkeypatch):
     mock_telemetry.MEMORY_QUERY = "memory.query"
     mock_telemetry.MEMORY_SCOPE = "memory.scope"
     mock_telemetry.WORKSPACE_ID_ATTR = "workspace.id"
-    monkeypatch.setitem(sys.modules, "tools.telemetry", mock_telemetry)
+    monkeypatch.setitem(sys.modules, "builtin_tools.telemetry", mock_telemetry)
 
     # --- awareness_client mock (no client by default) -------------------------
-    mock_awareness_mod = ModuleType("tools.awareness_client")
+    mock_awareness_mod = ModuleType("builtin_tools.awareness_client")
     mock_awareness_mod.build_awareness_client = MagicMock(return_value=None)
-    monkeypatch.setitem(sys.modules, "tools.awareness_client", mock_awareness_mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.awareness_client", mock_awareness_mod)
 
     # Remove any cached memory module so it re-imports with our mocks
-    sys.modules.pop("tools.memory", None)
+    sys.modules.pop("builtin_tools.memory", None)
 
-    tools_pkg = sys.modules.get("tools")
+    tools_pkg = sys.modules.get("builtin_tools")
     if tools_pkg is not None:
         monkeypatch.setattr(tools_pkg, "__path__", [str(TOOLS_DIR)], raising=False)
 
-    memory = _load_module("tools.memory_mocked", TOOLS_DIR / "memory.py")
+    memory = _load_module("builtin_tools.memory_mocked", TOOLS_DIR / "memory.py")
     # Patch module-level constants
     memory.PLATFORM_URL = "http://platform.test"
     memory.WORKSPACE_ID = "ws-test"
 
     yield memory, mock_audit, mock_awareness_mod
 
-    sys.modules.pop("tools.memory_mocked", None)
+    sys.modules.pop("builtin_tools.memory_mocked", None)
 
 
 # ---------------------------------------------------------------------------
@@ -632,7 +632,7 @@ def test_commit_memory_awareness_exception_span_record_fails(memory_modules_with
     memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
 
     # Get the span mock from the telemetry module loaded in sys.modules
-    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_telemetry = sys.modules.get("builtin_tools.telemetry")
     mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
     mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
 
@@ -650,7 +650,7 @@ def test_search_memory_awareness_exception_span_record_fails(memory_modules_with
     from unittest.mock import AsyncMock, MagicMock
     memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
 
-    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_telemetry = sys.modules.get("builtin_tools.telemetry")
     mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
     mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
 
@@ -667,7 +667,7 @@ def test_commit_memory_httpx_exception_span_record_fails(memory_modules_with_moc
     from unittest.mock import MagicMock
     memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
 
-    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_telemetry = sys.modules.get("builtin_tools.telemetry")
     mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
     mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
 
@@ -689,7 +689,7 @@ def test_search_memory_httpx_exception_span_record_fails(memory_modules_with_moc
     from unittest.mock import MagicMock
     memory, mock_audit, mock_awareness_mod = memory_modules_with_mocks
 
-    mock_telemetry = sys.modules.get("tools.telemetry")
+    mock_telemetry = sys.modules.get("builtin_tools.telemetry")
     mock_span = mock_telemetry.get_tracer.return_value.start_as_current_span.return_value.__enter__.return_value
     mock_span.record_exception = MagicMock(side_effect=RuntimeError("span broken"))
 

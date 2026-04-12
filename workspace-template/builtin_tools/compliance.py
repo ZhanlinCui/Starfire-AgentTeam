@@ -56,7 +56,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from tools.audit import log_event
+from builtin_tools.audit import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +324,7 @@ def get_compliance_posture() -> dict[str, Any]:
         }
     """
     try:
-        from tools.audit import _load_workspace_config
+        from builtin_tools.audit import _load_workspace_config
         cfg = _load_workspace_config()
     except Exception:
         cfg = None

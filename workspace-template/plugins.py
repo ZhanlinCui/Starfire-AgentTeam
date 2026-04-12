@@ -37,6 +37,7 @@ class PluginManifest:
     rules: list[str] = field(default_factory=list)
     prompt_fragments: list[str] = field(default_factory=list)
     adapters: dict = field(default_factory=dict)
+    runtimes: list[str] = field(default_factory=list)  # declared supported runtimes
 
 
 @dataclass
@@ -76,6 +77,7 @@ def load_plugin_manifest(plugin_path: str) -> PluginManifest:
             rules=raw.get("rules", []),
             prompt_fragments=raw.get("prompt_fragments", []),
             adapters=raw.get("adapters", {}),
+            runtimes=raw.get("runtimes", []),
         )
     except Exception as e:
         logger.warning("Failed to parse plugin manifest %s: %s", manifest_file, e)

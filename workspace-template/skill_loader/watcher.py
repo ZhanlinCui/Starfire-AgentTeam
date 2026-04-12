@@ -167,7 +167,7 @@ class SkillsWatcher:
             del sys.modules[key]
 
         try:
-            from skills.loader import load_skills
+            from skill_loader.loader import load_skills
             loaded = load_skills(self.config_path, [skill_name])
 
             if loaded:
@@ -179,7 +179,7 @@ class SkillsWatcher:
 
                 # Audit event
                 try:
-                    from tools.audit import log_event
+                    from builtin_tools.audit import log_event
                     log_event(
                         event_type="skill_reload",
                         action="reload",
@@ -213,7 +213,7 @@ class SkillsWatcher:
     @staticmethod
     def _audit_failure(skill_name: str, changed_files: list[str], error: str) -> None:
         try:
-            from tools.audit import log_event
+            from builtin_tools.audit import log_event
             log_event(
                 event_type="skill_reload",
                 action="reload",

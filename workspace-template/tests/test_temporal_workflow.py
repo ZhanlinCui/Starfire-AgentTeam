@@ -70,13 +70,13 @@ def real_temporal_with_temporalio(monkeypatch):
     mock_shared.extract_history = MagicMock(return_value=[("human", "prior msg")])
     monkeypatch.setitem(sys.modules, "adapters.shared_runtime", mock_shared)
 
-    monkeypatch.delitem(sys.modules, "tools.temporal_workflow", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.temporal_workflow", raising=False)
     spec = importlib.util.spec_from_file_location(
-        "tools.temporal_workflow_with_mocks",
-        os.path.join(os.path.dirname(__file__), "..", "tools", "temporal_workflow.py"),
+        "builtin_tools.temporal_workflow_with_mocks",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools", "temporal_workflow.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.temporal_workflow_with_mocks", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.temporal_workflow_with_mocks", mod)
     spec.loader.exec_module(mod)
     mod._global_wrapper = None
     mod._task_registry.clear()
@@ -91,7 +91,7 @@ def real_temporal_with_temporalio(monkeypatch):
 @pytest.fixture
 def real_temporal(monkeypatch):
     # Remove any existing temporal module
-    monkeypatch.delitem(sys.modules, "tools.temporal_workflow", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.temporal_workflow", raising=False)
     # Ensure temporalio is not available
     monkeypatch.setitem(sys.modules, "temporalio", None)
     monkeypatch.setitem(sys.modules, "temporalio.activity", None)
@@ -105,11 +105,11 @@ def real_temporal(monkeypatch):
     monkeypatch.setitem(sys.modules, "adapters.shared_runtime", mock_shared)
 
     spec = importlib.util.spec_from_file_location(
-        "tools.temporal_workflow",
-        os.path.join(os.path.dirname(__file__), "..", "tools", "temporal_workflow.py"),
+        "builtin_tools.temporal_workflow",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools", "temporal_workflow.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.temporal_workflow", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.temporal_workflow", mod)
     spec.loader.exec_module(mod)
     # Reset global wrapper
     mod._global_wrapper = None

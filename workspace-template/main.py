@@ -19,10 +19,10 @@ from adapters import get_adapter, AdapterConfig
 from config import load_config
 from heartbeat import HeartbeatLoop
 from preflight import run_preflight, render_preflight_report
-from tools.awareness_client import get_awareness_config
+from builtin_tools.awareness_client import get_awareness_config
 import uuid as _uuid
 
-from tools.telemetry import setup_telemetry, make_trace_middleware
+from builtin_tools.telemetry import setup_telemetry, make_trace_middleware
 from policies.namespaces import resolve_awareness_namespace
 
 
@@ -62,7 +62,7 @@ async def main():  # pragma: no cover
         print(f"Awareness enabled for namespace: {awareness_namespace}")
 
     # 1.5  Initialise governance adapter (no-op if disabled or package absent)
-    from tools.governance import initialize_governance
+    from builtin_tools.governance import initialize_governance
     if config.governance.enabled:
         await initialize_governance(config.governance)
         print(f"Governance: Microsoft Agent Governance Toolkit enabled (mode={config.governance.policy_mode})")
@@ -111,7 +111,7 @@ async def main():  # pragma: no cover
     # co-located Temporal worker as a background asyncio task.
     # No-op with a warning log if Temporal is unreachable or temporalio
     # is not installed — all tasks fall back to direct execution transparently.
-    from tools.temporal_workflow import create_wrapper as _create_temporal_wrapper
+    from builtin_tools.temporal_workflow import create_wrapper as _create_temporal_wrapper
     temporal_wrapper = _create_temporal_wrapper()
     await temporal_wrapper.start()
 
@@ -199,7 +199,7 @@ async def main():  # pragma: no cover
     # back into the adapter so the next A2A request uses the updated tools.
     if config.skills:
         try:
-            from skills.watcher import SkillsWatcher
+            from skill_loader.watcher import SkillsWatcher
 
             def _on_skill_reload(updated_skill):
                 """Rebuild the LangGraph agent when a skill changes in-place."""
@@ -212,10 +212,10 @@ async def main():  # pragma: no cover
                 ]
                 # Rebuild the agent's tool list from updated skills
                 if hasattr(adapter, "all_tools") and hasattr(adapter, "system_prompt"):
-                    from tools.approval import request_approval
-                    from tools.delegation import delegate_to_workspace
-                    from tools.memory import commit_memory, search_memory
-                    from tools.sandbox import run_code
+                    from builtin_tools.approval import request_approval
+                    from builtin_tools.delegation import delegate_to_workspace
+                    from builtin_tools.memory import commit_memory, search_memory
+                    from builtin_tools.sandbox import run_code
                     base_tools = [delegate_to_workspace, request_approval,
                                   commit_memory, search_memory, run_code]
                     skill_tools = []

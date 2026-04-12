@@ -78,7 +78,7 @@ def _mock_build_children_description(children):
 # All patches needed for _common_setup
 _SETUP_PATCHES = {
     "plugins.load_plugins": _mock_load_plugins,
-    "skills.loader.load_skills": _mock_load_skills,
+    "skill_loader.loader.load_skills": _mock_load_skills,
     "coordinator.get_children": _mock_get_children,
     "coordinator.get_parent_context": _mock_get_parent_context,
     "coordinator.build_children_description": _mock_build_children_description,

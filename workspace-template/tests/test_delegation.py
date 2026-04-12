@@ -86,17 +86,17 @@ def delegation_mocks(monkeypatch):
     for attr in ["A2A_SOURCE_WORKSPACE", "A2A_TARGET_WORKSPACE", "A2A_TASK_ID", "WORKSPACE_ID_ATTR"]:
         setattr(mock_telemetry, attr, attr)
 
-    monkeypatch.setitem(sys.modules, "tools.audit", mock_audit)
-    monkeypatch.setitem(sys.modules, "tools.telemetry", mock_telemetry)
+    monkeypatch.setitem(sys.modules, "builtin_tools.audit", mock_audit)
+    monkeypatch.setitem(sys.modules, "builtin_tools.telemetry", mock_telemetry)
     monkeypatch.setenv("WORKSPACE_ID", "ws-self")
     monkeypatch.setenv("PLATFORM_URL", "http://test:8080")
 
     spec = importlib.util.spec_from_file_location(
-        "tools.delegation",
-        os.path.join(os.path.dirname(__file__), "..", "tools", "delegation.py"),
+        "builtin_tools.delegation",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools", "delegation.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.delegation", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.delegation", mod)
     spec.loader.exec_module(mod)
 
     mod.DELEGATION_RETRY_ATTEMPTS = 2

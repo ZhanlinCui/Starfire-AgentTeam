@@ -32,17 +32,17 @@ def real_compliance(monkeypatch, tmp_path):
     mock_audit = MagicMock()
     mock_audit.log_event = MagicMock(return_value="trace-123")
     mock_audit._load_workspace_config = MagicMock(return_value=None)
-    monkeypatch.setitem(sys.modules, "tools.audit", mock_audit)
+    monkeypatch.setitem(sys.modules, "builtin_tools.audit", mock_audit)
 
     # Remove any stale compliance module so we always reload
-    monkeypatch.delitem(sys.modules, "tools.compliance", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.compliance", raising=False)
 
     spec = importlib.util.spec_from_file_location(
-        "tools.compliance",
-        os.path.join(os.path.dirname(__file__), "..", "tools/compliance.py"),
+        "builtin_tools.compliance",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools/compliance.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.compliance", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.compliance", mod)
     spec.loader.exec_module(mod)
     return mod, mock_audit
 
@@ -273,7 +273,7 @@ class TestGetCompliancePosture:
         """Returns a dict with note='config unavailable' when config load fails."""
         mod, mock_audit = real_compliance
         # _load_workspace_config already returns None in the fixture (mock_audit)
-        # but get_compliance_posture imports it locally from tools.audit
+        # but get_compliance_posture imports it locally from builtin_tools.audit
         mock_audit._load_workspace_config = MagicMock(return_value=None)
 
         result = mod.get_compliance_posture()

@@ -5,7 +5,7 @@ requiring a real E2B_API_KEY or network access in CI.
 
 Design notes:
 - sandbox.py lives in tools/ alongside other tool modules.
-- conftest.py stubs sys.modules["tools"] so a plain `import tools.sandbox`
+- conftest.py stubs sys.modules["tools"] so a plain `import builtin_tools.sandbox`
   would hit the stub. We load sandbox.py via its file path instead.
 - SANDBOX_BACKEND is captured as a module-level constant on load, so
   _load_sandbox() must be called with it set.
@@ -26,7 +26,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-_SANDBOX_PATH = Path(__file__).parent.parent / "tools" / "sandbox.py"
+_SANDBOX_PATH = Path(__file__).parent.parent / "builtin_tools" / "sandbox.py"
 
 
 def _load_sandbox(sandbox_backend: str = "subprocess", extra_env: dict | None = None):

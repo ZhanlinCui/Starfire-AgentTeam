@@ -48,21 +48,21 @@ def _load_governance_module(monkeypatch, mock_audit, mock_telemetry, with_agent_
     tools_mod = MagicMock()
     tools_mod.audit = mock_audit
     monkeypatch.setitem(sys.modules, "tools", tools_mod)
-    monkeypatch.setitem(sys.modules, "tools.audit", mock_audit)
-    monkeypatch.setitem(sys.modules, "tools.telemetry", mock_telemetry)
+    monkeypatch.setitem(sys.modules, "builtin_tools.audit", mock_audit)
+    monkeypatch.setitem(sys.modules, "builtin_tools.telemetry", mock_telemetry)
 
     if not with_agent_os:
         # Ensure agent_os is NOT installed (graceful degradation)
         monkeypatch.setitem(sys.modules, "agent_os", None)
         monkeypatch.setitem(sys.modules, "agent_os.policies", None)
 
-    monkeypatch.delitem(sys.modules, "tools.governance", raising=False)
+    monkeypatch.delitem(sys.modules, "builtin_tools.governance", raising=False)
     spec = importlib.util.spec_from_file_location(
-        "tools.governance",
-        os.path.join(os.path.dirname(__file__), "..", "tools", "governance.py"),
+        "builtin_tools.governance",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools", "governance.py"),
     )
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "tools.governance", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.governance", mod)
     spec.loader.exec_module(mod)
     # Reset global singleton
     mod._adapter = None

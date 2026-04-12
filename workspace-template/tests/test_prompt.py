@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from skills.loader import LoadedSkill, SkillMetadata
+from skill_loader.loader import LoadedSkill, SkillMetadata
 from prompt import build_system_prompt, get_peer_capabilities
 
 

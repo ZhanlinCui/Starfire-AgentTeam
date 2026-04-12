@@ -47,7 +47,7 @@ from adapters.shared_runtime import (
     brief_task,
     set_current_task,
 )
-from tools.telemetry import (
+from builtin_tools.telemetry import (
     A2A_TASK_ID,
     GEN_AI_OPERATION_NAME,
     GEN_AI_REQUEST_MODEL,
@@ -68,7 +68,7 @@ _WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "unknown")
 # ---------------------------------------------------------------------------
 
 try:
-    from tools.compliance import (
+    from builtin_tools.compliance import (
         AgencyTracker,
         ExcessiveAgencyError,
         PromptInjectionError,
@@ -157,7 +157,7 @@ class LangGraphA2AExecutor(AgentExecutor):
         # Falls back silently to _core_execute() on any error or if Temporal
         # is unavailable, so the client always receives a response.
         try:
-            from tools.temporal_workflow import get_wrapper as _get_temporal_wrapper
+            from builtin_tools.temporal_workflow import get_wrapper as _get_temporal_wrapper
 
             _tw = _get_temporal_wrapper()
             if _tw is not None and _tw.is_available():
@@ -335,7 +335,7 @@ class LangGraphA2AExecutor(AgentExecutor):
                 if _COMPLIANCE_AVAILABLE and _compliance_cfg and _compliance_cfg.mode == "owasp_agentic":
                     final_text, _pii_types = _redact_pii(final_text)
                     if _pii_types:
-                        from tools.audit import log_event as _audit_log
+                        from builtin_tools.audit import log_event as _audit_log
                         _audit_log(
                             event_type="compliance",
                             action="pii.redact",

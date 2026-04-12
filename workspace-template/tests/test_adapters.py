@@ -1427,7 +1427,7 @@ class TestCommonSetupMissingPaths:
         mock_plugins.rules = []
 
         with patch("plugins.load_plugins", return_value=mock_plugins), \
-             patch("skills.loader.load_skills", return_value=[]), \
+             patch("skill_loader.loader.load_skills", return_value=[]), \
              patch("coordinator.get_children", return_value=[]), \
              patch("coordinator.get_parent_context", return_value=[]), \
              patch("coordinator.build_children_description", return_value=""), \
@@ -1466,7 +1466,7 @@ class TestCommonSetupMissingPaths:
             return []
 
         with patch("plugins.load_plugins", return_value=mock_plugins), \
-             patch("skills.loader.load_skills", side_effect=fake_load_skills), \
+             patch("skill_loader.loader.load_skills", side_effect=fake_load_skills), \
              patch("coordinator.get_children", return_value=[]), \
              patch("coordinator.get_parent_context", return_value=[]), \
              patch("coordinator.build_children_description", return_value=""), \
@@ -1508,7 +1508,7 @@ class TestCommonSetupMissingPaths:
             return [fake_workspace_skill]
 
         with patch("plugins.load_plugins", return_value=mock_plugins), \
-             patch("skills.loader.load_skills", side_effect=fake_load_skills), \
+             patch("skill_loader.loader.load_skills", side_effect=fake_load_skills), \
              patch("coordinator.get_children", return_value=[]), \
              patch("coordinator.get_parent_context", return_value=[]), \
              patch("coordinator.build_children_description", return_value=""), \
@@ -1543,7 +1543,7 @@ class TestCommonSetupMissingPaths:
         fake_route_tool.name = "route_task_to_team"
 
         with patch("plugins.load_plugins", return_value=mock_plugins), \
-             patch("skills.loader.load_skills", return_value=[]), \
+             patch("skill_loader.loader.load_skills", return_value=[]), \
              patch("coordinator.get_children", return_value=children), \
              patch("coordinator.get_parent_context", return_value=[]), \
              patch("coordinator.build_children_description", return_value="## Team\n- Worker"), \

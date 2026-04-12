@@ -38,12 +38,12 @@ def _load_approval(monkeypatch, *, platform_url="http://platform.test",
     import importlib.util as ilu
     import os
     spec = ilu.spec_from_file_location(
-        "tools.approval",
-        os.path.join(os.path.dirname(__file__), "..", "tools", "approval.py"),
+        "builtin_tools.approval",
+        os.path.join(os.path.dirname(__file__), "..", "builtin_tools", "approval.py"),
     )
     mod = ilu.module_from_spec(spec)
     # Use setitem so monkeypatch restores the original mock after the test
-    monkeypatch.setitem(sys.modules, "tools.approval", mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.approval", mod)
     spec.loader.exec_module(mod)
     return mod
 
@@ -556,18 +556,18 @@ class TestRequestApprovalRBACDeny:
             monkeypatch.setattr(sys.modules["langchain_core.tools"], "tool", lambda f: f, raising=False)
 
         # Build a mock tools.audit that denies the "approve" permission
-        mock_audit_mod = ModuleType("tools.audit")
+        mock_audit_mod = ModuleType("builtin_tools.audit")
         mock_audit_mod.check_permission = MagicMock(return_value=False)
         mock_audit_mod.get_workspace_roles = MagicMock(return_value=(["read-only"], {}))
         mock_audit_mod.log_event = MagicMock(return_value="trace-rbac")
-        monkeypatch.setitem(sys.modules, "tools.audit", mock_audit_mod)
+        monkeypatch.setitem(sys.modules, "builtin_tools.audit", mock_audit_mod)
 
         spec = ilu.spec_from_file_location(
-            "tools.approval",
-            os.path.join(os.path.dirname(__file__), "..", "tools", "approval.py"),
+            "builtin_tools.approval",
+            os.path.join(os.path.dirname(__file__), "..", "builtin_tools", "approval.py"),
         )
         mod2 = ilu.module_from_spec(spec)
-        monkeypatch.setitem(sys.modules, "tools.approval", mod2)
+        monkeypatch.setitem(sys.modules, "builtin_tools.approval", mod2)
         spec.loader.exec_module(mod2)
 
         result = asyncio.run(mod2.request_approval("destroy everything", "chaos"))

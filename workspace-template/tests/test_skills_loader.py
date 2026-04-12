@@ -5,7 +5,7 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
-from skills.loader import (
+from skill_loader.loader import (
     LoadedSkill,
     SkillMetadata,
     parse_skill_frontmatter,
@@ -95,7 +95,7 @@ def test_load_skills_with_temp_dir(tmp_path):
     # load_skill_tools will try to import langchain_core — mock it
     from unittest.mock import patch
 
-    with patch("skills.loader.load_skill_tools", return_value=[]):
+    with patch("skill_loader.loader.load_skill_tools", return_value=[]):
         loaded = load_skills(str(tmp_path), ["my-skill"])
 
     assert len(loaded) == 1
@@ -115,7 +115,7 @@ def test_load_skills_missing_skill_md(tmp_path):
 
     from unittest.mock import patch
 
-    with patch("skills.loader.load_skill_tools", return_value=[]):
+    with patch("skill_loader.loader.load_skill_tools", return_value=[]):
         loaded = load_skills(str(tmp_path), ["no-md"])
 
     assert len(loaded) == 0
@@ -133,7 +133,7 @@ def test_load_skills_multiple(tmp_path):
 
     from unittest.mock import patch
 
-    with patch("skills.loader.load_skill_tools", return_value=[]):
+    with patch("skill_loader.loader.load_skill_tools", return_value=[]):
         loaded = load_skills(str(tmp_path), ["alpha", "beta"])
 
     assert len(loaded) == 2
@@ -151,8 +151,8 @@ def test_security_scan_available_flag_true(monkeypatch):
     import importlib
 
     # Save the original module object so we can restore it fully
-    original_loader_module = sys.modules.get("skills.loader")
-    skills_pkg = sys.modules.get("skills")
+    original_loader_module = sys.modules.get("skill_loader.loader")
+    skills_pkg = sys.modules.get("skill_loader")
 
     # Create a fake tools.security_scan module with required exports
     fake_tools_mod = ModuleType("tools")
@@ -160,31 +160,31 @@ def test_security_scan_available_flag_true(monkeypatch):
     class FakeSkillSecurityError(Exception):
         pass
 
-    fake_security_mod = ModuleType("tools.security_scan")
+    fake_security_mod = ModuleType("builtin_tools.security_scan")
     fake_security_mod.SkillSecurityError = FakeSkillSecurityError
     fake_security_mod.scan_skill_dependencies = MagicMock()
 
     # Inject into sys.modules BEFORE reimporting skills.loader
     monkeypatch.setitem(sys.modules, "tools", fake_tools_mod)
-    monkeypatch.setitem(sys.modules, "tools.security_scan", fake_security_mod)
+    monkeypatch.setitem(sys.modules, "builtin_tools.security_scan", fake_security_mod)
 
     # Remove skills.loader from sys.modules so it re-executes the module-level try/except
-    monkeypatch.delitem(sys.modules, "skills.loader", raising=False)
+    monkeypatch.delitem(sys.modules, "skill_loader.loader", raising=False)
 
     try:
         # Reimport — line 13 (_SECURITY_SCAN_AVAILABLE = True) should now execute
-        import skills.loader as reloaded_loader
+        import skill_loader.loader as reloaded_loader
         assert reloaded_loader._SECURITY_SCAN_AVAILABLE is True
     finally:
         # ALWAYS restore the original module fully (including the package attribute)
-        # to avoid contaminating subsequent tests that do `import skills.loader`
+        # to avoid contaminating subsequent tests that do `import skill_loader.loader`
         if original_loader_module is not None:
-            sys.modules["skills.loader"] = original_loader_module
-            # Also restore the skills package attribute so `import skills.loader` returns original
+            sys.modules["skill_loader.loader"] = original_loader_module
+            # Also restore the skills package attribute so `import skill_loader.loader` returns original
             if skills_pkg is not None:
                 skills_pkg.loader = original_loader_module
         else:
-            monkeypatch.delitem(sys.modules, "skills.loader", raising=False)
+            monkeypatch.delitem(sys.modules, "skill_loader.loader", raising=False)
 
 
 # ---------- load_skill_tools() (lines 52-77) ----------
@@ -192,7 +192,7 @@ def test_security_scan_available_flag_true(monkeypatch):
 
 def test_load_skill_tools_returns_empty_for_missing_dir(tmp_path):
     """load_skill_tools returns [] when tools dir does not exist."""
-    from skills.loader import load_skill_tools
+    from skill_loader.loader import load_skill_tools
 
     # Mock langchain_core.tools so import works even without the real package
     fake_lc = ModuleType("langchain_core")
@@ -215,7 +215,7 @@ def test_load_skill_tools_returns_empty_for_missing_dir(tmp_path):
 
 def test_load_skill_tools_skips_underscore_files(tmp_path):
     """load_skill_tools skips files starting with _."""
-    from skills.loader import load_skill_tools
+    from skill_loader.loader import load_skill_tools
 
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
@@ -242,7 +242,7 @@ def test_load_skill_tools_skips_underscore_files(tmp_path):
 
 def test_load_skill_tools_loads_basetool_instances(tmp_path):
     """load_skill_tools returns BaseTool instances found in tool files."""
-    from skills.loader import load_skill_tools
+    from skill_loader.loader import load_skill_tools
 
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
@@ -286,7 +286,7 @@ def test_load_skill_tools_loads_basetool_instances(tmp_path):
 
 def test_load_skill_tools_handles_invalid_spec(tmp_path):
     """load_skill_tools skips files where spec_from_file_location returns None."""
-    from skills.loader import load_skill_tools
+    from skill_loader.loader import load_skill_tools
 
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
@@ -312,7 +312,7 @@ def test_load_skill_tools_handles_invalid_spec(tmp_path):
 
 def test_load_skill_tools_appends_basetool_instances(tmp_path):
     """load_skill_tools appends attributes that are BaseTool instances (line 75)."""
-    from skills.loader import load_skill_tools
+    from skill_loader.loader import load_skill_tools
 
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
@@ -377,7 +377,7 @@ def test_load_skills_with_security_scan_available_warn_mode(tmp_path, monkeypatc
 
     scan_calls = []
 
-    import skills.loader as loader_module
+    import skill_loader.loader as loader_module
 
     monkeypatch.setattr(loader_module, "_SECURITY_SCAN_AVAILABLE", True)
 
@@ -397,7 +397,7 @@ def test_load_skills_with_security_scan_available_warn_mode(tmp_path, monkeypatc
     fake_cfg = WorkspaceConfig()
     fake_cfg.security_scan = SecurityScanConfig(mode="warn")
 
-    with patch("skills.loader.load_skill_tools", return_value=[]):
+    with patch("skill_loader.loader.load_skill_tools", return_value=[]):
         with patch("config.load_config", return_value=fake_cfg):
             loaded = loader_module.load_skills(str(tmp_path), ["my-skill"])
 
@@ -415,7 +415,7 @@ def test_load_skills_security_scan_block_mode_skips_skill(tmp_path, monkeypatch)
         "---\nname: Blocked\ndescription: Unsafe\n---\nInstructions."
     )
 
-    import skills.loader as loader_module
+    import skill_loader.loader as loader_module
 
     monkeypatch.setattr(loader_module, "_SECURITY_SCAN_AVAILABLE", True)
 
@@ -432,7 +432,7 @@ def test_load_skills_security_scan_block_mode_skips_skill(tmp_path, monkeypatch)
     fake_cfg = WorkspaceConfig()
     fake_cfg.security_scan = SecurityScanConfig(mode="block")
 
-    with patch("skills.loader.load_skill_tools", return_value=[]):
+    with patch("skill_loader.loader.load_skill_tools", return_value=[]):
         with patch("config.load_config", return_value=fake_cfg):
             loaded = loader_module.load_skills(str(tmp_path), ["blocked-skill"])
 
@@ -450,7 +450,7 @@ def test_load_skills_security_scan_off_mode_skips_scan(tmp_path, monkeypatch):
 
     scan_calls = []
 
-    import skills.loader as loader_module
+    import skill_loader.loader as loader_module
     monkeypatch.setattr(loader_module, "_SECURITY_SCAN_AVAILABLE", True)
 
     def tracking_scan(skill_name, skill_path, mode):
@@ -466,7 +466,7 @@ def test_load_skills_security_scan_off_mode_skips_scan(tmp_path, monkeypatch):
     fake_cfg = WorkspaceConfig()
     fake_cfg.security_scan = SecurityScanConfig(mode="off")
 
-    with patch("skills.loader.load_skill_tools", return_value=[]):
+    with patch("skill_loader.loader.load_skill_tools", return_value=[]):
         with patch("config.load_config", return_value=fake_cfg):
             loaded = loader_module.load_skills(str(tmp_path), ["my-skill"])
 
@@ -485,7 +485,7 @@ def test_load_skills_config_load_error_defaults_to_warn(tmp_path, monkeypatch):
 
     scan_modes = []
 
-    import skills.loader as loader_module
+    import skill_loader.loader as loader_module
     monkeypatch.setattr(loader_module, "_SECURITY_SCAN_AVAILABLE", True)
 
     def tracking_scan(skill_name, skill_path, mode):
@@ -497,7 +497,7 @@ def test_load_skills_config_load_error_defaults_to_warn(tmp_path, monkeypatch):
     monkeypatch.setattr(loader_module, "scan_skill_dependencies", tracking_scan, raising=False)
     monkeypatch.setattr(loader_module, "SkillSecurityError", FakeSkillSecurityError, raising=False)
 
-    with patch("skills.loader.load_skill_tools", return_value=[]):
+    with patch("skill_loader.loader.load_skill_tools", return_value=[]):
         with patch("config.load_config", side_effect=FileNotFoundError("no config")):
             loaded = loader_module.load_skills(str(tmp_path), ["my-skill"])
 

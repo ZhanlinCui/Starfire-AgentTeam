@@ -28,9 +28,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy runtime code
 COPY *.py ./
 COPY entrypoint.sh ./
-COPY skills/ ./skills/
-COPY tools/ ./tools/
+COPY skill_loader/ ./skill_loader/
+COPY builtin_tools/ ./builtin_tools/
 COPY adapters/ ./adapters/
+COPY plugins_registry/ ./plugins_registry/
 COPY policies/ ./policies/
 
 # Create CLI aliases
