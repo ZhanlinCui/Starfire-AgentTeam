@@ -198,3 +198,123 @@ async def test_install_skips_skill_when_already_present(tmp_path: Path, full_plu
     await AgentskillsAdaptor("my-plugin", "claude_code").install(_make_ctx(configs, full_plugin))
     # Pre-existing content preserved.
     assert (configs / "skills" / "my-skill" / "SKILL.md").read_text() == "# USER'S OWN"
+
+
+# ---------------------------------------------------------------------------
+# memory_filename plumbing — AgentskillsAdaptor must honour a non-default
+# memory file (for runtimes that read AGENTS.md, .windsurfrules, etc.).
+# ---------------------------------------------------------------------------
+
+
+async def test_agentskills_adaptor_honours_non_default_memory_filename(tmp_path: Path, full_plugin: Path):
+    """Overriding ctx.memory_filename routes rule/fragment writes there."""
+    configs = tmp_path / "configs"
+    configs.mkdir()
+
+    written = {}
+    def _append(filename: str, content: str) -> None:
+        written[filename] = content
+
+    ctx = InstallContext(
+        configs_dir=configs,
+        workspace_id="ws",
+        runtime="custom_runtime",
+        plugin_root=full_plugin,
+        memory_filename="AGENTS.md",   # non-default
+        append_to_memory=_append,
+        logger=logging.getLogger("test"),
+    )
+
+    await AgentskillsAdaptor("my-plugin", "custom_runtime").install(ctx)
+
+    # Memory writes went to AGENTS.md, not CLAUDE.md.
+    assert "AGENTS.md" in written
+    assert "CLAUDE.md" not in written
+    assert "# Plugin: my-plugin /" in written["AGENTS.md"]
+
+
+async def test_agentskills_adaptor_uninstall_honours_non_default_memory_filename(tmp_path: Path, full_plugin: Path):
+    """Uninstall strips markers from the same non-default memory file."""
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    (configs / "AGENTS.md").write_text(
+        "# User content\n\n# Plugin: my-plugin / rule: r1.md\n\n- rule\n"
+    )
+
+    ctx = InstallContext(
+        configs_dir=configs,
+        workspace_id="ws",
+        runtime="custom_runtime",
+        plugin_root=full_plugin,
+        memory_filename="AGENTS.md",
+        logger=logging.getLogger("test"),
+    )
+
+    await AgentskillsAdaptor("my-plugin", "custom_runtime").uninstall(ctx)
+
+    remaining = (configs / "AGENTS.md").read_text()
+    assert "# User content" in remaining
+    assert "# Plugin: my-plugin /" not in remaining
+    # CLAUDE.md must not have been created as a side effect.
+    assert not (configs / "CLAUDE.md").exists()
+
+
+def test_install_context_default_memory_filename_is_claude_md():
+    """Regression check: the default plumbing picks CLAUDE.md so existing
+    runtimes (Claude Code, DeepAgents) keep working without change."""
+    from plugins_registry.protocol import DEFAULT_MEMORY_FILENAME
+    assert DEFAULT_MEMORY_FILENAME == "CLAUDE.md"
+
+    ctx = InstallContext(
+        configs_dir=Path("/tmp"),
+        workspace_id="w",
+        runtime="claude_code",
+        plugin_root=Path("/tmp"),
+    )
+    assert ctx.memory_filename == "CLAUDE.md"
+
+
+async def test_base_adapter_memory_filename_override_flows_through_install(tmp_path: Path):
+    """End-to-end: a BaseAdapter subclass overriding memory_filename() has
+    its value populated into ctx.memory_filename by install_plugins_via_registry.
+    Plumbs W2 all the way from BaseAdapter hook down to AgentskillsAdaptor.install."""
+    from types import SimpleNamespace
+    from adapters.base import BaseAdapter, AdapterConfig
+
+    class _CustomRuntime(BaseAdapter):
+        @staticmethod
+        def name() -> str: return "custom_runtime"
+        @staticmethod
+        def display_name() -> str: return "Custom"
+        @staticmethod
+        def description() -> str: return "test runtime"
+        def memory_filename(self) -> str: return "AGENTS.md"
+        async def setup(self, config): return None
+        async def create_executor(self, config): return None
+
+    # Plant a plugin with our registered claude_code adapter (runtime name
+    # coercion: custom_runtime has no adapter → raw-drop, but AgentskillsAdaptor
+    # is used when we ship adapters/custom_runtime.py).
+    plugin_root = tmp_path / "plugins" / "my-plugin"
+    (plugin_root / "rules").mkdir(parents=True)
+    (plugin_root / "rules" / "r.md").write_text("- rule")
+    (plugin_root / "adapters").mkdir()
+    (plugin_root / "adapters" / "custom_runtime.py").write_text(
+        "from plugins_registry.builtins import AgentskillsAdaptor as Adaptor\n"
+    )
+
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    cfg = AdapterConfig(
+        model="x", config_path=str(configs), workspace_id="ws",
+    )
+    plugins = SimpleNamespace(
+        plugins=[SimpleNamespace(name="my-plugin", path=str(plugin_root))],
+    )
+
+    await _CustomRuntime().install_plugins_via_registry(cfg, plugins)
+
+    # The hook value (AGENTS.md) propagated into the memory file path.
+    assert (configs / "AGENTS.md").exists()
+    assert "# Plugin: my-plugin /" in (configs / "AGENTS.md").read_text()
+    assert not (configs / "CLAUDE.md").exists()

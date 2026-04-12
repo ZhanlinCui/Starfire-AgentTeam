@@ -88,12 +88,12 @@ def validate_manifest(path: str | Path) -> list[str]:
 # agentskills.io spec — SKILL.md validation
 # ---------------------------------------------------------------------------
 
-# Spec: https://agentskills.io/specification
-# name: 1-64 chars, lowercase alphanumeric + hyphens, no leading/trailing/consecutive hyphens
-_SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-_SKILL_NAME_MAX = 64
-_SKILL_DESC_MAX = 1024
-_SKILL_COMPAT_MAX = 500
+# Spec limits — public so tooling/tests/docs can import them rather than
+# duplicate magic numbers. Source: https://agentskills.io/specification
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+SKILL_NAME_MAX = 64
+SKILL_DESC_MAX = 1024
+SKILL_COMPAT_MAX = 500
 
 
 def parse_skill_md(path: str | Path) -> tuple[dict[str, Any], str, list[str]]:
@@ -146,9 +146,9 @@ def validate_skill(path: str | Path) -> list[str]:
     elif not isinstance(name, str):
         errors.append(f"`name` must be a string, got {type(name).__name__}")
     else:
-        if len(name) > _SKILL_NAME_MAX:
-            errors.append(f"`name` length must be ≤{_SKILL_NAME_MAX}, got {len(name)}")
-        if not _SKILL_NAME_RE.match(name):
+        if len(name) > SKILL_NAME_MAX:
+            errors.append(f"`name` length must be ≤{SKILL_NAME_MAX}, got {len(name)}")
+        if not SKILL_NAME_RE.match(name):
             errors.append(
                 f"`name` '{name}' must be lowercase alphanumeric with single hyphens, "
                 f"no leading/trailing/consecutive hyphens"
@@ -165,17 +165,17 @@ def validate_skill(path: str | Path) -> list[str]:
         errors.append("`description` is required in SKILL.md frontmatter")
     elif not isinstance(desc, str):
         errors.append(f"`description` must be a string, got {type(desc).__name__}")
-    elif len(desc) > _SKILL_DESC_MAX:
-        errors.append(f"`description` length must be ≤{_SKILL_DESC_MAX}, got {len(desc)}")
+    elif len(desc) > SKILL_DESC_MAX:
+        errors.append(f"`description` length must be ≤{SKILL_DESC_MAX}, got {len(desc)}")
 
     # compatibility — optional, ≤500 chars
     compat = fm.get("compatibility")
     if compat is not None:
         if not isinstance(compat, str):
             errors.append(f"`compatibility` must be a string, got {type(compat).__name__}")
-        elif len(compat) > _SKILL_COMPAT_MAX:
+        elif len(compat) > SKILL_COMPAT_MAX:
             errors.append(
-                f"`compatibility` length must be ≤{_SKILL_COMPAT_MAX}, got {len(compat)}"
+                f"`compatibility` length must be ≤{SKILL_COMPAT_MAX}, got {len(compat)}"
             )
 
     # metadata — optional, string→string map

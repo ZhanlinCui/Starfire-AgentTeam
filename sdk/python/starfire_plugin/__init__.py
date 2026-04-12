@@ -43,23 +43,35 @@ from .protocol import (  # noqa: F401
     InstallResult,
     PluginAdaptor,
 )
-from .builtins import AgentskillsAdaptor  # noqa: F401
+from .builtins import AgentskillsAdaptor, SKIP_ROOT_MD  # noqa: F401
 from .manifest import (  # noqa: F401
     PLUGIN_YAML_SCHEMA,
+    SKILL_COMPAT_MAX,
+    SKILL_DESC_MAX,
+    SKILL_NAME_MAX,
+    SKILL_NAME_RE,
     parse_skill_md,
     validate_manifest,
     validate_plugin,
     validate_skill,
 )
+from .protocol import DEFAULT_MEMORY_FILENAME, SKILLS_SUBDIR  # noqa: F401
 
 __version__ = "0.1.0"
 
 __all__ = [
     "AgentskillsAdaptor",
+    "DEFAULT_MEMORY_FILENAME",
     "InstallContext",
     "InstallResult",
     "PLUGIN_YAML_SCHEMA",
     "PluginAdaptor",
+    "SKILLS_SUBDIR",
+    "SKILL_COMPAT_MAX",
+    "SKILL_DESC_MAX",
+    "SKILL_NAME_MAX",
+    "SKILL_NAME_RE",
+    "SKIP_ROOT_MD",
     "parse_skill_md",
     "validate_manifest",
     "validate_plugin",

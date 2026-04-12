@@ -43,7 +43,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .protocol import InstallContext, InstallResult
+from .protocol import SKILLS_SUBDIR, InstallContext, InstallResult
+
+# Files at the plugin root that are never treated as prompt fragments,
+# even if they're markdown. Module-level so tests and other adapters can
+# import the set rather than re-declaring it.
+SKIP_ROOT_MD = frozenset({"readme.md", "changelog.md", "license.md", "contributing.md"})
 
 
 def _read_md_files(directory: Path) -> list[tuple[str, str]]:
@@ -92,9 +97,6 @@ class AgentskillsAdaptor:
     adapter class in the plugin's ``adapters/<runtime>.py``.
     """
 
-    # Files at the plugin root that are never treated as prompt fragments.
-    _SKIP_ROOT_MD = frozenset({"readme.md", "changelog.md", "license.md", "contributing.md"})
-
     def __init__(self, plugin_name: str, runtime: str) -> None:
         self.plugin_name = plugin_name
         self.runtime = runtime
@@ -116,7 +118,7 @@ class AgentskillsAdaptor:
         root_fragments: list[tuple[str, str]] = []
         if ctx.plugin_root.is_dir():
             for p in sorted(ctx.plugin_root.iterdir()):
-                if p.is_file() and p.suffix == ".md" and p.name.lower() not in self._SKIP_ROOT_MD:
+                if p.is_file() and p.suffix == ".md" and p.name.lower() not in SKIP_ROOT_MD:
                     content = p.read_text().strip()
                     if content:
                         root_fragments.append((p.name, content))
@@ -129,16 +131,16 @@ class AgentskillsAdaptor:
 
         if memory_blocks:
             joined = "\n\n".join(memory_blocks)
-            ctx.append_to_memory("CLAUDE.md", joined)
+            ctx.append_to_memory(ctx.memory_filename, joined)
             ctx.logger.info(
-                "%s: injected %d rule+fragment block(s) into CLAUDE.md",
-                self.plugin_name, len(memory_blocks),
+                "%s: injected %d rule+fragment block(s) into %s",
+                self.plugin_name, len(memory_blocks), ctx.memory_filename,
             )
 
         # 3. Skills — copy each skill dir to /configs/skills/.
         src_skills_dir = ctx.plugin_root / "skills"
         if src_skills_dir.is_dir():
-            dst_skills_root = ctx.configs_dir / "skills"
+            dst_skills_root = ctx.configs_dir / SKILLS_SUBDIR
             dst_skills_root.mkdir(parents=True, exist_ok=True)
             copied = 0
             for entry in sorted(src_skills_dir.iterdir()):
@@ -146,7 +148,7 @@ class AgentskillsAdaptor:
                     continue
                 dst = dst_skills_root / entry.name
                 if dst.exists():
-                    ctx.logger.info("%s: skill %s already present, skipping", self.plugin_name, entry.name)
+                    ctx.logger.debug("%s: skill %s already present, skipping", self.plugin_name, entry.name)
                     continue
                 shutil.copytree(entry, dst)
                 copied += 1
@@ -167,7 +169,7 @@ class AgentskillsAdaptor:
         src_skills_dir = ctx.plugin_root / "skills"
         if src_skills_dir.is_dir():
             for entry in src_skills_dir.iterdir():
-                dst = ctx.configs_dir / "skills" / entry.name
+                dst = ctx.configs_dir / SKILLS_SUBDIR / entry.name
                 if dst.exists() and dst.is_dir():
                     shutil.rmtree(dst)
                     ctx.logger.info("%s: removed %s", self.plugin_name, dst)
@@ -175,7 +177,7 @@ class AgentskillsAdaptor:
         # Best-effort strip of our markers from CLAUDE.md. Users can always
         # edit manually; we only guarantee the injected block's first line
         # is removed so re-install re-adds cleanly.
-        memory_path = ctx.configs_dir / "CLAUDE.md"
+        memory_path = ctx.configs_dir / ctx.memory_filename
         if not memory_path.exists():
             return
         text = memory_path.read_text()
@@ -184,6 +186,6 @@ class AgentskillsAdaptor:
         kept = [line for line in lines if not line.startswith(prefix)]
         if len(kept) != len(lines):
             memory_path.write_text("".join(kept))
-            ctx.logger.info("%s: stripped markers from CLAUDE.md", self.plugin_name)
+            ctx.logger.info("%s: stripped markers from %s", self.plugin_name, ctx.memory_filename)
 
 

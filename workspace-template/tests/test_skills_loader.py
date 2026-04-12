@@ -546,3 +546,54 @@ def test_load_skills_no_scripts_yields_empty_tools(tmp_path):
     loaded = loader_module.load_skills(str(tmp_path), ["bare"])
     assert len(loaded) == 1
     assert loaded[0].tools == []
+
+
+# ---------- parse_skill_frontmatter tolerance (runtime-side) ----------
+
+
+def test_parse_skill_frontmatter_yaml_error_returns_empty_dict(tmp_path, caplog):
+    """Runtime tolerates malformed YAML frontmatter instead of crashing
+    the workspace at startup — SDK's validator is the strict one."""
+    import logging
+    from skill_loader.loader import parse_skill_frontmatter
+
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\n: bad\nfoo: [unclosed\n---\nbody here")
+
+    with caplog.at_level(logging.WARNING):
+        fm, body = parse_skill_frontmatter(p)
+
+    assert fm == {}
+    assert body == "body here"
+    assert any("malformed frontmatter" in rec.message for rec in caplog.records)
+
+
+def test_parse_skill_frontmatter_non_mapping_returns_empty_dict(tmp_path, caplog):
+    """If frontmatter parses to a list (not a mapping), also tolerated."""
+    import logging
+    from skill_loader.loader import parse_skill_frontmatter
+
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\n- just\n- a\n- list\n---\nbody")
+
+    with caplog.at_level(logging.WARNING):
+        fm, body = parse_skill_frontmatter(p)
+
+    assert fm == {}
+    assert body == "body"
+    assert any("not a mapping" in rec.message for rec in caplog.records)
+
+
+def test_load_skills_missing_skill_md_logs_warning(tmp_path, caplog):
+    """Missing SKILL.md path logs a warning via the logger (not print)."""
+    import logging
+    from skill_loader.loader import load_skills
+
+    (tmp_path / "skills" / "phantom").mkdir(parents=True)
+    # no SKILL.md
+
+    with caplog.at_level(logging.WARNING):
+        loaded = load_skills(str(tmp_path), ["phantom"])
+
+    assert loaded == []
+    assert any("SKILL.md not found" in rec.message for rec in caplog.records)

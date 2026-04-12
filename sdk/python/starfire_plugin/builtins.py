@@ -22,7 +22,10 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .protocol import InstallContext, InstallResult
+from .protocol import SKILLS_SUBDIR, InstallContext, InstallResult
+
+# Files at the plugin root that are never treated as prompt fragments.
+SKIP_ROOT_MD = frozenset({"readme.md", "changelog.md", "license.md", "contributing.md"})
 
 
 class AgentskillsAdaptor:
@@ -39,8 +42,6 @@ class AgentskillsAdaptor:
     copy here so SDK users can unit-test their plugins without installing
     the full workspace runtime.
     """
-
-    _SKIP_ROOT_MD = frozenset({"readme.md", "changelog.md", "license.md", "contributing.md"})
 
     def __init__(self, plugin_name: str, runtime: str) -> None:
         self.plugin_name = plugin_name
@@ -60,17 +61,17 @@ class AgentskillsAdaptor:
 
         if ctx.plugin_root.is_dir():
             for p in sorted(ctx.plugin_root.iterdir()):
-                if p.is_file() and p.suffix == ".md" and p.name.lower() not in self._SKIP_ROOT_MD:
+                if p.is_file() and p.suffix == ".md" and p.name.lower() not in SKIP_ROOT_MD:
                     content = p.read_text().strip()
                     if content:
                         blocks.append(f"# Plugin: {self.plugin_name} / fragment: {p.name}\n\n{content}")
 
         if blocks:
-            ctx.append_to_memory("CLAUDE.md", "\n\n".join(blocks))
+            ctx.append_to_memory(ctx.memory_filename, "\n\n".join(blocks))
 
         src_skills = ctx.plugin_root / "skills"
         if src_skills.is_dir():
-            dst_root = ctx.configs_dir / "skills"
+            dst_root = ctx.configs_dir / SKILLS_SUBDIR
             dst_root.mkdir(parents=True, exist_ok=True)
             for entry in sorted(src_skills.iterdir()):
                 if not entry.is_dir():
@@ -89,11 +90,11 @@ class AgentskillsAdaptor:
         src_skills = ctx.plugin_root / "skills"
         if src_skills.is_dir():
             for entry in src_skills.iterdir():
-                dst = ctx.configs_dir / "skills" / entry.name
+                dst = ctx.configs_dir / SKILLS_SUBDIR / entry.name
                 if dst.exists() and dst.is_dir():
                     shutil.rmtree(dst)
 
-        memory_path = ctx.configs_dir / "CLAUDE.md"
+        memory_path = ctx.configs_dir / ctx.memory_filename
         if memory_path.exists():
             prefix = f"# Plugin: {self.plugin_name} / "
             kept = [ln for ln in memory_path.read_text().splitlines(keepends=True) if not ln.startswith(prefix)]

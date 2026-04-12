@@ -19,6 +19,16 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
 
 
+# Default filename for the runtime's long-lived memory file. Claude Code
+# and DeepAgents both read CLAUDE.md natively; other runtimes override via
+# BaseAdapter.memory_filename() and that value flows through
+# InstallContext.memory_filename so adaptors don't hardcode the name.
+DEFAULT_MEMORY_FILENAME = "CLAUDE.md"
+
+# Subdirectory under /configs where skills get installed.
+SKILLS_SUBDIR = "skills"
+
+
 @dataclass
 class InstallContext:
     """Hooks + state passed to every PluginAdaptor.install() call.
@@ -38,6 +48,12 @@ class InstallContext:
 
     plugin_root: Path
     """Path to the plugin's directory (where plugin.yaml + content lives)."""
+
+    memory_filename: str = DEFAULT_MEMORY_FILENAME
+    """Runtime's long-lived memory file (populated from
+    :meth:`BaseAdapter.memory_filename`). Adaptors pass this to
+    :attr:`append_to_memory` instead of hardcoding a filename so runtimes
+    with non-standard memory files (e.g. ``AGENTS.md``) work unchanged."""
 
     register_tool: Callable[[str, Callable[..., Any]], None] = field(
         default=lambda name, fn: None
