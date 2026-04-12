@@ -72,15 +72,115 @@ class BaseAdapter(ABC):
         Override in subclasses for adapter-specific settings."""
         return {}
 
-    async def inject_plugins(self, config: AdapterConfig, plugins) -> None:
-        """Apply plugin content to the runtime. Override per adapter.
+    # ------------------------------------------------------------------
+    # Plugin install hooks
+    # ------------------------------------------------------------------
+    # New pipeline: each plugin ships per-runtime adaptors resolved via
+    # `plugins_registry.resolve()`. Adapters expose hooks below that
+    # adaptors call to wire plugin content into the runtime.
+    #
+    # Default implementations are filesystem-only (write to /configs,
+    # append to CLAUDE.md). Runtimes with a dynamic tool registry
+    # (e.g. DeepAgents sub-agents) override the hooks to also register
+    # in-process state.
 
-        Default implementation does nothing — _common_setup handles injection
-        for LangChain-based adapters (langgraph, crewai, autogen).
-        Non-LangChain adapters (claude-code) should override this to inject
-        rules into their native config format (e.g. CLAUDE.md) and copy skills.
+    def memory_filename(self) -> str:
+        """File under /configs that the runtime treats as long-lived memory.
+
+        Both Claude Code and DeepAgents read CLAUDE.md natively, so this is
+        the sensible default. Override only if a runtime expects a different
+        filename.
         """
-        pass
+        return "CLAUDE.md"
+
+    def register_tool_hook(self, name: str, fn) -> None:
+        """Default no-op. Override on runtimes with a dynamic tool registry.
+
+        Runtimes that pick tools up at startup via filesystem scan (Claude
+        Code reads /configs/skills, LangGraph globs **/*.py) don't need to
+        do anything here — the adaptor's file-write step is enough.
+        """
+        return None
+
+    def register_subagent_hook(self, name: str, spec: dict) -> None:
+        """Default no-op. DeepAgents overrides to register a sub-agent."""
+        return None
+
+    def append_to_memory_hook(self, config: AdapterConfig, filename: str, content: str) -> None:
+        """Append text to /configs/<filename> if the marker isn't already present.
+
+        Idempotent: looks for the first line of `content` as a marker so a
+        re-install doesn't duplicate the block. Adaptors should pass content
+        beginning with a unique header (e.g. ``# Plugin: starfire-dev-conventions``).
+        """
+        import os
+        target = os.path.join(config.config_path, filename)
+        marker = content.splitlines()[0].strip() if content else ""
+        existing = ""
+        if os.path.exists(target):
+            with open(target) as f:
+                existing = f.read()
+            if marker and marker in existing:
+                logger.info("append_to_memory: %s already contains %r — skipping", filename, marker)
+                return
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        with open(target, "a") as f:
+            if existing and not existing.endswith("\n"):
+                f.write("\n")
+            f.write(content if content.endswith("\n") else content + "\n")
+        logger.info("append_to_memory: appended %d chars to %s", len(content), filename)
+
+    async def install_plugins_via_registry(
+        self,
+        config: AdapterConfig,
+        plugins,
+    ) -> list:
+        """Drive the new per-runtime adaptor pipeline for every loaded plugin.
+
+        For each plugin in `plugins.plugins`, resolve the adaptor for this
+        runtime (via :func:`plugins_registry.resolve`) and invoke
+        ``install(ctx)``. Returns the list of :class:`InstallResult` so
+        callers can surface warnings (e.g. raw-drop fallback hits).
+
+        Adapters whose runtime supports the new pipeline call this from
+        ``setup()`` instead of the legacy ``inject_plugins()``.
+        """
+        from pathlib import Path
+        from plugins_registry import InstallContext, resolve
+
+        results = []
+        runtime = self.name().replace("-", "_")  # e.g. "claude-code" -> "claude_code"
+
+        for plugin in plugins.plugins:
+            adaptor, source = resolve(plugin.name, runtime, Path(plugin.path))
+            ctx = InstallContext(
+                configs_dir=Path(config.config_path),
+                workspace_id=config.workspace_id,
+                runtime=runtime,
+                plugin_root=Path(plugin.path),
+                register_tool=self.register_tool_hook,
+                register_subagent=self.register_subagent_hook,
+                append_to_memory=lambda fn, c, _cfg=config: self.append_to_memory_hook(_cfg, fn, c),
+            )
+            try:
+                result = await adaptor.install(ctx)
+                results.append(result)
+                logger.info(
+                    "Plugin %s installed via %s adaptor (warnings: %d)",
+                    plugin.name, source, len(result.warnings),
+                )
+            except Exception as exc:
+                logger.exception("Plugin %s install via %s failed: %s", plugin.name, source, exc)
+
+        return results
+
+    async def inject_plugins(self, config: AdapterConfig, plugins) -> None:
+        """Legacy hook — kept for backwards compatibility during migration.
+
+        Default: drive the new per-runtime adaptor pipeline. Adapters not yet
+        migrated may still override this with their own logic.
+        """
+        await self.install_plugins_via_registry(config, plugins)
 
     async def _common_setup(self, config: AdapterConfig) -> SetupResult:
         """Shared setup pipeline — loads plugins, skills, tools, coordinator, and builds system prompt.
