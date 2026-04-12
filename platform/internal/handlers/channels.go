@@ -265,6 +265,21 @@ func (h *ChannelHandler) Test(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "test message sent"})
 }
 
+// matchesChatID returns true if chatID is in the channel's comma-separated chat_id list.
+// Exact match — avoids the substring-match bug of SQL LIKE.
+func matchesChatID(config map[string]interface{}, chatID string) bool {
+	raw, _ := config["chat_id"].(string)
+	if raw == "" {
+		return false
+	}
+	for _, s := range strings.Split(raw, ",") {
+		if strings.TrimSpace(s) == chatID {
+			return true
+		}
+	}
+	return false
+}
+
 // Discover auto-detects chats/groups a bot has been added to by calling the platform API.
 // User flow: enter bot token → add bot to groups → send a message → click Detect → select groups.
 func (h *ChannelHandler) Discover(c *gin.Context) {
@@ -312,10 +327,20 @@ func (h *ChannelHandler) Discover(c *gin.Context) {
 		return
 	}
 
+	hint := "For groups: add bot and send a message. For DMs: send /start to the bot. Then retry."
+	var warning string
+	if !result.CanReadAllGroupMessages {
+		warning = "⚠️ Group privacy mode is ON for this bot — it only sees commands and @mentions in groups. " +
+			"To let it see all group messages: open @BotFather → /mybots → " + result.BotUsername +
+			" → Bot Settings → Group Privacy → Turn off, then re-add the bot to the group."
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"bot_username": result.BotUsername,
-		"chats":        result.Chats,
-		"hint":         "For groups: add bot and send a message. For DMs: send /start to the bot. Then retry.",
+		"bot_username":                  result.BotUsername,
+		"chats":                         result.Chats,
+		"can_read_all_group_messages":   result.CanReadAllGroupMessages,
+		"privacy_warning":               warning,
+		"hint":                          hint,
 	})
 }
 
@@ -342,22 +367,50 @@ func (h *ChannelHandler) Webhook(c *gin.Context) {
 		return
 	}
 
-	// Look up channel by type — chat_id supports comma-separated lists,
-	// so we use LIKE to match any channel whose chat_id field contains this ID.
-	var ch channels.ChannelRow
-	var configJSON, allowedJSON []byte
-	err = db.DB.QueryRowContext(ctx, `
+	// Look up channels by type and find one whose chat_id list contains msg.ChatID.
+	// We can't use SQL LIKE — that matches substrings (chat_id "123" would match "1234").
+	// Fetch all enabled channels of this type, then exact-match in code.
+	rows, err := db.DB.QueryContext(ctx, `
 		SELECT id, workspace_id, channel_type, channel_config, enabled, allowed_users
 		FROM workspace_channels
 		WHERE channel_type = $1 AND enabled = true
-		  AND channel_config->>'chat_id' LIKE '%' || $2 || '%'
-	`, channelType, msg.ChatID).Scan(&ch.ID, &ch.WorkspaceID, &ch.ChannelType, &configJSON, &ch.Enabled, &allowedJSON)
+	`, channelType)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"status": "no_channel"}) // No channel configured for this chat
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "channel lookup failed"})
 		return
 	}
-	json.Unmarshal(configJSON, &ch.Config)
-	json.Unmarshal(allowedJSON, &ch.AllowedUsers)
+	defer rows.Close()
+
+	var ch channels.ChannelRow
+	found := false
+	for rows.Next() {
+		var row channels.ChannelRow
+		var configJSON, allowedJSON []byte
+		if err := rows.Scan(&row.ID, &row.WorkspaceID, &row.ChannelType, &configJSON, &row.Enabled, &allowedJSON); err != nil {
+			continue
+		}
+		json.Unmarshal(configJSON, &row.Config)
+		json.Unmarshal(allowedJSON, &row.AllowedUsers)
+
+		// Verify webhook secret_token if the channel has one configured
+		if expectedSecret, _ := row.Config["webhook_secret"].(string); expectedSecret != "" {
+			receivedSecret := c.GetHeader("X-Telegram-Bot-Api-Secret-Token")
+			if receivedSecret != expectedSecret {
+				continue // Wrong secret — try other channels (could be different bot)
+			}
+		}
+
+		// Exact match against the comma-separated chat_id list
+		if matchesChatID(row.Config, msg.ChatID) {
+			ch = row
+			found = true
+			break
+		}
+	}
+	if !found {
+		c.JSON(http.StatusOK, gin.H{"status": "no_channel"})
+		return
+	}
 
 	// Process asynchronously — don't block the webhook response
 	go func() {

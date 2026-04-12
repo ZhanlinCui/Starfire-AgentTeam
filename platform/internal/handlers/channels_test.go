@@ -124,7 +124,7 @@ func TestChannelHandler_Create_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"channel_type":  "telegram",
-		"config":        map[string]interface{}{"bot_token": "123:ABC", "chat_id": "-100"},
+		"config":        map[string]interface{}{"bot_token": "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "chat_id": "-100"},
 		"allowed_users": []string{"user-1"},
 	})
 

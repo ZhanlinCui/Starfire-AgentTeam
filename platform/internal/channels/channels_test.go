@@ -24,7 +24,7 @@ func TestTelegramAdapter_DisplayName(t *testing.T) {
 func TestTelegramAdapter_ValidateConfig_Valid(t *testing.T) {
 	a := &TelegramAdapter{}
 	err := a.ValidateConfig(map[string]interface{}{
-		"bot_token": "123:ABC",
+		"bot_token": "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		"chat_id":   "-100123",
 	})
 	if err != nil {
@@ -45,10 +45,21 @@ func TestTelegramAdapter_ValidateConfig_MissingBotToken(t *testing.T) {
 func TestTelegramAdapter_ValidateConfig_MissingChatID(t *testing.T) {
 	a := &TelegramAdapter{}
 	err := a.ValidateConfig(map[string]interface{}{
-		"bot_token": "123:ABC",
+		"bot_token": "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 	})
 	if err == nil {
 		t.Error("expected error for missing chat_id")
+	}
+}
+
+func TestTelegramAdapter_ValidateConfig_BadTokenFormat(t *testing.T) {
+	a := &TelegramAdapter{}
+	err := a.ValidateConfig(map[string]interface{}{
+		"bot_token": "not-a-real-token",
+		"chat_id":   "-100",
+	})
+	if err == nil {
+		t.Error("expected error for malformed bot_token")
 	}
 }
 
@@ -71,7 +82,7 @@ func TestTelegramAdapter_SendMessage_EmptyToken(t *testing.T) {
 func TestTelegramAdapter_SendMessage_InvalidChatID(t *testing.T) {
 	a := &TelegramAdapter{}
 	err := a.SendMessage(context.Background(), map[string]interface{}{
-		"bot_token": "123:ABC",
+		"bot_token": "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 	}, "not-a-number", "hello")
 	if err == nil {
 		t.Error("expected error for invalid chat_id")

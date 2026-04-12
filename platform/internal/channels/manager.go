@@ -44,11 +44,19 @@ type Manager struct {
 
 // NewManager creates a channel manager.
 func NewManager(proxy A2AProxy, broadcaster Broadcaster) *Manager {
-	return &Manager{
+	m := &Manager{
 		proxy:       proxy,
 		broadcaster: broadcaster,
 		pollers:     make(map[string]context.CancelFunc),
 	}
+	// Wire up the /reset command in the Telegram adapter to clear Redis history
+	clearChatHistory = func(ctx context.Context, channelID, chatID string) {
+		key := fmt.Sprintf("channel:telegram:%s:history", chatID)
+		if db.RDB != nil {
+			db.RDB.Del(ctx, key)
+		}
+	}
+	return m
 }
 
 // Start loads all enabled channels from DB and starts polling goroutines.
@@ -240,6 +248,30 @@ func (m *Manager) HandleInbound(ctx context.Context, ch ChannelRow, msg *Inbound
 
 	fireCtx, cancel := context.WithTimeout(ctx, channelA2ATimeout)
 	defer cancel()
+
+	// Show typing indicator throughout the agent call so user knows we're working.
+	// Telegram clears it after ~5s, so we re-send every 4s in a goroutine.
+	if tg, ok := GetAdapter(ch.ChannelType); ok {
+		if typer, ok := tg.(interface {
+			SendTyping(config map[string]interface{}, chatID string)
+		}); ok {
+			typingCtx, typingCancel := context.WithCancel(fireCtx)
+			defer typingCancel()
+			go func() {
+				typer.SendTyping(ch.Config, msg.ChatID)
+				ticker := time.NewTicker(4 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-typingCtx.Done():
+						return
+					case <-ticker.C:
+						typer.SendTyping(ch.Config, msg.ChatID)
+					}
+				}
+			}()
+		}
+	}
 
 	statusCode, respBody, err := m.proxy.ProxyA2ARequest(fireCtx, ch.WorkspaceID, a2aBody, callerID, true)
 	if err != nil {
