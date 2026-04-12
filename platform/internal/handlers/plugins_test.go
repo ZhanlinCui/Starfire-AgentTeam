@@ -963,21 +963,17 @@ func TestHTTPErr_WrapsCleanly(t *testing.T) {
 }
 
 func TestLogInstallLimitsOnce(t *testing.T) {
-	// sync.Once guarantees exactly one emission for the process; we can't
-	// reset it in a test. Instead, redirect the writer to a buffer,
-	// trigger NewPluginsHandler in its own subtest (so the Once has
-	// already fired from other tests if they ran first), and assert the
-	// buffer either got the line (if first to run) or stayed empty (if
-	// not). Either way: no panic, no cross-test state leak.
+	// sync.Once guarantees exactly one emission per process, so this
+	// test can't reset it. We call with a local buffer writer and assert
+	// behaviour that holds regardless of ordering:
+	//   - first caller sees the line
+	//   - later callers see nothing
+	//   - no panic either way
+	// If another test's NewPluginsHandler already fired the Once, our
+	// buffer stays empty — that's correct, not a bug.
 	var buf bytes.Buffer
-	prevWriter := installLimitsLogWriter
-	installLimitsLogWriter = &buf
-	t.Cleanup(func() { installLimitsLogWriter = prevWriter })
-
-	// Calling it directly — if this is the first call in the test binary,
-	// we see the line; otherwise Once already fired and we see nothing.
-	logInstallLimitsOnce()
-	logInstallLimitsOnce() // must not panic; Once is idempotent
+	logInstallLimitsOnce(&buf)
+	logInstallLimitsOnce(&buf) // must not panic; Once is idempotent
 
 	if buf.Len() > 0 {
 		// We were the first caller. Verify the line contains all three

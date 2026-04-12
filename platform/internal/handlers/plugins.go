@@ -50,20 +50,21 @@ func (e *httpErr) Error() string {
 // pointer receivers. Keeps call sites terse.
 func newHTTPErr(status int, body gin.H) *httpErr { return &httpErr{Status: status, Body: body} }
 
-// logInstallLimitsOnce emits a single operator-facing line describing
-// the effective install caps + timeout. Safe to call from any goroutine;
-// sync.Once guarantees exactly one log emission per process lifetime.
-// Helps self-hosters confirm their env overrides took effect.
+// installLimitsLogOnce gates the single operator-facing log line
+// describing the effective install caps + timeout. sync.Once guarantees
+// exactly one emission per process lifetime, regardless of how many
+// PluginsHandler instances are constructed. Safe to call from any
+// goroutine.
 var installLimitsLogOnce sync.Once
 
-// installLimitsLogWriter is the destination for the one-shot log line.
-// Tests swap this to a buffer to observe the output without poking
-// package-level state or touching the stdlib logger's global sink.
-var installLimitsLogWriter io.Writer = os.Stderr
-
-func logInstallLimitsOnce() {
+// logInstallLimitsOnce writes the effective install limits to `w`,
+// exactly once per process. Taking the writer as a parameter (instead
+// of a package-level var) removes the last piece of mutable global
+// state from this file — production passes os.Stderr, tests pass a
+// bytes.Buffer with no t.Cleanup dance.
+func logInstallLimitsOnce(w io.Writer) {
 	installLimitsLogOnce.Do(func() {
-		fmt.Fprintf(installLimitsLogWriter,
+		fmt.Fprintf(w,
 			"Plugin install limits: body=%d bytes  timeout=%s  staged=%d bytes\n",
 			envx.Int64("PLUGIN_INSTALL_BODY_MAX_BYTES", defaultInstallBodyMaxBytes),
 			envx.Duration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout),
@@ -129,7 +130,7 @@ func NewPluginsHandler(pluginsDir string, docker *client.Client, restartFunc fun
 	sources := plugins.NewRegistry()
 	sources.Register(plugins.NewLocalResolver(pluginsDir))
 	sources.Register(plugins.NewGithubResolver())
-	logInstallLimitsOnce()
+	logInstallLimitsOnce(os.Stderr)
 	return &PluginsHandler{
 		pluginsDir:  pluginsDir,
 		docker:      docker,

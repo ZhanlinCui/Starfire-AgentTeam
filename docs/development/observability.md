@@ -30,7 +30,7 @@ Automatic traces include:
 A2A delegations are HTTP calls — LangGraph doesn't know about them. The delegation tool creates a manual span:
 
 ```python
-# workspace-template/tools/delegation.py
+# workspace-template/builtin_tools/delegation.py
 
 from langfuse import Langfuse
 langfuse = Langfuse()
