@@ -218,3 +218,110 @@ def test_resolve_handles_broken_adaptor_module(plugin_root: Path):
 def test_protocol_runtime_check():
     """RawDropAdaptor must satisfy the Protocol at runtime."""
     assert isinstance(RawDropAdaptor("p", "r"), PluginAdaptor)
+
+
+# ---------------------------------------------------------------------------
+# Edge cases on adaptor loading
+# ---------------------------------------------------------------------------
+
+def test_resolve_module_with_neither_adaptor_nor_factory(plugin_root: Path):
+    """Adaptor file that defines neither ``Adaptor`` nor ``get_adaptor()``
+    falls back to raw-drop (can't instantiate anything)."""
+    (plugin_root / "adapters").mkdir()
+    (plugin_root / "adapters" / "test_runtime.py").write_text(
+        "# no Adaptor, no get_adaptor — just a valid module\nX = 1\n"
+    )
+    _, source = resolve("demo-plugin", "test_runtime", plugin_root)
+    assert source == AdaptorSource.RAW_DROP
+
+
+def test_resolve_get_adaptor_factory_raises(plugin_root: Path):
+    """get_adaptor() that raises → falls back to raw-drop gracefully."""
+    (plugin_root / "adapters").mkdir()
+    (plugin_root / "adapters" / "test_runtime.py").write_text(textwrap.dedent("""
+        def get_adaptor(plugin_name, runtime):
+            raise ValueError("kaboom")
+    """))
+    _, source = resolve("demo-plugin", "test_runtime", plugin_root)
+    assert source == AdaptorSource.RAW_DROP
+
+
+def test_resolve_adaptor_class_construction_raises(plugin_root: Path):
+    """Adaptor class whose __init__ raises → falls back to raw-drop."""
+    (plugin_root / "adapters").mkdir()
+    (plugin_root / "adapters" / "test_runtime.py").write_text(textwrap.dedent("""
+        class Adaptor:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("nope")
+    """))
+    _, source = resolve("demo-plugin", "test_runtime", plugin_root)
+    assert source == AdaptorSource.RAW_DROP
+
+
+def test_resolve_adaptor_class_zero_arg_fallback(plugin_root: Path):
+    """Adaptor class whose (name, runtime) ctor raises TypeError → try zero-arg."""
+    (plugin_root / "adapters").mkdir()
+    (plugin_root / "adapters" / "test_runtime.py").write_text(textwrap.dedent("""
+        from plugins_registry.protocol import InstallResult
+        class Adaptor:
+            plugin_name = "demo-plugin"
+            runtime = "test_runtime"
+            def __init__(self):
+                pass
+            async def install(self, ctx):
+                return InstallResult(plugin_name=self.plugin_name, runtime=self.runtime, source="plugin")
+            async def uninstall(self, ctx):
+                pass
+    """))
+    # TypeError forces the fallback path: `cls(plugin_name, runtime)` fails
+    # because the class takes no args, so we retry with `cls()`.
+    _, source = resolve("demo-plugin", "test_runtime", plugin_root)
+    assert source == AdaptorSource.PLUGIN
+
+
+def test_load_module_bailout_when_spec_is_none(monkeypatch, plugin_root: Path):
+    """Defensive path: ``spec_from_file_location`` returns None. Forced via
+    monkeypatch since real filesystems never trigger it for .py files."""
+    import importlib.util as iu
+    import plugins_registry as pr
+
+    (plugin_root / "adapters").mkdir()
+    (plugin_root / "adapters" / "test_runtime.py").write_text("class Adaptor: pass\n")
+
+    real = iu.spec_from_file_location
+    def fake_spec(name, path, *a, **kw):
+        if path.name == "test_runtime.py":
+            return None
+        return real(name, path, *a, **kw)
+    monkeypatch.setattr(pr.importlib.util, "spec_from_file_location", fake_spec)
+
+    _, source = pr.resolve("demo-plugin", "test_runtime", plugin_root)
+    assert source == AdaptorSource.RAW_DROP
+
+
+def test_resolve_registry_bails_when_load_returns_none(monkeypatch, tmp_path: Path, plugin_root: Path):
+    """Registry path exists but the module fails to load → falls through to
+    plugin-shipped (or raw-drop if that's also missing). Exercises the
+    ``if module is None: return None`` bail-out in ``_resolve_registry``."""
+    import plugins_registry as pr
+
+    fake_registry = tmp_path / "fake_registry"
+    (fake_registry / "demo-plugin").mkdir(parents=True)
+    (fake_registry / "demo-plugin" / "test_runtime.py").write_text("class Adaptor: pass\n")
+    monkeypatch.setattr(pr, "_REGISTRY_ROOT", fake_registry)
+
+    # Force _load_module_from_path to return None when asked for this module.
+    monkeypatch.setattr(pr, "_load_module_from_path", lambda name, path: None)
+
+    _, source = pr.resolve("demo-plugin", "test_runtime", plugin_root)
+    # Both registry and plugin-shipped now yield None → raw-drop.
+    assert source == AdaptorSource.RAW_DROP
+
+
+def test_resolve_registry_missing_module_falls_through(monkeypatch, tmp_path: Path, plugin_root: Path):
+    """Registry root exists but has neither plugin dir for this name →
+    plugin-shipped or raw-drop takes over (not a crash)."""
+    import plugins_registry as pr
+    monkeypatch.setattr(pr, "_REGISTRY_ROOT", tmp_path / "empty-registry")
+    _, source = pr.resolve("demo-plugin", "test_runtime", plugin_root)
+    assert source == AdaptorSource.RAW_DROP
