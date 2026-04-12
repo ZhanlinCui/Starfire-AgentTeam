@@ -32,6 +32,7 @@
 | 22 | Cron Scheduling | PR #49 — recurring tasks via cron expressions, Canvas Schedule tab |
 | 23 | Code Quality & Multi-Provider | PR #50 — model fallback, DeepAgents full SDK, 7 LLM providers, 100% test coverage |
 | 24 | Async Delegation | PR #41 — non-blocking delegation with status polling, `check_delegation_status` tool |
+| 25 | Social Channels | PR #54 — adapter-based Telegram integration, Canvas Channels tab, 7 MCP tools, hot reload |
 
 ---
 
@@ -115,10 +116,10 @@ All PRs must follow this checklist:
 
 | Stack | Tests | Framework |
 |-------|-------|-----------|
-| Go (platform) | 406 | `go test -race` |
+| Go (platform) | 448 | `go test -race` |
 | Python (workspace) | 973 | pytest |
 | Canvas (frontend) | 345 | Vitest |
-| **Total** | **1,724** | |
+| **Total** | **1,766** | |
 
 E2E: 68/68 comprehensive checks passing, 62 API tests.
 
