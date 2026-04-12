@@ -148,12 +148,17 @@ Backward-compatible admin aliases also exist under `/admin/secrets`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/plugins` | List available plugins from registry |
-| `GET` | `/workspaces/:id/plugins` | List installed plugins in workspace |
-| `POST` | `/workspaces/:id/plugins` | Install plugin `{"name":"ecc"}` — copies to container, auto-restarts |
+| `GET` | `/plugins` | List available plugins; accepts `?runtime=<name>` to filter to compatible plugins |
+| `GET` | `/plugins/sources` | List registered install-source schemes (e.g. `{"schemes":["github","local"]}`) |
+| `GET` | `/workspaces/:id/plugins` | List installed plugins (each includes `supported_on_runtime: bool`) |
+| `GET` | `/workspaces/:id/plugins/available` | Plugins filtered to those compatible with the workspace runtime |
+| `GET` | `/workspaces/:id/plugins/compatibility?runtime=X` | Preflight runtime change — which installed plugins would become inert |
+| `POST` | `/workspaces/:id/plugins` | Install plugin `{"source":"<scheme>://<spec>"}` — e.g. `local://ecc`, `github://owner/repo#v1.0`. Auto-restarts workspace. |
 | `DELETE` | `/workspaces/:id/plugins/:name` | Uninstall plugin — removes from container, auto-restarts |
 
-Plugins are installed per-workspace into `/configs/plugins/<name>/`. The registry is the `plugins/` directory at the repo root, each containing a `plugin.yaml` manifest. Plugin names are validated (no path traversal).
+Plugins are installed per-workspace into `/configs/plugins/<name>/`. Sources are pluggable via schemes (local + github shipped; clawhub/oci/https planned). See [`docs/plugins/sources.md`](../plugins/sources.md) for the two-axis source/shape model.
+
+Install safeguards bound the cost of a single install (env-tunable via `PLUGIN_INSTALL_BODY_MAX_BYTES` / `PLUGIN_INSTALL_FETCH_TIMEOUT` / `PLUGIN_INSTALL_MAX_DIR_BYTES`).
 
 ### Files and templates
 

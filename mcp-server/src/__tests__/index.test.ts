@@ -869,7 +869,7 @@ describe("Response format invariants", () => {
     // New tools — plugins, global secrets, pause/resume, org
     ["handleListPluginRegistry", () => handleListPluginRegistry()],
     ["handleListInstalledPlugins", () => handleListInstalledPlugins({ workspace_id: "x" })],
-    ["handleInstallPlugin", () => handleInstallPlugin({ workspace_id: "x", name: "ecc" })],
+    ["handleInstallPlugin", () => handleInstallPlugin({ workspace_id: "x", source: "local://ecc" })],
     ["handleUninstallPlugin", () => handleUninstallPlugin({ workspace_id: "x", name: "ecc" })],
     ["handleListGlobalSecrets", () => handleListGlobalSecrets()],
     ["handleSetGlobalSecret", () => handleSetGlobalSecret({ key: "K", value: "V" })],
