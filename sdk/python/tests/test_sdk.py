@@ -17,7 +17,7 @@ if str(_SDK_ROOT) not in sys.path:
     sys.path.insert(0, str(_SDK_ROOT))
 
 from starfire_plugin import (  # noqa: E402
-    GenericPluginAdaptor,
+    AgentskillsAdaptor,
     InstallContext,
     PluginAdaptor,
     parse_skill_md,
@@ -28,7 +28,7 @@ from starfire_plugin import (  # noqa: E402
 
 
 def test_generic_adaptor_satisfies_protocol():
-    adaptor = GenericPluginAdaptor("p", "claude_code")
+    adaptor = AgentskillsAdaptor("p", "claude_code")
     assert isinstance(adaptor, PluginAdaptor)
 
 
@@ -55,7 +55,7 @@ async def test_generic_adaptor_installs_skills_and_rules(tmp_path: Path):
         logger=logging.getLogger("test"),
     )
 
-    result = await GenericPluginAdaptor("demo", "claude_code").install(ctx)
+    result = await AgentskillsAdaptor("demo", "claude_code").install(ctx)
     assert result.plugin_name == "demo"
     assert (configs / "skills" / "s1" / "SKILL.md").exists()
     assert "# Plugin: demo" in (configs / "CLAUDE.md").read_text()
@@ -144,7 +144,7 @@ async def test_generic_adaptor_installs_rules_and_skills_both(tmp_path: Path):
         plugin_root=plugin_root, append_to_memory=_append,
         logger=logging.getLogger("test"),
     )
-    adaptor = GenericPluginAdaptor("demo", "claude_code")
+    adaptor = AgentskillsAdaptor("demo", "claude_code")
     result = await adaptor.install(ctx)
 
     text = (configs / "CLAUDE.md").read_text()
@@ -175,7 +175,7 @@ async def test_generic_adaptor_skips_existing_skill_dir(tmp_path: Path):
         configs_dir=configs, workspace_id="w", runtime="claude_code",
         plugin_root=plugin_root,
     )
-    await GenericPluginAdaptor("demo", "claude_code").install(ctx)
+    await AgentskillsAdaptor("demo", "claude_code").install(ctx)
     # Pre-existing content preserved.
     assert (configs / "skills" / "s1" / "SKILL.md").read_text() == "# user wrote this"
 
@@ -190,7 +190,7 @@ async def test_generic_adaptor_uninstall_when_nothing_installed(tmp_path: Path):
         plugin_root=plugin_root,
     )
     # Should not raise even with no CLAUDE.md and no skills/
-    await GenericPluginAdaptor("bare", "claude_code").uninstall(ctx)
+    await AgentskillsAdaptor("bare", "claude_code").uninstall(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -376,8 +376,149 @@ def test_first_party_plugins_are_spec_compliant():
     assert not failures, f"Spec failures: {failures}"
 
 
-def test_sdk_generic_adaptor_alias():
-    """SDK exposes AgentskillsAdaptor as the canonical name; GenericPluginAdaptor
-    remains as a backwards-compat alias for existing plugin repos."""
-    from starfire_plugin import AgentskillsAdaptor, GenericPluginAdaptor
-    assert GenericPluginAdaptor is AgentskillsAdaptor
+
+
+# ---------------------------------------------------------------------------
+# CLI (python -m starfire_plugin)
+# ---------------------------------------------------------------------------
+
+
+def _write_valid_plugin(tmp_path: Path, name: str = "ok-plugin") -> Path:
+    p = tmp_path / name
+    p.mkdir()
+    (p / "plugin.yaml").write_text(f"name: {name}\nruntimes: [claude_code]\n")
+    (p / "skills" / "hello").mkdir(parents=True)
+    (p / "skills" / "hello" / "SKILL.md").write_text(
+        "---\nname: hello\ndescription: greet\n---\nbody"
+    )
+    return p
+
+
+def test_cli_exits_zero_on_valid_plugin(tmp_path: Path, capsys):
+    from starfire_plugin.__main__ import main
+
+    plugin = _write_valid_plugin(tmp_path)
+    assert main(["validate", str(plugin)]) == 0
+    out = capsys.readouterr().out
+    assert "✓" in out
+    assert "valid" in out
+
+
+def test_cli_exits_nonzero_on_invalid_plugin(tmp_path: Path, capsys):
+    from starfire_plugin.__main__ import main
+
+    plugin = tmp_path / "bad"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text("name: bad\n")
+    (plugin / "skills" / "mismatched").mkdir(parents=True)
+    (plugin / "skills" / "mismatched" / "SKILL.md").write_text(
+        "---\nname: different\ndescription: d\n---\n"
+    )
+    assert main(["validate", str(plugin)]) == 1
+    err = capsys.readouterr().err
+    assert "✗" in err
+    assert "match directory name" in err
+
+
+def test_cli_quiet_suppresses_success_lines(tmp_path: Path, capsys):
+    from starfire_plugin.__main__ import main
+
+    plugin = _write_valid_plugin(tmp_path)
+    assert main(["validate", "--quiet", str(plugin)]) == 0
+    out = capsys.readouterr().out
+    assert "✓" not in out  # success line suppressed
+
+
+def test_cli_quiet_still_prints_errors(tmp_path: Path, capsys):
+    from starfire_plugin.__main__ import main
+
+    plugin = tmp_path / "bad"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text("")
+    assert main(["validate", "-q", str(plugin)]) != 0
+    err = capsys.readouterr().err
+    assert "✗" in err
+
+
+def test_cli_rejects_nonexistent_path(tmp_path: Path, capsys):
+    from starfire_plugin.__main__ import main
+
+    assert main(["validate", str(tmp_path / "nope")]) == 1
+    err = capsys.readouterr().err
+    assert "does not exist" in err
+
+
+def test_cli_rejects_file_instead_of_dir(tmp_path: Path, capsys):
+    from starfire_plugin.__main__ import main
+
+    f = tmp_path / "plugin.yaml"
+    f.write_text("name: x\n")
+    assert main(["validate", str(f)]) == 1
+    err = capsys.readouterr().err
+    assert "not a directory" in err
+
+
+def test_cli_validates_multiple_plugins(tmp_path: Path, capsys):
+    from starfire_plugin.__main__ import main
+
+    p1 = _write_valid_plugin(tmp_path, "one")
+    p2 = _write_valid_plugin(tmp_path, "two")
+    assert main(["validate", str(p1), str(p2)]) == 0
+    out = capsys.readouterr().out
+    assert out.count("✓") == 2
+
+
+
+
+# ---------------------------------------------------------------------------
+# Type-error branches in validate_skill (non-string values for typed fields)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_skill_parse_error_propagates(tmp_path: Path):
+    """A malformed SKILL.md surfaces parse errors through validate_skill."""
+    skill = tmp_path / "bad"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("no frontmatter here")
+    errs = validate_skill(skill)
+    assert any("frontmatter" in e for e in errs)
+
+
+def test_validate_skill_name_must_be_string(tmp_path: Path):
+    skill = _write_skill(tmp_path, "x", "---\nname: 42\ndescription: x\n---\n")
+    errs = validate_skill(skill)
+    assert any("name" in e and "string" in e for e in errs)
+
+
+def test_validate_skill_description_must_be_string(tmp_path: Path):
+    skill = _write_skill(tmp_path, "x", "---\nname: x\ndescription: 42\n---\n")
+    errs = validate_skill(skill)
+    assert any("description" in e and "string" in e for e in errs)
+
+
+def test_validate_skill_compatibility_must_be_string(tmp_path: Path):
+    skill = _write_skill(tmp_path, "x", "---\nname: x\ndescription: d\ncompatibility: 42\n---\n")
+    errs = validate_skill(skill)
+    assert any("compatibility" in e.lower() and "string" in e for e in errs)
+
+
+def test_validate_skill_metadata_key_must_be_string(tmp_path: Path):
+    skill = _write_skill(tmp_path, "x", "---\nname: x\ndescription: d\nmetadata:\n  1: value\n---\n")
+    errs = validate_skill(skill)
+    assert any("metadata" in e and "string" in e for e in errs)
+
+
+def test_validate_skill_license_must_be_string(tmp_path: Path):
+    skill = _write_skill(tmp_path, "x", "---\nname: x\ndescription: d\nlicense: 42\n---\n")
+    errs = validate_skill(skill)
+    assert any("license" in e and "string" in e for e in errs)
+
+
+def test_validate_plugin_skips_file_entries_in_skills_dir(tmp_path: Path):
+    """A stray file inside skills/ (not a dir) is not treated as a skill."""
+    plugin = tmp_path / "p"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text("name: p\n")
+    (plugin / "skills").mkdir()
+    (plugin / "skills" / "stray.txt").write_text("not a skill")
+    assert validate_plugin(plugin) == {}

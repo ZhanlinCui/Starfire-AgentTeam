@@ -1,6 +1,6 @@
 ---
 name: example-skill
-description: One-sentence description of what this skill does AND when the agent should use it. Include keywords the agent will grep for (nouns, verbs, file types, user phrasing). Must be ≤1024 characters.
+description: Short description — what this does and when to use it.
 license: MIT
 metadata:
   author: your-name

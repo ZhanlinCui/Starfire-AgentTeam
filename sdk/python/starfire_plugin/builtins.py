@@ -15,9 +15,6 @@ SDK authors pick a sub-type by import:
 
 Plugins whose shape doesn't match any built-in ship a custom adapter
 class in Python — unlimited expressiveness, no framework constraint.
-
-``GenericPluginAdaptor`` is kept as an alias of :class:`AgentskillsAdaptor`
-for backwards compat.
 """
 
 from __future__ import annotations
@@ -103,5 +100,3 @@ class AgentskillsAdaptor:
             memory_path.write_text("".join(kept))
 
 
-# Backwards-compat alias. Prefer AgentskillsAdaptor in new code.
-GenericPluginAdaptor = AgentskillsAdaptor

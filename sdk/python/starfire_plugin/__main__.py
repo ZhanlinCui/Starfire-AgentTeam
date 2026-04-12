@@ -20,7 +20,7 @@ from pathlib import Path
 from .manifest import validate_plugin
 
 
-def _validate(paths: list[str]) -> int:
+def _validate(paths: list[str], quiet: bool = False) -> int:
     total_errors = 0
     for raw in paths:
         path = Path(raw)
@@ -35,7 +35,8 @@ def _validate(paths: list[str]) -> int:
 
         results = validate_plugin(path)
         if not results:
-            print(f"✓ {path}: valid (plugin.yaml + all skills pass agentskills.io spec)")
+            if not quiet:
+                print(f"✓ {path}: valid (plugin.yaml + all skills pass agentskills.io spec)")
             continue
 
         for source, errors in results.items():
@@ -52,12 +53,17 @@ def main(argv: list[str] | None = None) -> int:
 
     v = sub.add_parser("validate", help="Validate one or more plugin directories")
     v.add_argument("paths", nargs="+", help="plugin directory paths to validate")
+    v.add_argument(
+        "--quiet", "-q", action="store_true",
+        help="suppress success lines; only print errors to stderr",
+    )
 
     args = parser.parse_args(argv)
-    if args.cmd == "validate":
-        return _validate(args.paths)
-    return 2
+    # argparse enforces `required=True` on the subcommand so `validate` is the
+    # only reachable branch today. Keep the dispatch structure for future
+    # subcommands (e.g. `scaffold`, `publish`) rather than collapsing it.
+    return _validate(args.paths, quiet=args.quiet)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())

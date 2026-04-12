@@ -11,8 +11,7 @@ This SDK exposes:
   ``install()`` and returned from it.
 * :class:`AgentskillsAdaptor` — a drop-in adaptor for plugins that ship
   agentskills.io-format skills + Starfire's optional rules (covers the
-  vast majority of cases). ``GenericPluginAdaptor`` is kept as an alias
-  for backwards compat.
+  vast majority of cases).
 * :data:`PLUGIN_YAML_SCHEMA` — the manifest schema for validation tooling.
 
 Example: a minimal plugin that's installable on Claude Code and DeepAgents
@@ -44,7 +43,7 @@ from .protocol import (  # noqa: F401
     InstallResult,
     PluginAdaptor,
 )
-from .builtins import AgentskillsAdaptor, GenericPluginAdaptor  # noqa: F401
+from .builtins import AgentskillsAdaptor  # noqa: F401
 from .manifest import (  # noqa: F401
     PLUGIN_YAML_SCHEMA,
     parse_skill_md,
@@ -57,7 +56,6 @@ __version__ = "0.1.0"
 
 __all__ = [
     "AgentskillsAdaptor",
-    "GenericPluginAdaptor",
     "InstallContext",
     "InstallResult",
     "PLUGIN_YAML_SCHEMA",

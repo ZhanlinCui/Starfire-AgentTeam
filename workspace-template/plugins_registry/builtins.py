@@ -20,24 +20,22 @@ Shape taxonomy (one class per shape; add more as the ecosystem evolves):
   Claude Code, our adapter code does the equivalent on DeepAgents /
   LangGraph / etc.). **This is the default and covers the common case.**
 
-Coming as ecosystems mature (rule of three — promote when 3+ plugins
-ship the same custom shape):
+Planned as the ecosystem matures (none are implemented yet — rule of
+three: promote a class here only after 3+ plugins ship the same custom
+shape via their own ``adapters/<runtime>.py``):
 
-* ``MCPServerAdaptor`` — install a plugin as an MCP server
+* ``MCPServerAdaptor`` — install a plugin as an MCP server *(TODO)*
 * ``DeepAgentsSubagentAdaptor`` — register a DeepAgents sub-agent
-  (runtime-locked to deepagents)
-* ``LangGraphSubgraphAdaptor`` — install a LangGraph sub-graph
-* ``RAGPipelineAdaptor`` — wire a retriever + index
-* ``SwarmAdaptor`` — bind an OpenAI-swarm / AutoGen-swarm
-* ``WebhookAdaptor`` — register an event handler
+  (runtime-locked to deepagents) *(TODO)*
+* ``LangGraphSubgraphAdaptor`` — install a LangGraph sub-graph *(TODO)*
+* ``RAGPipelineAdaptor`` — wire a retriever + index *(TODO)*
+* ``SwarmAdaptor`` — bind an OpenAI-swarm / AutoGen-swarm *(TODO)*
+* ``WebhookAdaptor`` — register an event handler *(TODO)*
 
 Plugins whose shape doesn't match any built-in ship their own adapter
 class in ``plugins/<name>/adapters/<runtime>.py`` — full Python, no
 constraint. When 3+ plugins ship the same custom pattern, we promote
 the class into this module.
-
-Backwards-compat: ``GenericPluginAdaptor`` is kept as an alias of
-``AgentskillsAdaptor`` for already-imported code.
 """
 
 from __future__ import annotations
@@ -189,9 +187,3 @@ class AgentskillsAdaptor:
             ctx.logger.info("%s: stripped markers from CLAUDE.md", self.plugin_name)
 
 
-# ---------------------------------------------------------------------------
-# Backwards-compat alias — keep existing imports working.
-# Prefer AgentskillsAdaptor in new code; GenericPluginAdaptor is retained so
-# that externally-authored plugins and existing test fixtures do not break.
-# ---------------------------------------------------------------------------
-GenericPluginAdaptor = AgentskillsAdaptor

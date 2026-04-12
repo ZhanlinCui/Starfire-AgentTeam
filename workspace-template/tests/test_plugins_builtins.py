@@ -1,4 +1,4 @@
-"""Edge-case tests for :class:`GenericPluginAdaptor`.
+"""Edge-case tests for :class:`AgentskillsAdaptor`.
 
 Covers:
   - Uninstall removes copied skill dirs and strips CLAUDE.md markers
@@ -22,7 +22,7 @@ if str(_WS_TEMPLATE) not in sys.path:
     sys.path.insert(0, str(_WS_TEMPLATE))
 
 from plugins_registry import InstallContext  # noqa: E402
-from plugins_registry.builtins import GenericPluginAdaptor  # noqa: E402
+from plugins_registry.builtins import AgentskillsAdaptor  # noqa: E402
 
 
 def _make_ctx(configs_dir: Path, plugin_root: Path) -> InstallContext:
@@ -64,7 +64,7 @@ def full_plugin(tmp_path: Path) -> Path:
 async def test_uninstall_removes_skills_and_strips_markers(tmp_path: Path, full_plugin: Path):
     configs = tmp_path / "configs"
     configs.mkdir()
-    adaptor = GenericPluginAdaptor("my-plugin", "claude_code")
+    adaptor = AgentskillsAdaptor("my-plugin", "claude_code")
     ctx = _make_ctx(configs, full_plugin)
 
     await adaptor.install(ctx)
@@ -83,7 +83,7 @@ async def test_uninstall_removes_skills_and_strips_markers(tmp_path: Path, full_
 async def test_install_is_idempotent_on_skills_and_memory(tmp_path: Path, full_plugin: Path):
     configs = tmp_path / "configs"
     configs.mkdir()
-    adaptor = GenericPluginAdaptor("my-plugin", "claude_code")
+    adaptor = AgentskillsAdaptor("my-plugin", "claude_code")
     ctx = _make_ctx(configs, full_plugin)
 
     await adaptor.install(ctx)
@@ -99,7 +99,7 @@ async def test_install_is_idempotent_on_skills_and_memory(tmp_path: Path, full_p
 async def test_readme_and_changelog_not_treated_as_fragments(tmp_path: Path, full_plugin: Path):
     configs = tmp_path / "configs"
     configs.mkdir()
-    await GenericPluginAdaptor("my-plugin", "claude_code").install(_make_ctx(configs, full_plugin))
+    await AgentskillsAdaptor("my-plugin", "claude_code").install(_make_ctx(configs, full_plugin))
     text = (configs / "CLAUDE.md").read_text()
     assert "should be ignored" not in text
     assert "# Plugin: my-plugin / fragment: README.md" not in text
@@ -112,7 +112,7 @@ async def test_plugin_with_no_content_is_noop(tmp_path: Path):
     plugin_root = tmp_path / "bare"
     plugin_root.mkdir()
 
-    result = await GenericPluginAdaptor("bare", "claude_code").install(_make_ctx(configs, plugin_root))
+    result = await AgentskillsAdaptor("bare", "claude_code").install(_make_ctx(configs, plugin_root))
     assert result.plugin_name == "bare"
     assert not (configs / "CLAUDE.md").exists()
     assert not (configs / "skills").exists()
@@ -126,7 +126,7 @@ async def test_plugin_with_empty_rules_dir(tmp_path: Path):
     (plugin_root / "rules").mkdir(parents=True)
     # no .md files
 
-    await GenericPluginAdaptor("demo", "claude_code").install(_make_ctx(configs, plugin_root))
+    await AgentskillsAdaptor("demo", "claude_code").install(_make_ctx(configs, plugin_root))
     assert not (configs / "CLAUDE.md").exists()
 
 
@@ -134,7 +134,7 @@ async def test_uninstall_safe_when_never_installed(tmp_path: Path, full_plugin: 
     configs = tmp_path / "configs"
     configs.mkdir()
     # Never install — uninstall must not raise.
-    await GenericPluginAdaptor("my-plugin", "claude_code").uninstall(_make_ctx(configs, full_plugin))
+    await AgentskillsAdaptor("my-plugin", "claude_code").uninstall(_make_ctx(configs, full_plugin))
 
 
 async def test_install_preserves_unrelated_claude_md_content(tmp_path: Path, full_plugin: Path):
@@ -143,7 +143,7 @@ async def test_install_preserves_unrelated_claude_md_content(tmp_path: Path, ful
     configs.mkdir()
     (configs / "CLAUDE.md").write_text("# User Note\n\nHand-written content.\n")
 
-    adaptor = GenericPluginAdaptor("my-plugin", "claude_code")
+    adaptor = AgentskillsAdaptor("my-plugin", "claude_code")
     ctx = _make_ctx(configs, full_plugin)
     await adaptor.install(ctx)
     await adaptor.uninstall(ctx)
@@ -163,7 +163,7 @@ async def test_install_ignores_non_dir_entries_in_skills(tmp_path: Path):
     (plugin_root / "skills" / "real-skill").mkdir()
     (plugin_root / "skills" / "real-skill" / "SKILL.md").write_text("# ok")
 
-    await GenericPluginAdaptor("demo", "claude_code").install(_make_ctx(configs, plugin_root))
+    await AgentskillsAdaptor("demo", "claude_code").install(_make_ctx(configs, plugin_root))
     assert (configs / "skills" / "real-skill" / "SKILL.md").exists()
     # The loose file must not have been copied to /configs/skills/ as a file.
     assert not (configs / "skills" / "loose-file.txt").exists()
@@ -195,22 +195,6 @@ async def test_install_skips_skill_when_already_present(tmp_path: Path, full_plu
     (configs / "skills" / "my-skill").mkdir(parents=True)
     (configs / "skills" / "my-skill" / "SKILL.md").write_text("# USER'S OWN")
 
-    await GenericPluginAdaptor("my-plugin", "claude_code").install(_make_ctx(configs, full_plugin))
+    await AgentskillsAdaptor("my-plugin", "claude_code").install(_make_ctx(configs, full_plugin))
     # Pre-existing content preserved.
     assert (configs / "skills" / "my-skill" / "SKILL.md").read_text() == "# USER'S OWN"
-
-
-# Backwards-compat alias must keep working so externally-authored plugins
-# that still import GenericPluginAdaptor don't break after the rename to
-# AgentskillsAdaptor.
-async def test_generic_plugin_adaptor_is_alias_of_agentskills_adaptor(tmp_path: Path, full_plugin: Path):
-    from plugins_registry.builtins import AgentskillsAdaptor, GenericPluginAdaptor
-
-    assert GenericPluginAdaptor is AgentskillsAdaptor
-
-    configs = tmp_path / "configs"
-    configs.mkdir()
-    adaptor = GenericPluginAdaptor("my-plugin", "claude_code")
-    result = await adaptor.install(_make_ctx(configs, full_plugin))
-    assert result.plugin_name == "my-plugin"
-    assert (configs / "skills" / "my-skill" / "SKILL.md").exists()

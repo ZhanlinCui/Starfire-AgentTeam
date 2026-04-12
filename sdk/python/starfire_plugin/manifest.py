@@ -146,8 +146,8 @@ def validate_skill(path: str | Path) -> list[str]:
     elif not isinstance(name, str):
         errors.append(f"`name` must be a string, got {type(name).__name__}")
     else:
-        if len(name) < 1 or len(name) > _SKILL_NAME_MAX:
-            errors.append(f"`name` length must be 1–{_SKILL_NAME_MAX}, got {len(name)}")
+        if len(name) > _SKILL_NAME_MAX:
+            errors.append(f"`name` length must be ≤{_SKILL_NAME_MAX}, got {len(name)}")
         if not _SKILL_NAME_RE.match(name):
             errors.append(
                 f"`name` '{name}' must be lowercase alphanumeric with single hyphens, "
