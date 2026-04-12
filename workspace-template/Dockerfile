@@ -31,6 +31,7 @@ COPY entrypoint.sh ./
 COPY skills/ ./skills/
 COPY tools/ ./tools/
 COPY adapters/ ./adapters/
+COPY plugins_registry/ ./plugins_registry/
 COPY policies/ ./policies/
 
 # Create CLI aliases
