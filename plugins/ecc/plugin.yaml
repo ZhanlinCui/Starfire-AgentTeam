@@ -4,6 +4,10 @@ description: Everything Claude Code — coding guardrails, standards, and develo
 author: Starfire
 tags: [claude-code, coding, standards, guardrails]
 
+runtimes:
+  - claude_code
+  - deepagents
+
 rules:
   - rules/everything-claude-code-guardrails.md
   - rules/node.md

@@ -4,5 +4,12 @@ description: Starfire codebase conventions, past bugs, quality standards, and co
 author: Starfire
 tags: [conventions, quality, coordination, codebase]
 
+# Per-runtime adaptors live under adapters/<runtime>.py and are resolved via
+# the platform's plugin registry. Listed here so the canvas can filter
+# install options by workspace runtime.
+runtimes:
+  - claude_code
+  - deepagents
+
 skills:
   - review-loop
