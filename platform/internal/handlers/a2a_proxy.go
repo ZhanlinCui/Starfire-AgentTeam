@@ -30,9 +30,11 @@ import (
 //
 // Detection: /.dockerenv is the canonical marker inside the default
 // Docker runtime. STARFIRE_IN_DOCKER is an explicit override for
-// environments where /.dockerenv is absent (Podman, custom runtimes);
-// accepts any value strconv.ParseBool recognises ("1", "true", "TRUE",
-// "yes", "on", …).
+// environments where /.dockerenv is absent (Podman, custom runtimes).
+// Accepts any value strconv.ParseBool recognises — 1, 0, t, f, T, F,
+// true, false, TRUE, FALSE, True, False. Anything else (including
+// "yes"/"on") is treated as unset and falls through to the /.dockerenv
+// check.
 //
 // Exposed as a var (not a const) so tests can toggle it via
 // setPlatformInDockerForTest without fiddling with real filesystem

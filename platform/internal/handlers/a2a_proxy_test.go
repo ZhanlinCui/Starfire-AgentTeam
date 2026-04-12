@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -459,6 +460,10 @@ func TestIsSystemCaller(t *testing.T) {
 // ==================== detectPlatformInDocker ====================
 
 func TestDetectPlatformInDocker_EnvVar(t *testing.T) {
+	// Deterministic: asserts the function returns exactly the env-var
+	// value when strconv.ParseBool accepts it. Unparseable values are
+	// covered separately below because their outcome depends on whether
+	// /.dockerenv exists on the host running the test.
 	cases := []struct {
 		env      string
 		expected bool
@@ -467,22 +472,39 @@ func TestDetectPlatformInDocker_EnvVar(t *testing.T) {
 		{"true", true},
 		{"TRUE", true},
 		{"True", true},
-		{"yes", false},  // strconv.ParseBool doesn't accept "yes"
+		{"t", true},
 		{"0", false},
 		{"false", false},
-		{"bogus", false}, // unparseable → fall through to /.dockerenv check
+		{"FALSE", false},
+		{"f", false},
 	}
-	// Tests touch the global env var; guarantee cleanup after each case.
 	for _, tc := range cases {
 		t.Run(tc.env, func(t *testing.T) {
 			t.Setenv("STARFIRE_IN_DOCKER", tc.env)
-			// Mask any real /.dockerenv that might exist on the CI host
-			// by asserting only the env-var path is exercised here; if
-			// env is unparseable we still fall through to the file check.
 			got := detectPlatformInDocker()
-			if tc.env != "bogus" && got != tc.expected {
+			if got != tc.expected {
 				t.Errorf("STARFIRE_IN_DOCKER=%q → detectPlatformInDocker() = %v, want %v",
 					tc.env, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestDetectPlatformInDocker_UnparseableFallsThroughToFilesystemCheck(t *testing.T) {
+	// Unparseable env values must NOT be treated as "true" — they fall
+	// through to the /.dockerenv filesystem check. The result therefore
+	// depends on the host; we only assert the return matches what the
+	// filesystem check would report (keeps the test stable on Docker-
+	// based CI as well as host-mode dev boxes).
+	_, dockerenvErr := os.Stat("/.dockerenv")
+	dockerenvExists := dockerenvErr == nil
+	for _, env := range []string{"yes", "on", "bogus", "maybe", "2"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv("STARFIRE_IN_DOCKER", env)
+			got := detectPlatformInDocker()
+			if got != dockerenvExists {
+				t.Errorf("STARFIRE_IN_DOCKER=%q → detectPlatformInDocker() = %v, want %v (matches /.dockerenv presence)",
+					env, got, dockerenvExists)
 			}
 		})
 	}
