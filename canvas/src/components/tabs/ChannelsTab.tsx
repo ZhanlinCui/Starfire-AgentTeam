@@ -89,7 +89,7 @@ export function ChannelsTab({ workspaceId }: Props) {
       const chats = res.chats || [];
       setDiscoveredChats(chats);
       if (chats.length === 0) {
-        setFormError("No groups found. Add the bot to your group(s), send a message, then try again.");
+        setFormError("No chats found. For groups: add the bot and send a message. For DMs: send /start to the bot first. Then retry.");
       } else {
         // Auto-select all discovered chats
         setSelectedChats(new Set(chats.map((c) => c.chat_id)));
@@ -216,7 +216,7 @@ export function ChannelsTab({ workspaceId }: Props) {
                 disabled={discovering || !formBotToken}
                 className="text-[10px] px-2 py-0.5 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition disabled:opacity-40"
               >
-                {discovering ? "Detecting..." : "Detect Groups"}
+                {discovering ? "Detecting..." : "Detect Chats"}
               </button>
             </div>
             {discoveredChats.length > 0 && (
@@ -246,8 +246,8 @@ export function ChannelsTab({ workspaceId }: Props) {
             />
             <p className="text-[9px] text-zinc-600 mt-0.5">
               {discoveredChats.length > 0
-                ? "Select groups above or enter IDs manually."
-                : "Enter IDs manually, or click Detect Groups after adding the bot to your group(s)."}
+                ? "Select chats above or enter IDs manually."
+                : "Click Detect Chats after adding the bot to groups or sending /start in DMs."}
             </p>
           </div>
           <div>

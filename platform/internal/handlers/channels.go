@@ -298,7 +298,7 @@ func (h *ChannelHandler) Discover(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"bot_username": "",
 		"chats":        chats,
-		"hint":         "Add the bot to your groups and send a message, then retry if no chats appear.",
+		"hint":         "For groups: add bot and send a message. For DMs: send /start to the bot. Then retry.",
 	})
 }
 
