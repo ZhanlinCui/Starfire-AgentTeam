@@ -32,8 +32,11 @@ func (t *TelegramAdapter) ValidateConfig(config map[string]interface{}) error {
 	return nil
 }
 
+// welcomeMessage is sent when a user sends /start to the bot (acknowledgment only).
+const welcomeMessage = "✅ Bot connected and ready.\n\nYour chat ID: `%d`\n\nPaste this ID in Starfire to link this chat to an agent, or use 'Detect Chats' to auto-fill it."
+
 // DiscoverChats calls Telegram getUpdates to find groups/chats the bot has been added to.
-// The user adds the bot to their group(s), sends a message, then calls this to auto-detect.
+// It also auto-replies to any /start commands so the user knows the bot is alive.
 func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) ([]map[string]interface{}, error) {
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
@@ -52,7 +55,7 @@ func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) ([
 		return nil, fmt.Errorf("failed to get updates: %w", err)
 	}
 
-	// Deduplicate by chat ID
+	// Deduplicate by chat ID, auto-reply to /start during discovery
 	seen := map[int64]bool{}
 	var chats []map[string]interface{}
 	for _, update := range updates {
@@ -60,6 +63,18 @@ func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) ([
 			continue
 		}
 		chat := update.Message.Chat
+
+		// Auto-reply to /start so user knows the bot works
+		if strings.HasPrefix(update.Message.Text, "/start") {
+			reply := tgbotapi.NewMessage(chat.ID, fmt.Sprintf(welcomeMessage, chat.ID))
+			reply.ParseMode = "Markdown"
+			if _, sendErr := bot.Send(reply); sendErr != nil {
+				// Retry without Markdown
+				reply.ParseMode = ""
+				bot.Send(reply)
+			}
+		}
+
 		if seen[chat.ID] {
 			continue
 		}
@@ -231,6 +246,13 @@ func (t *TelegramAdapter) StartPolling(ctx context.Context, config map[string]in
 
 			// Only process messages from configured chats
 			if !isChatAllowed(config, chatID) {
+				continue
+			}
+
+			// Auto-reply to /start without forwarding to the agent
+			if strings.HasPrefix(update.Message.Text, "/start") {
+				reply := tgbotapi.NewMessage(update.Message.Chat.ID, "✅ Connected to Starfire agent. Send a message and I'll forward it.")
+				bot.Send(reply)
 				continue
 			}
 
