@@ -110,6 +110,13 @@ All PRs must follow this checklist:
 6. **Remote plugin registry** — install plugins from npm/git (currently local only)
 7. **Agent git worktrees** — per-agent branches without full clone
 8. **SDK follow-ups** — live tool-call visibility, cost telemetry, cancel UX, governance hooks
+9. **Real webhook mode for channels** — Phase 27 candidate. Currently polling-only; webhook needs:
+   - `mode: "webhook"|"polling"` config field
+   - `PUBLIC_URL` env var
+   - Platform calls `setWebhook` on channel create (with random `webhook_secret`), `deleteWebhook` on delete
+   - Canvas toggle to enable webhook mode (only when PUBLIC_URL is set)
+   - Polling works fine for ≤hundreds of bots; webhook needed at thousands+ scale or for serverless
+10. **More channel adapters** — Slack (OAuth + Events API), Discord (Bot + Gateway), WhatsApp (Cloud API)
 
 ---
 
