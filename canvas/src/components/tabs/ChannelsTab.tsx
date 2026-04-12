@@ -49,6 +49,7 @@ export function ChannelsTab({ workspaceId }: Props) {
   const [discovering, setDiscovering] = useState(false);
   const [discoveredChats, setDiscoveredChats] = useState<{ chat_id: string; name: string; type: string }[]>([]);
   const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set());
+  const [showManualInput, setShowManualInput] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -238,16 +239,29 @@ export function ChannelsTab({ workspaceId }: Props) {
                 ))}
               </div>
             )}
-            <input
-              value={formChatId}
-              onChange={(e) => setFormChatId(e.target.value)}
-              placeholder="-100123456789, -100987654321"
-              className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-300 placeholder-zinc-600"
-            />
+            {(discoveredChats.length === 0 || showManualInput) && (
+              <input
+                value={formChatId}
+                onChange={(e) => setFormChatId(e.target.value)}
+                placeholder="-100123456789, -100987654321"
+                className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-300 placeholder-zinc-600"
+              />
+            )}
             <p className="text-[9px] text-zinc-600 mt-0.5">
-              {discoveredChats.length > 0
-                ? "Select chats above or enter IDs manually."
-                : "Click Detect Chats after adding the bot to groups or sending /start in DMs."}
+              {discoveredChats.length > 0 ? (
+                <>
+                  Chats: <span className="text-zinc-400">{formChatId || "(none selected)"}</span>
+                  {" · "}
+                  <button
+                    onClick={() => setShowManualInput(!showManualInput)}
+                    className="text-blue-400 hover:underline"
+                  >
+                    {showManualInput ? "hide manual input" : "edit manually"}
+                  </button>
+                </>
+              ) : (
+                "Click Detect Chats after adding the bot to groups or sending /start in DMs."
+              )}
             </p>
           </div>
           <div>
