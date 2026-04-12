@@ -57,6 +57,51 @@ func (m *Manager) Start(ctx context.Context) {
 	m.Reload(ctx)
 }
 
+// PausePollersForToken stops any pollers that share the given bot token,
+// then returns a resume function. Used during discovery to avoid Telegram's
+// "only one getUpdates at a time" 409 Conflict.
+func (m *Manager) PausePollersForToken(botToken string) func() {
+	if botToken == "" {
+		return func() {}
+	}
+
+	rows, err := db.DB.QueryContext(context.Background(), `
+		SELECT id FROM workspace_channels
+		WHERE enabled = true AND channel_config->>'bot_token' = $1
+	`, botToken)
+	if err != nil {
+		return func() {}
+	}
+	defer rows.Close()
+
+	var pausedIDs []string
+	m.mu.Lock()
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			if cancel, ok := m.pollers[id]; ok {
+				cancel()
+				delete(m.pollers, id)
+				pausedIDs = append(pausedIDs, id)
+				log.Printf("Channels: paused poller %s for discovery", truncID(id))
+			}
+		}
+	}
+	m.mu.Unlock()
+
+	if len(pausedIDs) == 0 {
+		return func() {}
+	}
+
+	// Resume by reloading — Reload starts pollers for any enabled channels not currently running
+	return func() {
+		// Wait briefly so Telegram releases the long-poll connection
+		time.Sleep(1 * time.Second)
+		m.Reload(context.Background())
+		log.Printf("Channels: resumed %d poller(s) after discovery", len(pausedIDs))
+	}
+}
+
 // Stop cancels all running pollers.
 func (m *Manager) Stop() {
 	m.mu.Lock()

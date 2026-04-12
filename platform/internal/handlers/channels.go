@@ -290,6 +290,11 @@ func (h *ChannelHandler) Discover(c *gin.Context) {
 		return
 	}
 
+	// Pause any active poller using this bot token to avoid Telegram's
+	// "only one getUpdates at a time" 409 Conflict.
+	resumeFn := h.manager.PausePollersForToken(body.BotToken)
+	defer resumeFn()
+
 	result, err := tg.DiscoverChats(c.Request.Context(), body.BotToken)
 	if err != nil {
 		// Map known errors to user-friendly messages
@@ -297,6 +302,10 @@ func (h *ChannelHandler) Discover(c *gin.Context) {
 		userMsg := "Failed to connect to Telegram. Check your bot token and try again."
 		if strings.Contains(msg, "invalid bot token") || strings.Contains(msg, "Unauthorized") || strings.Contains(msg, "Not Found") {
 			userMsg = "Invalid bot token. Check the token from @BotFather and try again."
+		} else if strings.Contains(msg, "Conflict") || strings.Contains(msg, "terminated by other") {
+			userMsg = "This bot is already connected to another channel. Disconnect the existing channel first, or wait 30 seconds and retry."
+		} else if strings.Contains(msg, "no route to host") || strings.Contains(msg, "i/o timeout") {
+			userMsg = "Cannot reach Telegram API. Check your network connection and try again."
 		}
 		log.Printf("Channels: discover error: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": userMsg})
