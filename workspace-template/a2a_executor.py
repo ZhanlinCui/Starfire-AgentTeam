@@ -235,9 +235,11 @@ class LangGraphA2AExecutor(AgentExecutor):
 
                 # Recursion limit (LangGraph default is 25). Each ReAct cycle
                 # = 1 LLM call + 1 tool call = 2 steps. DeepAgents with
-                # planning + delegation often needs 100+. Configurable via
-                # LANGGRAPH_RECURSION_LIMIT env var.
-                recursion_limit = int(os.environ.get("LANGGRAPH_RECURSION_LIMIT", "100"))
+                # planning + delegation often blows past 100 when a PM fans
+                # out to 6+ reports (plan → 6 delegations → 6 awaits → 6
+                # results → synthesize ≈ 30+ ReAct steps even before retries).
+                # 500 gives headroom; configurable via LANGGRAPH_RECURSION_LIMIT.
+                recursion_limit = int(os.environ.get("LANGGRAPH_RECURSION_LIMIT", "500"))
                 run_config = {
                     "configurable": {"thread_id": context_id},
                     "run_name": f"a2a-{context_id[:8]}",
