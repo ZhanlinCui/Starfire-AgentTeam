@@ -32,7 +32,8 @@
 | 22 | Cron Scheduling | PR #49 — recurring tasks via cron expressions, Canvas Schedule tab |
 | 23 | Code Quality & Multi-Provider | PR #50 — model fallback, DeepAgents full SDK, 7 LLM providers, 100% test coverage |
 | 24 | Async Delegation | PR #41 — non-blocking delegation with status polling, `check_delegation_status` tool |
-| 25 | Social Channels | PR #54 — adapter-based Telegram integration, Canvas Channels tab, 7 MCP tools, hot reload |
+| 25 | Social Channels | PR #54 — adapter-based Telegram integration, Canvas Channels tab, 7 MCP tools, hot reload, multi-chat IDs, auto-detect, /start auto-reply, full Telegram Bot API audit fixes |
+| 26 | Auth Env Vars | PR #55 — `required_env` config replaces `.auth-token` files, env-var only path; reno-stars 15-agent org template |
 
 ---
 
@@ -117,9 +118,9 @@ All PRs must follow this checklist:
 | Stack | Tests | Framework |
 |-------|-------|-----------|
 | Go (platform) | 448 | `go test -race` |
-| Python (workspace) | 973 | pytest |
+| Python (workspace) | 990 | pytest |
 | Canvas (frontend) | 345 | Vitest |
-| **Total** | **1,766** | |
+| **Total** | **1,783** | |
 
 E2E: 68/68 comprehensive checks passing, 62 API tests.
 
