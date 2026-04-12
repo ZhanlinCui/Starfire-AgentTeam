@@ -63,6 +63,34 @@ logger = logging.getLogger(__name__)
 
 _WORKSPACE_ID = os.environ.get("WORKSPACE_ID", "unknown")
 
+# LangGraph ReAct cycle budget per turn. Library default is 25; 500 covers
+# PM fan-outs (plan → 6 delegations → 6 awaits → 6 results → synthesize ≈
+# 30+ steps even before retries). Overridable via LANGGRAPH_RECURSION_LIMIT.
+DEFAULT_RECURSION_LIMIT = 500
+
+
+def _parse_recursion_limit() -> int:
+    """Read LANGGRAPH_RECURSION_LIMIT; fall back to DEFAULT_RECURSION_LIMIT
+    with a WARNING log on any unparseable or non-positive value."""
+    raw = os.environ.get("LANGGRAPH_RECURSION_LIMIT", "")
+    if not raw:
+        return DEFAULT_RECURSION_LIMIT
+    try:
+        n = int(raw)
+    except ValueError:
+        logger.warning(
+            "LANGGRAPH_RECURSION_LIMIT=%r is not an integer; using default %d",
+            raw, DEFAULT_RECURSION_LIMIT,
+        )
+        return DEFAULT_RECURSION_LIMIT
+    if n <= 0:
+        logger.warning(
+            "LANGGRAPH_RECURSION_LIMIT=%d is not positive; using default %d",
+            n, DEFAULT_RECURSION_LIMIT,
+        )
+        return DEFAULT_RECURSION_LIMIT
+    return n
+
 # ---------------------------------------------------------------------------
 # Compliance (OWASP Top 10 for Agentic Apps) — optional, lazy-loaded
 # ---------------------------------------------------------------------------
@@ -233,13 +261,10 @@ class LangGraphA2AExecutor(AgentExecutor):
                     logger.info("A2A execute: injecting %d history messages", len(messages))
                 messages.append(("human", user_input))
 
-                # Recursion limit (LangGraph default is 25). Each ReAct cycle
-                # = 1 LLM call + 1 tool call = 2 steps. DeepAgents with
-                # planning + delegation often blows past 100 when a PM fans
-                # out to 6+ reports (plan → 6 delegations → 6 awaits → 6
-                # results → synthesize ≈ 30+ ReAct steps even before retries).
-                # 500 gives headroom; configurable via LANGGRAPH_RECURSION_LIMIT.
-                recursion_limit = int(os.environ.get("LANGGRAPH_RECURSION_LIMIT", "500"))
+                # Recursion limit: see DEFAULT_RECURSION_LIMIT and
+                # _parse_recursion_limit() at module top. Re-read on every
+                # call so the env var can be hot-changed between requests.
+                recursion_limit = _parse_recursion_limit()
                 run_config = {
                     "configurable": {"thread_id": context_id},
                     "run_name": f"a2a-{context_id[:8]}",

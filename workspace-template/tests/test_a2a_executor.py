@@ -953,3 +953,48 @@ async def test_core_execute_sets_span_error_status_when_opentelemetry_available(
             sys.modules.pop("opentelemetry.trace", None)
         else:
             sys.modules["opentelemetry.trace"] = original_otel_trace
+
+
+# ---------------------------------------------------------------------------
+# _parse_recursion_limit — env-var parsing + fallbacks
+# ---------------------------------------------------------------------------
+
+
+def test_parse_recursion_limit_default_when_unset(monkeypatch):
+    from a2a_executor import _parse_recursion_limit, DEFAULT_RECURSION_LIMIT
+    monkeypatch.delenv("LANGGRAPH_RECURSION_LIMIT", raising=False)
+    assert _parse_recursion_limit() == DEFAULT_RECURSION_LIMIT
+
+
+def test_parse_recursion_limit_valid_override(monkeypatch):
+    from a2a_executor import _parse_recursion_limit
+    monkeypatch.setenv("LANGGRAPH_RECURSION_LIMIT", "750")
+    assert _parse_recursion_limit() == 750
+
+
+def test_parse_recursion_limit_falls_back_on_garbage(monkeypatch, caplog):
+    """Unparseable env value must not raise — fall back with a warning."""
+    import logging
+    from a2a_executor import _parse_recursion_limit, DEFAULT_RECURSION_LIMIT
+    monkeypatch.setenv("LANGGRAPH_RECURSION_LIMIT", "not-an-int")
+    with caplog.at_level(logging.WARNING):
+        result = _parse_recursion_limit()
+    assert result == DEFAULT_RECURSION_LIMIT
+    assert any("not an integer" in r.message for r in caplog.records)
+
+
+def test_parse_recursion_limit_falls_back_on_nonpositive(monkeypatch, caplog):
+    """0 and negatives must not be used — fall back with a warning."""
+    import logging
+    from a2a_executor import _parse_recursion_limit, DEFAULT_RECURSION_LIMIT
+    monkeypatch.setenv("LANGGRAPH_RECURSION_LIMIT", "0")
+    with caplog.at_level(logging.WARNING):
+        result = _parse_recursion_limit()
+    assert result == DEFAULT_RECURSION_LIMIT
+    assert any("not positive" in r.message for r in caplog.records)
+
+
+def test_default_recursion_limit_value():
+    """Regression guard: DeepAgents fan-outs need 100+; 500 is today's ceiling."""
+    from a2a_executor import DEFAULT_RECURSION_LIMIT
+    assert DEFAULT_RECURSION_LIMIT == 500

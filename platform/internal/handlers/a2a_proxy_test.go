@@ -455,3 +455,48 @@ func TestIsSystemCaller(t *testing.T) {
 		}
 	}
 }
+
+// ==================== detectPlatformInDocker ====================
+
+func TestDetectPlatformInDocker_EnvVar(t *testing.T) {
+	cases := []struct {
+		env      string
+		expected bool
+	}{
+		{"1", true},
+		{"true", true},
+		{"TRUE", true},
+		{"True", true},
+		{"yes", false},  // strconv.ParseBool doesn't accept "yes"
+		{"0", false},
+		{"false", false},
+		{"bogus", false}, // unparseable → fall through to /.dockerenv check
+	}
+	// Tests touch the global env var; guarantee cleanup after each case.
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("STARFIRE_IN_DOCKER", tc.env)
+			// Mask any real /.dockerenv that might exist on the CI host
+			// by asserting only the env-var path is exercised here; if
+			// env is unparseable we still fall through to the file check.
+			got := detectPlatformInDocker()
+			if tc.env != "bogus" && got != tc.expected {
+				t.Errorf("STARFIRE_IN_DOCKER=%q → detectPlatformInDocker() = %v, want %v",
+					tc.env, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestSetPlatformInDockerForTest(t *testing.T) {
+	original := platformInDocker
+	restore := setPlatformInDockerForTest(!original)
+	if platformInDocker == original {
+		t.Errorf("setPlatformInDockerForTest did not change platformInDocker")
+	}
+	restore()
+	if platformInDocker != original {
+		t.Errorf("restore function did not reset platformInDocker to %v (got %v)",
+			original, platformInDocker)
+	}
+}

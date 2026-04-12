@@ -392,6 +392,16 @@ class TestDeepAgentsAdapter:
 
         await adapter.setup(_make_config())
         assert adapter.agent is fake_agent
+        # virtual_mode must be False so read_file/ls/write_file/edit_file
+        # hit the real bind-mounted /workspace instead of an in-memory
+        # snapshot that silently drifts from what `bash` sees.
+        fs_call = fake_backends.FilesystemBackend.call_args
+        assert fs_call is not None, "FilesystemBackend was never constructed"
+        assert fs_call.kwargs.get("virtual_mode") is False, (
+            "FilesystemBackend must be built with virtual_mode=False — "
+            "virtual_mode=True caused agents to report real files as missing "
+            "and silently dropped writes across restarts. See commit bc563d1."
+        )
 
     @pytest.mark.asyncio
     async def test_create_executor_returns_langgraph_executor(self, monkeypatch):
