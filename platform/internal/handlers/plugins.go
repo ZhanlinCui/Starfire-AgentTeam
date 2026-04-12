@@ -27,8 +27,8 @@ import (
 // Install-layer defaults. Overridable via env for deployments whose
 // plugin sources are fast (or slow) enough to warrant different caps.
 const (
-	defaultInstallBodyMaxBytes = 64 * 1024       // 64 KiB JSON body cap
-	defaultInstallFetchTimeout = 5 * time.Minute // per-fetch deadline
+	defaultInstallBodyMaxBytes = 64 * 1024         // 64 KiB JSON body cap
+	defaultInstallFetchTimeout = 5 * time.Minute   // per-fetch deadline
 	defaultInstallMaxDirBytes  = 100 * 1024 * 1024 // 100 MiB staged tree
 )
 
@@ -109,11 +109,11 @@ type RuntimeLookup func(workspaceID string) (string, error)
 
 // PluginsHandler manages the plugin registry and per-workspace plugin installation.
 type PluginsHandler struct {
-	pluginsDir    string             // host path to plugins/ registry
-	docker        *client.Client     // Docker client for container operations
-	restartFunc   func(string)       // auto-restart workspace after install/uninstall
-	runtimeLookup RuntimeLookup      // workspace_id → runtime (optional)
-	sources       *plugins.Registry  // pluggable install sources (local, github, clawhub, …)
+	pluginsDir    string            // host path to plugins/ registry
+	docker        *client.Client    // Docker client for container operations
+	restartFunc   func(string)      // auto-restart workspace after install/uninstall
+	runtimeLookup RuntimeLookup     // workspace_id → runtime (optional)
+	sources       *plugins.Registry // pluggable install sources (local, github, clawhub, …)
 }
 
 func NewPluginsHandler(pluginsDir string, docker *client.Client, restartFunc func(string)) *PluginsHandler {
@@ -308,10 +308,10 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 	if containerName == "" {
 		// Workspace not running — nothing installed yet, trivially compatible.
 		c.JSON(http.StatusOK, gin.H{
-			"target_runtime":   targetRuntime,
-			"compatible":       []pluginInfo{},
-			"incompatible":     []pluginInfo{},
-			"all_compatible":   true,
+			"target_runtime": targetRuntime,
+			"compatible":     []pluginInfo{},
+			"incompatible":   []pluginInfo{},
+			"all_compatible": true,
 		})
 		return
 	}

@@ -23,11 +23,11 @@ func TestParseSource_BareNameBecomesLocal(t *testing.T) {
 
 func TestParseSource_ExplicitScheme(t *testing.T) {
 	cases := map[string]Source{
-		"local://foo":             {Scheme: "local", Spec: "foo"},
-		"github://org/repo":       {Scheme: "github", Spec: "org/repo"},
-		"github://org/repo#v1.0":  {Scheme: "github", Spec: "org/repo#v1.0"},
-		"clawhub://name@1.2.3":    {Scheme: "clawhub", Spec: "name@1.2.3"},
-		"https://example.com/x":   {Scheme: "https", Spec: "example.com/x"},
+		"local://foo":            {Scheme: "local", Spec: "foo"},
+		"github://org/repo":      {Scheme: "github", Spec: "org/repo"},
+		"github://org/repo#v1.0": {Scheme: "github", Spec: "org/repo#v1.0"},
+		"clawhub://name@1.2.3":   {Scheme: "clawhub", Spec: "name@1.2.3"},
+		"https://example.com/x":  {Scheme: "https", Spec: "example.com/x"},
 	}
 	for in, want := range cases {
 		t.Run(in, func(t *testing.T) {
@@ -136,7 +136,6 @@ func TestRegistry_EmptyReturnsEmpty(t *testing.T) {
 	}
 }
 
-
 func TestErrPluginNotFound_IsMatchable(t *testing.T) {
 	// Wrap + unwrap via fmt.Errorf to prove errors.Is works through
 	// the fmt wrappers the resolvers use in their error returns.
@@ -152,8 +151,6 @@ func TestSource_StringEqualsRaw(t *testing.T) {
 		t.Errorf("String()=%q Raw()=%q must match", s.String(), s.Raw())
 	}
 }
-
-
 
 func TestRegistry_ConcurrentRegisterResolve_NoRace(t *testing.T) {
 	// Exercises the RWMutex: interleave Register / Resolve / Schemes
@@ -177,7 +174,6 @@ func TestRegistry_ConcurrentRegisterResolve_NoRace(t *testing.T) {
 		<-done
 	}
 }
-
 
 // ---- C1: empty spec after scheme ----
 

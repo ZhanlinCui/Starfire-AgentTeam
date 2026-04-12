@@ -53,8 +53,8 @@ func stubGit(repoContents map[string]string) func(ctx context.Context, dir strin
 func TestGithubResolver_ClonesAndStripsGitDir(t *testing.T) {
 	r := &GithubResolver{
 		GitRunner: stubGit(map[string]string{
-			"plugin.yaml":           "name: demo\n",
-			"skills/h/SKILL.md":     "---\nname: h\ndescription: d\n---\n",
+			"plugin.yaml":             "name: demo\n",
+			"skills/h/SKILL.md":       "---\nname: h\ndescription: d\n---\n",
 			"adapters/claude_code.py": "from plugins_registry.builtins import AgentskillsAdaptor as Adaptor\n",
 		}),
 		BaseURL: "file:///dev/null",
@@ -185,7 +185,6 @@ func containsArg(args []string, target string) bool {
 	return false
 }
 
-
 // ---- defaultGitRunner ----
 
 func TestDefaultGitRunner_PropagatesFailureFromMissingGit(t *testing.T) {
@@ -208,8 +207,6 @@ func TestDefaultGitRunner_UsesWorkingDirHomeFallback(t *testing.T) {
 		t.Errorf("git --version should succeed: %v", err)
 	}
 }
-
-
 
 func TestGithubResolver_NilGitRunnerUsesDefault(t *testing.T) {
 	// Passing nil GitRunner should fall back to defaultGitRunner. With no
@@ -237,7 +234,6 @@ func TestGithubResolver_CopyToDstFailure(t *testing.T) {
 		t.Error("expected copy failure when dst is read-only")
 	}
 }
-
 
 func TestGithubResolver_AlwaysPassesDepth1(t *testing.T) {
 	var seenArgs []string

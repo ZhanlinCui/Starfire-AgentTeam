@@ -36,10 +36,10 @@ func TestLocalResolver_Scheme(t *testing.T) {
 func TestLocalResolver_CopiesPluginTree(t *testing.T) {
 	base := t.TempDir()
 	writePlugin(t, base, "demo", map[string]string{
-		"plugin.yaml":                "name: demo\n",
-		"rules/one.md":               "- rule",
-		"skills/hello/SKILL.md":      "---\nname: hello\ndescription: d\n---\nbody",
-		"skills/hello/scripts/t.py":  "# tool",
+		"plugin.yaml":               "name: demo\n",
+		"rules/one.md":              "- rule",
+		"skills/hello/SKILL.md":     "---\nname: hello\ndescription: d\n---\nbody",
+		"skills/hello/scripts/t.py": "# tool",
 	})
 
 	dst := t.TempDir()
@@ -131,7 +131,6 @@ func TestLocalResolver_HonoursContextCancellation(t *testing.T) {
 	}
 }
 
-
 func TestLocalResolver_BubblesUpCopyFailure(t *testing.T) {
 	// Source file the copyTree walk would read; make dst unwritable so
 	// the copyFile step fails.
@@ -175,7 +174,6 @@ func TestLocalResolver_CopyFileSourceUnreadable(t *testing.T) {
 	}
 }
 
-
 func TestLocalResolver_WalkErrorPropagates(t *testing.T) {
 	// Put a plugin dir in place, then replace its subdirectory with an
 	// unreadable one so filepath.Walk surfaces walkErr to our callback.
@@ -198,7 +196,6 @@ func TestLocalResolver_WalkErrorPropagates(t *testing.T) {
 		t.Error("expected Walk error to propagate")
 	}
 }
-
 
 func TestLocalResolver_MissingReturnsErrPluginNotFound(t *testing.T) {
 	r := NewLocalResolver(t.TempDir())
@@ -231,7 +228,6 @@ func TestLocalResolver_NonNotExistStatErrorIsNotErrPluginNotFound(t *testing.T) 
 		t.Errorf("permission-denied stat must not be surfaced as ErrPluginNotFound: %v", err)
 	}
 }
-
 
 func TestLocalResolver_RejectsOverlongName(t *testing.T) {
 	// 129-char name (1 + 128 tail); max is 1 + 127 = 128.

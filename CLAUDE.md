@@ -39,7 +39,7 @@ go run ./cmd/server          # Run server (requires Postgres + Redis running)
 go build -o molecli ./cmd/cli  # Build TUI dashboard
 ./molecli                    # Run TUI dashboard (requires platform running)
 ```
-Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (deprecated — plugins are now installed per-workspace via API; the `plugins/` registry at repo root is auto-discovered), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`), `CORS_ORIGINS` (comma-separated, default `http://localhost:3000,http://localhost:3001`), `RATE_LIMIT` (requests/min, default `600`), `WORKSPACE_DIR` (optional — global fallback host path for `/workspace` bind-mount; overridden by per-workspace `workspace_dir` column in DB; if neither is set, each workspace gets an isolated Docker named volume), `AWARENESS_URL` (optional — if set, injected into workspace containers along with a deterministic `AWARENESS_NAMESPACE` derived from workspace ID).
+Must run from `platform/` directory (not repo root). Env vars: `DATABASE_URL`, `REDIS_URL`, `PORT`, `PLATFORM_URL` (default `http://host.docker.internal:PORT` — passed to agent containers so they can reach the platform), `SECRETS_ENCRYPTION_KEY` (optional AES-256, 32 bytes), `CONFIGS_DIR` (auto-discovered), `PLUGINS_DIR` (deprecated — plugins are now installed per-workspace via API; the `plugins/` registry at repo root is auto-discovered), `ACTIVITY_RETENTION_DAYS` (default `7`), `ACTIVITY_CLEANUP_INTERVAL_HOURS` (default `6`), `CORS_ORIGINS` (comma-separated, default `http://localhost:3000,http://localhost:3001`), `RATE_LIMIT` (requests/min, default `600`), `WORKSPACE_DIR` (optional — global fallback host path for `/workspace` bind-mount; overridden by per-workspace `workspace_dir` column in DB; if neither is set, each workspace gets an isolated Docker named volume), `AWARENESS_URL` (optional — if set, injected into workspace containers along with a deterministic `AWARENESS_NAMESPACE` derived from workspace ID), `PLUGIN_INSTALL_BODY_MAX_BYTES` (default 65536), `PLUGIN_INSTALL_FETCH_TIMEOUT` (default 5m), `PLUGIN_INSTALL_MAX_DIR_BYTES` (default 100 MiB) — safeguards for `POST /workspaces/:id/plugins` installs; see `docs/plugins/sources.md` for the two-axis source/shape plugin model.
 
 `molecli` reads `MOLECLI_URL` (default http://localhost:8080) to locate the platform. Logs are written to `molecli.log` in the working directory (already covered by `*.log` in `.gitignore`).
 
@@ -95,7 +95,8 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 ```bash
 cd platform && go test -race ./...               # 476 Go tests (handlers, registry, provisioner, CLI, delegation, org, channels — sqlmock + miniredis)
 cd canvas && npm test                            # 325 Vitest tests (store, components, hydration, buildTree, secrets API)
-cd workspace-template && python -m pytest -v     # 990 pytest tests (config, heartbeat, prompt, skills, a2a, executor, sdk-executor, memory, mcp, plugins, cli, delegation, preflight)
+cd workspace-template && python -m pytest -v     # 1040 pytest tests (adds plugins_registry, plugins_builtins, plugins_builtins_drift, first_party_plugins, skills_loader expansion)
+cd sdk/python && python -m pytest -v              # 50 SDK tests (agentskills.io spec validator, CLI, AgentskillsAdaptor round-trip)
 ```
 
 ### Integration Tests
@@ -254,8 +255,11 @@ Agents can auto-execute a prompt on startup before any user interaction. Configu
 | GET | /registry/discover/:id | discovery.go |
 | GET | /registry/:id/peers | discovery.go |
 | POST | /registry/check-access | discovery.go |
-| GET | /plugins | plugins.go (list registry) |
+| GET | /plugins | plugins.go (list registry; supports `?runtime=` filter) |
+| GET | /plugins/sources | plugins.go (list registered install-source schemes) |
 | GET/POST/DELETE | /workspaces/:id/plugins[/:name] | plugins.go (install/uninstall per-workspace) |
+| GET | /workspaces/:id/plugins/available | plugins.go (filtered by workspace runtime) |
+| GET | /workspaces/:id/plugins/compatibility?runtime=X | plugins.go (preflight runtime-change check) |
 | GET | /bundles/export/:id | bundle.go |
 | POST | /bundles/import | bundle.go |
 | GET | /org/templates | org.go (list available org templates) |

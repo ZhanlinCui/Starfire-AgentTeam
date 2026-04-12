@@ -7,7 +7,7 @@
 //   - Unset variable  → default
 //   - Unparseable     → default (never crash startup)
 //   - Parsed but ≤ 0  → default (a "disabled" override is almost always
-//                        a misconfiguration; use a feature flag instead)
+//     a misconfiguration; use a feature flag instead)
 package envx
 
 import (
