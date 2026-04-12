@@ -155,3 +155,43 @@ E2E: 68/68 comprehensive checks passing, 62 API tests.
 2. Backend Engineer scopes Firecracker/E2B sandbox backends (Phase 12)
 3. QA Engineer reviews PR #52 for docs compliance before merge
 4. All agents use `GITHUB_TOKEN` env var to clone repo, branch, and create PRs
+
+---
+
+## Future Work — Plugin Adaptor System
+
+Landed (see `feat/plugin-adaptor-registry`): per-runtime plugin adaptors,
+hybrid resolver (registry > plugin-shipped > raw-drop), `GenericPluginAdaptor`
+covering rule+skill plugins for all runtimes, `/plugins?runtime=` filter,
+`/workspaces/:id/plugins/available` endpoint, `starfire-plugin` SDK, and
+gemini org parity with starfire-dev.
+
+Deferred, not blocking:
+
+- **Install-from-GitHub-URL flow** — `POST /plugins/install {git_url}` that
+  clones a repo into the registry, validates the manifest, and runs the
+  adaptor through a sandbox. Needs signature/version pinning and a review
+  of the adaptor-execution threat model before shipping.
+- **Promote-to-default UI** — today, promoting a community plugin to
+  "curated" means manually copying its `adapters/<runtime>.py` into
+  `workspace-template/plugins_registry/<plugin>/`. Later add a canvas
+  button + PR template that opens an upstream PR automatically.
+- **Plugin packs** — manifest that lists other plugins to bundle
+  (`superpowers-pack` → install `superpowers-tdd` + `superpowers-debug` + …).
+  Skip until a real user asks; first-party plugins are small enough to
+  install individually today.
+- **Hot-reload on DeepAgents** — upstream docs say skills/sub-agents are
+  startup-only; would need platform-level container restart on plugin
+  file change. Defer until users complain.
+- **Atomic split of first-party plugins** — `superpowers` and `ecc` still
+  ship as multi-skill bundles. Pipeline already supports splitting but
+  non-urgent.
+- **Sub-agent plugins for non-DeepAgents runtimes** — Claude Code /
+  LangGraph don't have a native sub-agent feature; emulating via
+  tool-routing is possible but invasive. Defer.
+- **Workspace install tracking table** — a `workspace_plugin_installs`
+  table would let uninstall call the adaptor's `uninstall()` path
+  reliably. Today uninstall is a `rm -rf /configs/plugins/<name>` which
+  leaves copied skill dirs behind. Low user impact.
+- **Shared org-template `system-prompt.md` via `_shared/`** — DRY starfire-dev
+  and starfire-worker-gemini. Drift risk; revisit at 3+ orgs.
