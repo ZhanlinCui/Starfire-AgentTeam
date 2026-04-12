@@ -43,12 +43,11 @@ might be whatever shape ClawHub packs happen to be.
 
 ## Source API
 
-`POST /workspaces/:id/plugins` accepts either:
+`POST /workspaces/:id/plugins` takes a single `source` field:
 
 ```json
-{"name": "my-plugin"}                    // back-compat: local registry
-{"source": "local://my-plugin"}          // explicit local
-{"source": "github://org/repo"}          // default branch (public repos only)
+{"source": "local://my-plugin"}          // platform registry
+{"source": "github://org/repo"}          // GitHub default branch (public repos only)
 {"source": "github://org/repo#v1.2.0"}   // pinned tag/branch/sha
 
 // Future: clawhub://, https://, oci:// — not registered by default.

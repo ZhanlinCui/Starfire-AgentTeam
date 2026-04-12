@@ -264,7 +264,7 @@ Agents can auto-execute a prompt on startup before any user interaction. Configu
 | POST | /registry/check-access | discovery.go |
 | GET | /plugins | plugins.go (list registry; supports `?runtime=` filter) |
 | GET | /plugins/sources | plugins.go (list registered install-source schemes) |
-| GET/POST/DELETE | /workspaces/:id/plugins[/:name] | plugins.go (install/uninstall per-workspace) |
+| GET/POST/DELETE | /workspaces/:id/plugins[/:name] | plugins.go — list, install (`{"source":"scheme://spec"}`), uninstall per-workspace |
 | GET | /workspaces/:id/plugins/available | plugins.go (filtered by workspace runtime) |
 | GET | /workspaces/:id/plugins/compatibility?runtime=X | plugins.go (preflight runtime-change check) |
 | GET | /bundles/export/:id | bundle.go |
