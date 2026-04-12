@@ -9,7 +9,7 @@ description: Cost-optimized AI agent team using DeepAgents + Gemini
 defaults:
   runtime: deepagents
   tier: 2
-  model: google_genai:gemini-2.0-flash
+  model: google_genai:gemini-2.5-flash
 
   initial_prompt: |
     You just started. Set up your environment silently — do NOT contact other agents yet.
