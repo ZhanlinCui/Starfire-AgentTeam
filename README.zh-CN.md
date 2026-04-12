@@ -279,6 +279,7 @@ npm run dev
 - [Workspace Runtime](./docs/agent-runtime/workspace-runtime.md)
 - [Canvas UI](./docs/frontend/canvas.md)
 - [本地开发](./docs/development/local-development.md)
+- [生态观察](./docs/ecosystem-watch.md) — 值得关注的相邻项目（Holaboss、Hermes、gstack 等）
 
 ## 当前范围说明
 

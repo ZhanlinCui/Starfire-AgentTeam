@@ -101,6 +101,18 @@ All PRs must follow this checklist:
 
 ---
 
+## Ecosystem Awareness
+
+Adjacent projects worth tracking (Holaboss, Hermes, gstack, …) are catalogued
+in **[`docs/ecosystem-watch.md`](docs/ecosystem-watch.md)**. Skim quarterly,
+add entries liberally, and when one of those projects ships something we
+should react to, file a "Signals to react to" line in that doc and create a
+Backlog entry below pointing at it. Agents doing research or strategy work
+should read `docs/ecosystem-watch.md` first — it's the canonical starting
+point for "what else is out there."
+
+---
+
 ## Backlog (prioritized)
 
 1. **Canvas: Org template import** — Phase 20.3 (deploy org from canvas UI)

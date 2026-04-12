@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Agent Molecule is a platform for orchestrating AI agent workspaces that form an organizational hierarchy. Workspaces register with a central platform, communicate via A2A protocol, and are visualized on a drag-and-drop canvas.
 
+## Ecosystem Context
+
+Before research, strategy, or design work, skim **`docs/ecosystem-watch.md`** —
+it catalogs adjacent agent projects (Holaboss, Hermes, gstack, …) with
+overlap / differentiation / terminology-collision notes. Cross-referenced
+from `PLAN.md` and `README.md`; it's the canonical starting point for
+"what else is out there."
+
 ## Architecture
 
 ```

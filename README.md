@@ -280,6 +280,7 @@ Then open `http://localhost:3000`:
 - [Workspace Runtime](./docs/agent-runtime/workspace-runtime.md)
 - [Canvas UI](./docs/frontend/canvas.md)
 - [Local Development](./docs/development/local-development.md)
+- [Ecosystem Watch](./docs/ecosystem-watch.md) — adjacent projects we track (Holaboss, Hermes, gstack, …)
 
 ## Current Scope
 
