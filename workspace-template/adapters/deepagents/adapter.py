@@ -120,7 +120,12 @@ class DeepAgentsAdapter(BaseAdapter):
 
         # FilesystemBackend — persistent file access
         workspace_dir = "/workspace" if os.path.isdir("/workspace") else "/configs"
-        backend = FilesystemBackend(root_dir=workspace_dir, virtual_mode=True)
+        # virtual_mode=False: read/write the real bind-mounted filesystem so
+        # read_file/ls/write_file/edit_file match what `bash` sees. With
+        # virtual_mode=True agents operate on an in-memory snapshot and
+        # report real files as "missing" (and writes don't persist across
+        # restarts). Permissions below still scope access to /workspace + /configs.
+        backend = FilesystemBackend(root_dir=workspace_dir, virtual_mode=False)
 
         # MemorySaver — session continuity
         self._checkpointer = MemorySaver()
