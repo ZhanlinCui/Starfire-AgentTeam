@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,36 @@ func (t *TelegramAdapter) ValidateConfig(config map[string]interface{}) error {
 		return fmt.Errorf("missing required field: chat_id")
 	}
 	return nil
+}
+
+// parseChatIDs splits a comma-separated chat_id string into individual IDs.
+func parseChatIDs(config map[string]interface{}) []string {
+	raw, _ := config["chat_id"].(string)
+	if raw == "" {
+		return nil
+	}
+	var ids []string
+	for _, s := range strings.Split(raw, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			ids = append(ids, s)
+		}
+	}
+	return ids
+}
+
+// isChatAllowed checks if a chat ID is in the configured list.
+func isChatAllowed(config map[string]interface{}, chatID string) bool {
+	ids := parseChatIDs(config)
+	if len(ids) == 0 {
+		return true // no restriction
+	}
+	for _, id := range ids {
+		if id == chatID {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *TelegramAdapter) SendMessage(ctx context.Context, config map[string]interface{}, chatID string, text string) error {
@@ -102,7 +133,7 @@ func (t *TelegramAdapter) StartPolling(ctx context.Context, config map[string]in
 	}
 
 	channelID, _ := config["_channel_id"].(string) // injected by manager
-	expectedChatID, _ := config["chat_id"].(string)
+	chatIDs := parseChatIDs(config)
 
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
@@ -117,12 +148,12 @@ func (t *TelegramAdapter) StartPolling(ctx context.Context, config map[string]in
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 30
 
-	log.Printf("Channels: Telegram polling started for chat %s (bot: @%s)", expectedChatID, bot.Self.UserName)
+	log.Printf("Channels: Telegram polling started for chats %v (bot: @%s)", chatIDs, bot.Self.UserName)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Channels: Telegram polling stopped for chat %s", expectedChatID)
+			log.Printf("Channels: Telegram polling stopped for chats %v", chatIDs)
 			return nil
 		default:
 		}
@@ -147,8 +178,8 @@ func (t *TelegramAdapter) StartPolling(ctx context.Context, config map[string]in
 
 			chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
 
-			// Only process messages from the configured chat
-			if expectedChatID != "" && chatID != expectedChatID {
+			// Only process messages from configured chats
+			if !isChatAllowed(config, chatID) {
 				continue
 			}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -254,13 +255,16 @@ func (m *Manager) SendOutbound(ctx context.Context, channelID string, text strin
 		return fmt.Errorf("no adapter for %s", ch.ChannelType)
 	}
 
-	chatID, _ := ch.Config["chat_id"].(string)
-	if chatID == "" {
+	chatIDRaw, _ := ch.Config["chat_id"].(string)
+	if chatIDRaw == "" {
 		return fmt.Errorf("no chat_id configured for channel %s", channelID)
 	}
 
-	if err := adapter.SendMessage(ctx, ch.Config, chatID, text); err != nil {
-		return fmt.Errorf("send outbound: %w", err)
+	// Send to all configured chat IDs (comma-separated)
+	for _, cid := range splitChatIDs(chatIDRaw) {
+		if err := adapter.SendMessage(ctx, ch.Config, cid, text); err != nil {
+			log.Printf("Channels: outbound send to %s failed: %v", cid, err)
+		}
 	}
 
 	if db.DB != nil {
@@ -280,6 +284,17 @@ func (m *Manager) SendOutbound(ctx context.Context, channelID string, text strin
 	}
 
 	return nil
+}
+
+func splitChatIDs(raw string) []string {
+	var ids []string
+	for _, s := range strings.Split(raw, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			ids = append(ids, s)
+		}
+	}
+	return ids
 }
 
 func truncID(id string) string {

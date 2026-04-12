@@ -398,6 +398,81 @@ func TestTruncID_Empty(t *testing.T) {
 	}
 }
 
+// ==================== Multi-Chat ID Tests ====================
+
+func TestParseChatIDs_Single(t *testing.T) {
+	ids := parseChatIDs(map[string]interface{}{"chat_id": "-100123"})
+	if len(ids) != 1 || ids[0] != "-100123" {
+		t.Errorf("expected ['-100123'], got %v", ids)
+	}
+}
+
+func TestParseChatIDs_Multiple(t *testing.T) {
+	ids := parseChatIDs(map[string]interface{}{"chat_id": "-100123, -100456, -100789"})
+	if len(ids) != 3 {
+		t.Fatalf("expected 3 IDs, got %d: %v", len(ids), ids)
+	}
+	if ids[0] != "-100123" || ids[1] != "-100456" || ids[2] != "-100789" {
+		t.Errorf("unexpected IDs: %v", ids)
+	}
+}
+
+func TestParseChatIDs_Empty(t *testing.T) {
+	ids := parseChatIDs(map[string]interface{}{})
+	if len(ids) != 0 {
+		t.Errorf("expected empty, got %v", ids)
+	}
+}
+
+func TestParseChatIDs_Whitespace(t *testing.T) {
+	ids := parseChatIDs(map[string]interface{}{"chat_id": " -100 , , -200 "})
+	if len(ids) != 2 || ids[0] != "-100" || ids[1] != "-200" {
+		t.Errorf("expected ['-100','-200'], got %v", ids)
+	}
+}
+
+func TestIsChatAllowed_InList(t *testing.T) {
+	config := map[string]interface{}{"chat_id": "-100, -200, -300"}
+	if !isChatAllowed(config, "-200") {
+		t.Error("expected -200 to be allowed")
+	}
+}
+
+func TestIsChatAllowed_NotInList(t *testing.T) {
+	config := map[string]interface{}{"chat_id": "-100, -200"}
+	if isChatAllowed(config, "-999") {
+		t.Error("expected -999 to NOT be allowed")
+	}
+}
+
+func TestIsChatAllowed_EmptyConfig(t *testing.T) {
+	config := map[string]interface{}{}
+	if !isChatAllowed(config, "-anything") {
+		t.Error("expected all chats allowed when no chat_id configured")
+	}
+}
+
+func TestSplitChatIDs_Multiple(t *testing.T) {
+	ids := splitChatIDs("-100, -200, -300")
+	if len(ids) != 3 {
+		t.Fatalf("expected 3, got %d", len(ids))
+	}
+}
+
+func TestSplitChatIDs_Single(t *testing.T) {
+	ids := splitChatIDs("-100")
+	if len(ids) != 1 || ids[0] != "-100" {
+		t.Errorf("expected ['-100'], got %v", ids)
+	}
+}
+
+func TestSplitChatIDs_Empty(t *testing.T) {
+	ids := splitChatIDs("")
+	if len(ids) != 0 {
+		t.Errorf("expected empty, got %v", ids)
+	}
+}
+
 // ==================== SendOutbound Tests ====================
 
 func TestManager_SendOutbound_NoChatID(t *testing.T) {

@@ -287,13 +287,15 @@ func (h *ChannelHandler) Webhook(c *gin.Context) {
 		return
 	}
 
-	// Look up channel by type + chat_id
+	// Look up channel by type — chat_id supports comma-separated lists,
+	// so we use LIKE to match any channel whose chat_id field contains this ID.
 	var ch channels.ChannelRow
 	var configJSON, allowedJSON []byte
 	err = db.DB.QueryRowContext(ctx, `
 		SELECT id, workspace_id, channel_type, channel_config, enabled, allowed_users
 		FROM workspace_channels
-		WHERE channel_type = $1 AND enabled = true AND channel_config->>'chat_id' = $2
+		WHERE channel_type = $1 AND enabled = true
+		  AND channel_config->>'chat_id' LIKE '%' || $2 || '%'
 	`, channelType, msg.ChatID).Scan(&ch.ID, &ch.WorkspaceID, &ch.ChannelType, &configJSON, &ch.Enabled, &allowedJSON)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"status": "no_channel"}) // No channel configured for this chat

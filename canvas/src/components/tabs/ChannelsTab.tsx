@@ -167,15 +167,15 @@ export function ChannelsTab({ workspaceId }: Props) {
             />
           </div>
           <div>
-            <label className="text-[10px] text-zinc-500 block mb-1">Chat ID</label>
+            <label className="text-[10px] text-zinc-500 block mb-1">Chat IDs</label>
             <input
               value={formChatId}
               onChange={(e) => setFormChatId(e.target.value)}
-              placeholder="-100123456789"
+              placeholder="-100123456789, -100987654321"
               className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-300 placeholder-zinc-600"
             />
             <p className="text-[9px] text-zinc-600 mt-0.5">
-              Group/channel ID. Use @userinfobot on Telegram to find it.
+              Comma-separated group/channel IDs. Use @userinfobot on Telegram to find them.
             </p>
           </div>
           <div>
