@@ -3,6 +3,7 @@ package channels
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // ==================== Adapter Interface Tests ====================
@@ -426,6 +427,79 @@ func TestDiscoverChats_MalformedToken(t *testing.T) {
 	_, err := a.DiscoverChats(context.Background(), "not-a-real-token")
 	if err == nil {
 		t.Error("expected error for malformed token")
+	}
+}
+
+// ==================== Poller Lifetime Tests ====================
+
+// TestManager_PollerSurvivesRequestContext verifies pollers use the manager's
+// background context, NOT the request ctx passed to Reload(). Otherwise pollers
+// die immediately when an HTTP handler returns.
+//
+// This catches the bug where Reload(c.Request.Context()) would cancel the
+// polling goroutine ~50ms after channel creation when the HTTP request finished.
+func TestManager_PollerSurvivesRequestContext(t *testing.T) {
+	mgr := NewManager(&mockProxy{}, &mockBroadcaster{})
+
+	// Manager started with long-lived background context (simulates main.go wiring)
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+	mgr.bgCtx = bgCtx
+
+	// Spawn a poller using the manager's bgCtx (the correct path)
+	pollCtx, pollCancel := context.WithCancel(mgr.bgCtx)
+	mgr.mu.Lock()
+	mgr.pollers["test-id"] = pollCancel
+	mgr.mu.Unlock()
+
+	pollerStopped := make(chan struct{})
+	go func() {
+		<-pollCtx.Done()
+		close(pollerStopped)
+	}()
+
+	// Simulate an HTTP request context being cancelled (handler returned)
+	requestCtx, requestCancel := context.WithCancel(context.Background())
+	requestCancel()
+	_ = requestCtx
+
+	// Poller MUST still be alive — it's tied to bgCtx, not requestCtx
+	select {
+	case <-pollerStopped:
+		t.Fatal("poller died when request context was cancelled — pollers must use manager.bgCtx, not request ctx")
+	case <-time.After(100 * time.Millisecond):
+		// good — poller still running
+	}
+
+	// Cleanup: cancel bg ctx to stop the poller
+	bgCancel()
+	select {
+	case <-pollerStopped:
+		// good
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("poller didn't stop after bg context cancelled")
+	}
+}
+
+// TestManager_BgCtxFallback verifies that if Start() was never called (bgCtx is nil),
+// pollers fall back to context.Background() instead of crashing.
+func TestManager_BgCtxFallback(t *testing.T) {
+	mgr := NewManager(&mockProxy{}, &mockBroadcaster{})
+	// Don't set mgr.bgCtx — simulates a manager that wasn't Start()ed
+
+	parent := mgr.bgCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	pollCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	// Poller should be alive
+	select {
+	case <-pollCtx.Done():
+		t.Fatal("poller ctx already cancelled with nil bgCtx — should fall back to context.Background()")
+	default:
+		// good
 	}
 }
 

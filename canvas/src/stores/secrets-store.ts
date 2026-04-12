@@ -3,6 +3,20 @@ import type { Secret, SecretGroup, SecretStatus } from '@/types/secrets';
 import * as api from '@/lib/api/secrets';
 import { inferGroup } from '@/lib/validation/secret-formats';
 import { SERVICE_GROUP_ORDER } from '@/lib/services';
+import { markAllWorkspacesNeedRestart, markWorkspaceNeedsRestart } from '@/lib/canvas-actions';
+
+// In api/secrets.ts, workspaceId === "global" routes to /settings/secrets;
+// any other value is a workspace-scoped secret at /workspaces/:id/secrets.
+const GLOBAL_WORKSPACE_ID = 'global';
+
+// Global secrets affect all workspaces; workspace-scoped secrets only affect one.
+function markAffectedWorkspaces(workspaceId: string): void {
+  if (workspaceId === GLOBAL_WORKSPACE_ID) {
+    markAllWorkspacesNeedRestart();
+  } else {
+    markWorkspaceNeedsRestart(workspaceId);
+  }
+}
 
 export interface SecretsState {
   // --- data ---
@@ -76,6 +90,7 @@ export const useSecretsStore = create<SecretsState>((set, get) => ({
   createSecret: async (workspaceId, name, value) => {
     const created = await api.createSecret(workspaceId, name, value);
     set((s) => ({ secrets: [...s.secrets, created], isAddFormOpen: false }));
+    markAffectedWorkspaces(workspaceId);
   },
 
   updateSecret: async (workspaceId, name, value) => {
@@ -84,6 +99,7 @@ export const useSecretsStore = create<SecretsState>((set, get) => ({
       secrets: s.secrets.map((sec) => (sec.name === name ? updated : sec)),
       editingKey: null,
     }));
+    markAffectedWorkspaces(workspaceId);
   },
 
   deleteSecret: async (workspaceId, name) => {
@@ -91,6 +107,7 @@ export const useSecretsStore = create<SecretsState>((set, get) => ({
     set((s) => ({
       secrets: s.secrets.filter((sec) => sec.name !== name),
     }));
+    markAffectedWorkspaces(workspaceId);
   },
 
   setSecretStatus: (name, status) => {

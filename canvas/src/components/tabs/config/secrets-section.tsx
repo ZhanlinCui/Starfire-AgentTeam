@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { Section } from "./form-inputs";
+import { markAllWorkspacesNeedRestart } from "@/lib/canvas-actions";
 
 interface SecretEntry {
   key: string;
@@ -180,6 +181,7 @@ export function SecretsSection({ workspaceId }: { workspaceId: string }) {
     try {
       if (globalMode) {
         await api.put("/settings/secrets", { key, value });
+        markAllWorkspacesNeedRestart();
       } else {
         await api.put(`/workspaces/${workspaceId}/secrets`, { key, value });
       }
@@ -193,6 +195,7 @@ export function SecretsSection({ workspaceId }: { workspaceId: string }) {
     try {
       if (globalMode) {
         await api.del(`/settings/secrets/${encodeURIComponent(key)}`);
+        markAllWorkspacesNeedRestart();
       } else {
         await api.del(`/workspaces/${workspaceId}/secrets/${encodeURIComponent(key)}`);
       }

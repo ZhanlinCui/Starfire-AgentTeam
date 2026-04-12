@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   open: boolean;
   title: string;
   message: string;
   confirmLabel?: string;
-  confirmVariant?: "danger" | "primary";
+  confirmVariant?: "danger" | "primary" | "warning";
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -22,26 +23,40 @@ export function ConfirmDialog({
   onCancel,
 }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+  // Refs avoid re-binding the keydown handler on every parent render
+  const onConfirmRef = useRef(onConfirm);
+  const onCancelRef = useRef(onCancel);
+  onConfirmRef.current = onConfirm;
+  onCancelRef.current = onCancel;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-      if (e.key === "Enter") onConfirm();
+      if (e.key === "Escape") onCancelRef.current();
+      if (e.key === "Enter") onConfirmRef.current();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, onCancel, onConfirm]);
+  }, [open]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const confirmColors =
     confirmVariant === "danger"
       ? "bg-red-600 hover:bg-red-500 text-white"
-      : "bg-blue-600 hover:bg-blue-500 text-white";
+      : confirmVariant === "warning"
+        ? "bg-amber-600 hover:bg-amber-500 text-white"
+        : "bg-blue-600 hover:bg-blue-500 text-white";
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  // Render via Portal so the fixed-position dialog escapes any containing block
+  // (e.g. parents with transform, filter, will-change that break position:fixed).
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
 
@@ -70,6 +85,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

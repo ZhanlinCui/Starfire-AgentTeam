@@ -38,6 +38,13 @@ type Manager struct {
 	proxy       A2AProxy
 	broadcaster Broadcaster
 
+	// bgCtx is the long-lived context for spawning poller goroutines.
+	// Set exactly once by Start() via startOnce. Pollers must use this —
+	// NOT the request context from HTTP handlers, which gets cancelled
+	// when the request finishes.
+	bgCtx     context.Context
+	startOnce sync.Once
+
 	mu      sync.RWMutex
 	pollers map[string]context.CancelFunc // channelID → cancel func
 }
@@ -60,8 +67,14 @@ func NewManager(proxy A2AProxy, broadcaster Broadcaster) *Manager {
 }
 
 // Start loads all enabled channels from DB and starts polling goroutines.
+// The provided ctx is used as the parent for all poller goroutines, so they
+// stay alive for the lifetime of the manager (not for individual requests).
+// Calling Start multiple times is a no-op after the first.
 func (m *Manager) Start(ctx context.Context) {
-	log.Println("Channels: manager started")
+	m.startOnce.Do(func() {
+		m.bgCtx = ctx
+		log.Println("Channels: manager started")
+	})
 	m.Reload(ctx)
 }
 
@@ -172,7 +185,13 @@ func (m *Manager) Reload(ctx context.Context) {
 			continue
 		}
 
-		pollCtx, cancel := context.WithCancel(ctx)
+		// Use the manager's long-lived background context, NOT the request ctx
+		// (request ctx gets cancelled when the HTTP handler returns, killing the poller)
+		parent := m.bgCtx
+		if parent == nil {
+			parent = context.Background()
+		}
+		pollCtx, cancel := context.WithCancel(parent)
 		m.pollers[id] = cancel
 
 		// Inject channel ID into config for the polling callback

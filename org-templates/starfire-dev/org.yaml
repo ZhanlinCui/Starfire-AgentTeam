@@ -32,6 +32,14 @@ workspaces:
     files_dir: pm
     workspace_dir: /Users/hongming/Documents/GitHub/Starfire-AgentTeam
     canvas: { x: 400, y: 50 }
+    # Auto-link Telegram so the user can talk to PM directly from Telegram.
+    # Bot token + chat ID come from pm/.env (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID).
+    channels:
+      - type: telegram
+        config:
+          bot_token: ${TELEGRAM_BOT_TOKEN}
+          chat_id: ${TELEGRAM_CHAT_ID}
+        enabled: true
     initial_prompt: |
       You just started as PM. Set up silently — do NOT contact agents yet.
       1. The repo is already mounted at /workspace — no need to clone

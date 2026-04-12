@@ -282,3 +282,104 @@ Use key: value pairs`
 		t.Error("expected prompt to preserve quoted strings")
 	}
 }
+
+// ==================== OrgChannel + env expansion tests ====================
+
+func TestOrgChannel_YAMLParsing(t *testing.T) {
+	raw := `
+name: PM
+files_dir: pm
+channels:
+  - type: telegram
+    config:
+      bot_token: ${TELEGRAM_BOT_TOKEN}
+      chat_id: ${TELEGRAM_CHAT_ID}
+    allowed_users: ["123", "456"]
+    enabled: true
+`
+	var ws OrgWorkspace
+	if err := yaml.Unmarshal([]byte(raw), &ws); err != nil {
+		t.Fatalf("YAML parse failed: %v", err)
+	}
+	if len(ws.Channels) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(ws.Channels))
+	}
+	ch := ws.Channels[0]
+	if ch.Type != "telegram" {
+		t.Errorf("expected type telegram, got %q", ch.Type)
+	}
+	if ch.Config["bot_token"] != "${TELEGRAM_BOT_TOKEN}" {
+		t.Errorf("expected raw ${VAR}, got %q", ch.Config["bot_token"])
+	}
+	if len(ch.AllowedUsers) != 2 {
+		t.Errorf("expected 2 allowed users, got %d", len(ch.AllowedUsers))
+	}
+	if ch.Enabled == nil || !*ch.Enabled {
+		t.Error("expected enabled=true")
+	}
+}
+
+func TestExpandWithEnv_FromMap(t *testing.T) {
+	env := map[string]string{"FOO": "bar", "TOKEN": "abc123"}
+	got := expandWithEnv("${FOO}-${TOKEN}", env)
+	if got != "bar-abc123" {
+		t.Errorf("expected 'bar-abc123', got %q", got)
+	}
+}
+
+func TestExpandWithEnv_FromProcessEnv(t *testing.T) {
+	t.Setenv("EXPAND_TEST_VAR", "process-value")
+	got := expandWithEnv("${EXPAND_TEST_VAR}", map[string]string{})
+	if got != "process-value" {
+		t.Errorf("expected 'process-value', got %q", got)
+	}
+}
+
+func TestExpandWithEnv_MapOverridesProcess(t *testing.T) {
+	t.Setenv("OVERRIDE_VAR", "process")
+	got := expandWithEnv("${OVERRIDE_VAR}", map[string]string{"OVERRIDE_VAR": "map"})
+	if got != "map" {
+		t.Errorf("map should override process env, got %q", got)
+	}
+}
+
+func TestExpandWithEnv_UnsetVar(t *testing.T) {
+	got := expandWithEnv("${DEFINITELY_NOT_SET_XYZ}", map[string]string{})
+	if got != "" {
+		t.Errorf("unset var should expand to empty, got %q", got)
+	}
+}
+
+func TestHasUnresolvedVarRef_NoVars(t *testing.T) {
+	if hasUnresolvedVarRef("plain text", "plain text") {
+		t.Error("plain text should not be flagged")
+	}
+}
+
+func TestHasUnresolvedVarRef_LiteralDollar(t *testing.T) {
+	// "$5" is a literal price, not a var ref — should NOT be flagged
+	if hasUnresolvedVarRef("price: $5", "price: $5") {
+		t.Error("literal $5 should not be flagged as unresolved")
+	}
+}
+
+func TestHasUnresolvedVarRef_Resolved(t *testing.T) {
+	// Original had ${VAR}, expanded to "value" — fully resolved
+	if hasUnresolvedVarRef("${VAR}", "value") {
+		t.Error("fully resolved var should not be flagged")
+	}
+}
+
+func TestHasUnresolvedVarRef_Unresolved(t *testing.T) {
+	// Original had ${VAR}, expanded to "" — unresolved
+	if !hasUnresolvedVarRef("${VAR}", "") {
+		t.Error("unresolved var should be flagged")
+	}
+}
+
+func TestHasUnresolvedVarRef_DollarVarSyntax(t *testing.T) {
+	// $VAR syntax (no braces) — also a real ref
+	if !hasUnresolvedVarRef("$MISSING_VAR", "") {
+		t.Error("$VAR syntax should be detected as ref when unresolved")
+	}
+}
