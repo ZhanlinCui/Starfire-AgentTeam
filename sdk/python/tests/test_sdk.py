@@ -374,3 +374,10 @@ def test_first_party_plugins_are_spec_compliant():
         if results:
             failures[plugin.name] = results
     assert not failures, f"Spec failures: {failures}"
+
+
+def test_sdk_generic_adaptor_alias():
+    """SDK exposes AgentskillsAdaptor as the canonical name; GenericPluginAdaptor
+    remains as a backwards-compat alias for existing plugin repos."""
+    from starfire_plugin import AgentskillsAdaptor, GenericPluginAdaptor
+    assert GenericPluginAdaptor is AgentskillsAdaptor

@@ -16,7 +16,7 @@ my-plugin/
 │   ├── SKILL.md             # instructions injected into the system prompt
 │   └── tools/do_thing.py    # optional LangChain @tool functions
 └── adapters/
-    ├── claude_code.py       # one-liner: `from starfire_plugin import GenericPluginAdaptor as Adaptor`
+    ├── claude_code.py       # one-liner: `from starfire_plugin import AgentskillsAdaptor as Adaptor`
     └── deepagents.py        # same
 ```
 
@@ -30,7 +30,7 @@ assert not errors, errors
 
 ## Per-runtime adaptors — when to write a custom one
 
-The default `GenericPluginAdaptor` handles the common shape: rules go into
+The default `AgentskillsAdaptor` handles the common shape: rules go into
 the runtime's memory file (CLAUDE.md), skill dirs go into `/configs/skills/`.
 That covers most plugins.
 
@@ -74,12 +74,12 @@ the platform registry (path #1) so it survives upstream breakage.
 
 ## Testing locally
 
-The SDK ships `GenericPluginAdaptor` as a standalone, unit-testable class:
+The SDK ships `AgentskillsAdaptor` as a standalone, unit-testable class:
 
 ```python
 import asyncio
 from pathlib import Path
-from starfire_plugin import GenericPluginAdaptor, InstallContext
+from starfire_plugin import AgentskillsAdaptor, InstallContext
 
 ctx = InstallContext(
     configs_dir=Path("/tmp/configs"),
@@ -87,7 +87,7 @@ ctx = InstallContext(
     runtime="claude_code",
     plugin_root=Path("./my-plugin"),
 )
-asyncio.run(GenericPluginAdaptor("my-plugin", "claude_code").install(ctx))
+asyncio.run(AgentskillsAdaptor("my-plugin", "claude_code").install(ctx))
 # check /tmp/configs/CLAUDE.md, /tmp/configs/skills/
 ```
 

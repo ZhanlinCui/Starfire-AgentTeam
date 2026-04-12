@@ -198,3 +198,19 @@ async def test_install_skips_skill_when_already_present(tmp_path: Path, full_plu
     await GenericPluginAdaptor("my-plugin", "claude_code").install(_make_ctx(configs, full_plugin))
     # Pre-existing content preserved.
     assert (configs / "skills" / "my-skill" / "SKILL.md").read_text() == "# USER'S OWN"
+
+
+# Backwards-compat alias must keep working so externally-authored plugins
+# that still import GenericPluginAdaptor don't break after the rename to
+# AgentskillsAdaptor.
+async def test_generic_plugin_adaptor_is_alias_of_agentskills_adaptor(tmp_path: Path, full_plugin: Path):
+    from plugins_registry.builtins import AgentskillsAdaptor, GenericPluginAdaptor
+
+    assert GenericPluginAdaptor is AgentskillsAdaptor
+
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    adaptor = GenericPluginAdaptor("my-plugin", "claude_code")
+    result = await adaptor.install(_make_ctx(configs, full_plugin))
+    assert result.plugin_name == "my-plugin"
+    assert (configs / "skills" / "my-skill" / "SKILL.md").exists()

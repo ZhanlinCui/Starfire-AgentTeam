@@ -1,27 +1,43 @@
-"""Generic built-in plugin adaptors for the common install patterns.
+"""Built-in plugin adaptors — one per agent shape.
 
-Most platform plugins fit one of two shapes:
-
-* **Rule plugin** — ships ``rules/*.md`` that should be appended to the runtime's
-  long-lived memory file (CLAUDE.md for Claude Code and DeepAgents), plus
-  optional ``prompt_fragments`` also appended to memory.
-* **Skill plugin** — ships ``skills/<skill_name>/`` directories (SKILL.md +
-  ``tools/*.py``) that the workspace runtime already discovers via a
-  filesystem scan. Install step copies the skill dirs to
-  ``/configs/skills/<name>/`` so both Claude Code (which reloads that dir)
-  and DeepAgents (which globs for tools) pick them up.
-
-Most plugins are "mixed" — they have both rules and skills. :class:`GenericPluginAdaptor`
-handles all three cases with the same code path; individual plugins just
-import it as their per-runtime adaptor:
+The adapter layer is our extensibility surface. Each agent "shape" (form
+of installable capability) gets its own named sub-type adapter. A plugin
+picks which sub-type to use by importing it as ``Adaptor`` in its
+per-runtime file:
 
 .. code-block:: python
 
     # plugins/<name>/adapters/claude_code.py
-    from plugins_registry.builtins import GenericPluginAdaptor as Adaptor
+    from plugins_registry.builtins import AgentskillsAdaptor as Adaptor
 
-Plugins that need runtime-specific behavior (e.g. a DeepAgents plugin that
-registers a sub-agent) ship a custom adaptor instead.
+Shape taxonomy (one class per shape; add more as the ecosystem evolves):
+
+* :class:`AgentskillsAdaptor` — skills in the `agentskills.io
+  <https://agentskills.io>`_ format (``SKILL.md`` + ``scripts/`` +
+  ``references/`` + ``assets/``), plus Starfire's optional ``rules/`` and
+  root-level prompt fragments at the plugin level. Works on every runtime
+  we support (the spec's filesystem layout makes activation trivial on
+  Claude Code, our adapter code does the equivalent on DeepAgents /
+  LangGraph / etc.). **This is the default and covers the common case.**
+
+Coming as ecosystems mature (rule of three — promote when 3+ plugins
+ship the same custom shape):
+
+* ``MCPServerAdaptor`` — install a plugin as an MCP server
+* ``DeepAgentsSubagentAdaptor`` — register a DeepAgents sub-agent
+  (runtime-locked to deepagents)
+* ``LangGraphSubgraphAdaptor`` — install a LangGraph sub-graph
+* ``RAGPipelineAdaptor`` — wire a retriever + index
+* ``SwarmAdaptor`` — bind an OpenAI-swarm / AutoGen-swarm
+* ``WebhookAdaptor`` — register an event handler
+
+Plugins whose shape doesn't match any built-in ship their own adapter
+class in ``plugins/<name>/adapters/<runtime>.py`` — full Python, no
+constraint. When 3+ plugins ship the same custom pattern, we promote
+the class into this module.
+
+Backwards-compat: ``GenericPluginAdaptor`` is kept as an alias of
+``AgentskillsAdaptor`` for already-imported code.
 """
 
 from __future__ import annotations
@@ -43,23 +59,39 @@ def _read_md_files(directory: Path) -> list[tuple[str, str]]:
     return out
 
 
-class GenericPluginAdaptor:
-    """Filesystem-based adaptor that mirrors what the legacy
-    ``claude_code.inject_plugins()`` did, but runtime-agnostic.
+class AgentskillsAdaptor:
+    """Sub-type adaptor for `agentskills.io <https://agentskills.io>`_-format skills.
+
+    This is the default adapter for the "skills + rules" shape — the most
+    common pattern. A plugin using this adapter ships:
+
+    * ``skills/<name>/SKILL.md`` (+ optional ``scripts/``, ``references/``,
+      ``assets/``) — each skill is a spec-compliant agentskills unit,
+      portable to Claude Code, Cursor, Codex, and ~35 other skill-compatible
+      tools without modification.
+    * ``rules/*.md`` (optional, Starfire extension) — always-on prose that
+      gets appended to the runtime's memory file (CLAUDE.md).
+    * Root-level ``*.md`` (optional) — prompt fragments, also appended to
+      memory.
 
     On ``install()``:
-      1. Rules (``rules/*.md``) → append to ``/configs/<memory_filename>``.
-         Idempotent: each rule block is wrapped in a ``# Plugin: <name>`` header
-         that is checked for before re-appending.
+      1. Rules → append to ``/configs/<memory_filename>``, wrapped in a
+         ``# Plugin: <name>`` marker for idempotent re-install.
       2. Prompt fragments (``*.md`` at plugin root, excl. README/CHANGELOG/etc.)
          → same treatment.
       3. Skills (``skills/<skill_name>/``) → copied to
-         ``/configs/skills/<skill_name>/`` so both Claude Code's skill loader
-         and DeepAgents' ``**/*.py`` tool discovery see them.
+         ``/configs/skills/<skill_name>/``. Runtimes with native agentskills
+         activation (Claude Code) pick them up automatically; other runtimes'
+         loaders scan the same path.
 
     Uninstall reverses the file copies and strips the rule/fragment block by
     marker (best-effort — if the user edited CLAUDE.md manually, only the
     marker line itself is removed).
+
+    For shapes other than agentskills (MCP server, DeepAgents sub-agent,
+    LangGraph sub-graph, RAG pipeline, swarm, webhook handler, etc.), see
+    the module docstring for the planned sibling adapters, or ship a custom
+    adapter class in the plugin's ``adapters/<runtime>.py``.
     """
 
     # Files at the plugin root that are never treated as prompt fragments.
@@ -155,3 +187,11 @@ class GenericPluginAdaptor:
         if len(kept) != len(lines):
             memory_path.write_text("".join(kept))
             ctx.logger.info("%s: stripped markers from CLAUDE.md", self.plugin_name)
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compat alias — keep existing imports working.
+# Prefer AgentskillsAdaptor in new code; GenericPluginAdaptor is retained so
+# that externally-authored plugins and existing test fixtures do not break.
+# ---------------------------------------------------------------------------
+GenericPluginAdaptor = AgentskillsAdaptor

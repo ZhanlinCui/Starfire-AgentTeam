@@ -101,7 +101,7 @@ continuously in this codebase" — the tool will decide whether to honor it.
 The spec leaves install semantics to the host tool. Starfire's plugin
 adapters (`plugins/<name>/adapters/<runtime>.py`) bridge the gap for
 runtimes that don't read `SKILL.md` natively. For most plugins the
-built-in `GenericPluginAdaptor` covers the common shape (copy skills to
+built-in `AgentskillsAdaptor` covers the common shape (copy skills to
 `/configs/skills/`, append rules to CLAUDE.md). See
 [plugins_registry](../../workspace-template/plugins_registry/__init__.py)
 for the resolution order.

@@ -162,7 +162,7 @@ E2E: 68/68 comprehensive checks passing, 62 API tests.
 
 Landed (see `feat/plugin-adaptor-registry` and `feat/agentskills-compliance`):
 per-runtime plugin adaptors, hybrid resolver (registry > plugin-shipped >
-raw-drop), `GenericPluginAdaptor` covering rule+skill plugins for all
+raw-drop), `AgentskillsAdaptor` covering rule+skill plugins for all
 runtimes, `/plugins?runtime=` filter, `/workspaces/:id/plugins/available`
 endpoint, `starfire-plugin` SDK, gemini org parity with starfire-dev,
 and **full agentskills.io spec compliance** for all first-party skills

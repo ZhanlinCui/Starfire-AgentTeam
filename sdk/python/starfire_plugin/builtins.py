@@ -1,12 +1,23 @@
-"""Re-export the platform's GenericPluginAdaptor for SDK consumers.
+"""Built-in sub-type adapters for the SDK.
 
-SDK authors should do:
+One class per agent shape. Currently ships :class:`AgentskillsAdaptor`
+(the `agentskills.io <https://agentskills.io>`_-format default); more
+will be added as new shapes emerge in the ecosystem
+(``MCPServerAdaptor``, ``DeepAgentsSubagentAdaptor``, ``RAGPipelineAdaptor``,
+etc.).
 
-    from starfire_plugin import GenericPluginAdaptor as Adaptor
+SDK authors pick a sub-type by import:
 
-and ship that as their ``adapters/<runtime>.py``. The actual implementation
-lives in ``workspace-template/plugins_registry/builtins.py`` — vendored here
-so plugin repos don't need to depend on the full runtime package.
+.. code-block:: python
+
+    # adapters/claude_code.py
+    from starfire_plugin import AgentskillsAdaptor as Adaptor
+
+Plugins whose shape doesn't match any built-in ship a custom adapter
+class in Python — unlimited expressiveness, no framework constraint.
+
+``GenericPluginAdaptor`` is kept as an alias of :class:`AgentskillsAdaptor`
+for backwards compat.
 """
 
 from __future__ import annotations
@@ -17,12 +28,19 @@ from pathlib import Path
 from .protocol import InstallContext, InstallResult
 
 
-class GenericPluginAdaptor:
-    """Filesystem-based adaptor for rule + skill plugins.
+class AgentskillsAdaptor:
+    """Sub-type adaptor for `agentskills.io <https://agentskills.io>`_-format skills.
 
-    Matches the behaviour of ``workspace-template/plugins_registry/builtins.py:GenericPluginAdaptor``.
-    Kept as a separate copy so SDK users can unit-test against it without
-    installing the full workspace runtime.
+    The default adapter for the "skills + rules" shape — installs
+    ``skills/<name>/SKILL.md`` into ``/configs/skills/`` (where native
+    agentskills runtimes like Claude Code activate them automatically)
+    and appends Starfire-level ``rules/*.md`` + root prompt fragments to
+    the runtime memory file.
+
+    Matches the behaviour of the workspace runtime's
+    ``plugins_registry.builtins.AgentskillsAdaptor``. Kept as a separate
+    copy here so SDK users can unit-test their plugins without installing
+    the full workspace runtime.
     """
 
     _SKIP_ROOT_MD = frozenset({"readme.md", "changelog.md", "license.md", "contributing.md"})
@@ -83,3 +101,7 @@ class GenericPluginAdaptor:
             prefix = f"# Plugin: {self.plugin_name} / "
             kept = [ln for ln in memory_path.read_text().splitlines(keepends=True) if not ln.startswith(prefix)]
             memory_path.write_text("".join(kept))
+
+
+# Backwards-compat alias. Prefer AgentskillsAdaptor in new code.
+GenericPluginAdaptor = AgentskillsAdaptor
