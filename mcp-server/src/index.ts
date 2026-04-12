@@ -416,7 +416,8 @@ export async function handleAddChannel(params: {
   config: string;
   allowed_users?: string;
 }) {
-  const config = JSON.parse(params.config);
+  let config: unknown;
+  try { config = JSON.parse(params.config); } catch { return { content: [{ type: "text" as const, text: "Error: config is not valid JSON" }] }; }
   const allowed_users = params.allowed_users ? params.allowed_users.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const data = await apiCall("POST", `/workspaces/${params.workspace_id}/channels`, {
     channel_type: params.channel_type,
@@ -434,7 +435,9 @@ export async function handleUpdateChannel(params: {
   allowed_users?: string;
 }) {
   const body: Record<string, unknown> = {};
-  if (params.config) body.config = JSON.parse(params.config);
+  if (params.config) {
+    try { body.config = JSON.parse(params.config); } catch { return { content: [{ type: "text" as const, text: "Error: config is not valid JSON" }] }; }
+  }
   if (params.enabled !== undefined) body.enabled = params.enabled;
   if (params.allowed_users !== undefined) {
     body.allowed_users = params.allowed_users.split(",").map((s) => s.trim()).filter(Boolean);
