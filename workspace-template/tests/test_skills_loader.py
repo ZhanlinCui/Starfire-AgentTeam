@@ -505,3 +505,95 @@ def test_load_skills_config_load_error_defaults_to_warn(tmp_path, monkeypatch):
     assert len(scan_modes) == 1
     assert scan_modes[0] == "warn"
     assert len(loaded) == 1
+
+
+# ---------- scripts/ (agentskills.io spec) precedence + legacy tools/ ----------
+
+
+def test_load_skills_prefers_scripts_dir(tmp_path, monkeypatch, capsys):
+    """agentskills.io spec says skill executables live under scripts/."""
+    skill = tmp_path / "skills" / "demo"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: demo\ndescription: d\n---\nbody")
+    (skill / "scripts").mkdir()
+    (skill / "scripts" / "tool.py").write_text("# no tools to load")
+
+    import skill_loader.loader as loader_module
+    from unittest.mock import patch
+
+    calls = []
+    def spy(tools_dir):
+        calls.append(tools_dir)
+        return []
+
+    with patch.object(loader_module, "load_skill_tools", side_effect=spy):
+        loader_module.load_skills(str(tmp_path), ["demo"])
+
+    assert len(calls) == 1
+    assert calls[0].name == "scripts"
+    # No deprecation warning should have been printed.
+    out = capsys.readouterr().out
+    assert "legacy" not in out
+
+
+def test_load_skills_no_scripts_yields_empty_tools(tmp_path):
+    """Skill with only SKILL.md (no scripts/ dir) loads with tools=[]."""
+    skill = tmp_path / "skills" / "bare"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: bare\ndescription: d\n---\nbody")
+
+    import skill_loader.loader as loader_module
+    loaded = loader_module.load_skills(str(tmp_path), ["bare"])
+    assert len(loaded) == 1
+    assert loaded[0].tools == []
+
+
+# ---------- parse_skill_frontmatter tolerance (runtime-side) ----------
+
+
+def test_parse_skill_frontmatter_yaml_error_returns_empty_dict(tmp_path, caplog):
+    """Runtime tolerates malformed YAML frontmatter instead of crashing
+    the workspace at startup — SDK's validator is the strict one."""
+    import logging
+    from skill_loader.loader import parse_skill_frontmatter
+
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\n: bad\nfoo: [unclosed\n---\nbody here")
+
+    with caplog.at_level(logging.WARNING):
+        fm, body = parse_skill_frontmatter(p)
+
+    assert fm == {}
+    assert body == "body here"
+    assert any("malformed frontmatter" in rec.message for rec in caplog.records)
+
+
+def test_parse_skill_frontmatter_non_mapping_returns_empty_dict(tmp_path, caplog):
+    """If frontmatter parses to a list (not a mapping), also tolerated."""
+    import logging
+    from skill_loader.loader import parse_skill_frontmatter
+
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\n- just\n- a\n- list\n---\nbody")
+
+    with caplog.at_level(logging.WARNING):
+        fm, body = parse_skill_frontmatter(p)
+
+    assert fm == {}
+    assert body == "body"
+    assert any("not a mapping" in rec.message for rec in caplog.records)
+
+
+def test_load_skills_missing_skill_md_logs_warning(tmp_path, caplog):
+    """Missing SKILL.md path logs a warning via the logger (not print)."""
+    import logging
+    from skill_loader.loader import load_skills
+
+    (tmp_path / "skills" / "phantom").mkdir(parents=True)
+    # no SKILL.md
+
+    with caplog.at_level(logging.WARNING):
+        loaded = load_skills(str(tmp_path), ["phantom"])
+
+    assert loaded == []
+    assert any("SKILL.md not found" in rec.message for rec in caplog.records)

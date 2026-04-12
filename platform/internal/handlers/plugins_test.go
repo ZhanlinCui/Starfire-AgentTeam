@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -146,9 +149,9 @@ skills:
 	}
 }
 
-// ---------- Install: missing name → 400 ----------
+// ---------- Install: missing source → 400 ----------
 
-func TestPluginInstall_MissingName(t *testing.T) {
+func TestPluginInstall_MissingSource(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
 
 	w := httptest.NewRecorder()
@@ -164,7 +167,7 @@ func TestPluginInstall_MissingName(t *testing.T) {
 	}
 }
 
-// ---------- Install: invalid name (path traversal) → 400 ----------
+// ---------- Install: invalid name in local source (path traversal) → 400 ----------
 
 func TestPluginInstall_InvalidName_PathTraversal(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
@@ -172,7 +175,7 @@ func TestPluginInstall_InvalidName_PathTraversal(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
-	body := `{"name":"../../../etc/passwd"}`
+	body := `{"source":"local://../../../etc/passwd"}`
 	c.Request = httptest.NewRequest("POST", "/workspaces/ws-123/plugins", bytes.NewBufferString(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -191,7 +194,7 @@ func TestPluginInstall_NotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
-	body := `{"name":"nonexistent-plugin"}`
+	body := `{"source":"local://nonexistent-plugin"}`
 	c.Request = httptest.NewRequest("POST", "/workspaces/ws-123/plugins", bytes.NewBufferString(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -555,4 +558,385 @@ func TestCheckRuntimeCompatibility_TriviallyCompatibleWhenContainerMissing(t *te
 	if body["target_runtime"] != "deepagents" {
 		t.Errorf("target_runtime mismatch: %v", body["target_runtime"])
 	}
+}
+
+// ---------- ListSources ----------
+
+func TestPluginListSources_ReturnsRegisteredSchemes(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/plugins/sources", nil)
+	h.ListSources(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d", w.Code)
+	}
+	var body map[string][]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	hasLocal, hasGithub := false, false
+	for _, s := range body["schemes"] {
+		if s == "local" {
+			hasLocal = true
+		}
+		if s == "github" {
+			hasGithub = true
+		}
+	}
+	if !hasLocal || !hasGithub {
+		t.Errorf("expected local+github by default, got %v", body["schemes"])
+	}
+}
+
+// ---------- Install — source routing ----------
+
+func TestPluginInstall_RejectsEmptyBody(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x", bytes.NewBufferString(`{}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPluginInstall_RejectsUnknownScheme(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"mystery://thing"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("available_schemes")) {
+		t.Errorf("response should list available_schemes: %s", w.Body.String())
+	}
+}
+
+func TestPluginInstall_LocalSourceReachesContainerLookup(t *testing.T) {
+	base := t.TempDir()
+	pluginDir := filepath.Join(base, "demo")
+	_ = os.MkdirAll(pluginDir, 0o755)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: demo\n"), 0o644)
+	h := NewPluginsHandler(base, nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"local://demo"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	// No docker client configured → source resolves, stage succeeds, then
+	// 503 on container lookup. Proves the local dispatch + stage worked.
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("local:// should reach container lookup: got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPluginInstall_InvalidSourceString(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"   "}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("whitespace-only source should be rejected: got %d", w.Code)
+	}
+}
+
+func TestPluginInstall_RejectsOversizedBody(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	// Build a JSON body larger than the cap (default 64 KiB).
+	big := `{"source":"local://` + strings.Repeat("a", 70*1024) + `"}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x", bytes.NewBufferString(big))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for oversized body, got %d", w.Code)
+	}
+}
+
+// Install 404 via the typed sentinel (replaces the old string-match test).
+func TestPluginInstall_NotFoundUsesTypedSentinel(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"local://nonexistent"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 via ErrPluginNotFound, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Install 502 for non-sentinel resolver errors (e.g. network / auth).
+func TestPluginInstall_NonSentinelResolverErrorIs502(t *testing.T) {
+	// Register a stub resolver whose Fetch returns a plain (non-ErrPluginNotFound) error.
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(alwaysErrs("broken", errors.New("connection refused")))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"broken://whatever"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("non-sentinel resolver error should be 502, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Install returns 504 when fetch honours ctx.DeadlineExceeded.
+func TestPluginInstall_DeadlineExceededIs504(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(alwaysErrs("slow", context.DeadlineExceeded))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"slow://x"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusGatewayTimeout {
+		t.Errorf("deadline exceeded should be 504, got %d", w.Code)
+	}
+}
+
+// Install 413 when the fetched tree exceeds the configured cap.
+func TestPluginInstall_OversizedStagedTreeIs413(t *testing.T) {
+	t.Setenv("PLUGIN_INSTALL_MAX_DIR_BYTES", "1024") // 1 KiB cap
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(writesBlob("big", 2048)) // 2 KiB blob
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"big://whatever"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized staged tree should be 413, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// envDuration / envInt64 moved to platform/internal/envx; see
+// envx/envx_test.go for their tests.
+
+func TestDirSize_ShortCircuitsOnCap(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a"), bytes.Repeat([]byte("x"), 2048), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := dirSize(dir, 1024)
+	if err == nil {
+		t.Error("expected cap-exceeded error")
+	}
+	// Under the cap: no error.
+	if _, err := dirSize(dir, 1<<20); err != nil {
+		t.Errorf("1 MiB cap should accept 2 KiB: %v", err)
+	}
+}
+
+// ---- test-only resolver stub ----
+
+// fakeResolver is a single hook-based SourceResolver replacing the
+// previously-separate erroringResolver / bigBlobResolver /
+// hostileResolver types. Tests pick the scheme and supply a fetchFn.
+type fakeResolver struct {
+	scheme  string
+	fetchFn func(ctx context.Context, spec, dst string) (string, error)
+}
+
+func (f *fakeResolver) Scheme() string { return f.scheme }
+func (f *fakeResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
+	return f.fetchFn(ctx, spec, dst)
+}
+
+// alwaysErrs returns a fakeResolver that fails every fetch with err.
+func alwaysErrs(scheme string, err error) *fakeResolver {
+	return &fakeResolver{
+		scheme:  scheme,
+		fetchFn: func(context.Context, string, string) (string, error) { return "", err },
+	}
+}
+
+// writesBlob returns a fakeResolver that writes N bytes into dst
+// before returning `scheme` as the plugin name.
+func writesBlob(scheme string, size int) *fakeResolver {
+	return &fakeResolver{
+		scheme: scheme,
+		fetchFn: func(_ context.Context, _, dst string) (string, error) {
+			if err := os.WriteFile(filepath.Join(dst, "blob"), bytes.Repeat([]byte("a"), size), 0o644); err != nil {
+				return "", err
+			}
+			return scheme, nil
+		},
+	}
+}
+
+// emitsName returns a fakeResolver that writes a valid plugin.yaml
+// but returns `returnedName` — used to probe post-fetch name
+// validation (e.g. hostile traversal names).
+func emitsName(scheme, returnedName string) *fakeResolver {
+	return &fakeResolver{
+		scheme: scheme,
+		fetchFn: func(_ context.Context, _, dst string) (string, error) {
+			_ = os.WriteFile(filepath.Join(dst, "plugin.yaml"), []byte("name: x\n"), 0o644)
+			return returnedName, nil
+		},
+	}
+}
+
+func TestPluginInstall_RejectsHostileResolverPluginName(t *testing.T) {
+	// Prove the post-fetch validatePluginName call catches a resolver
+	// that tries to smuggle a traversal name into /configs/plugins/.
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(emitsName("hostile", "../../../etc/passwd"))
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"hostile://anything"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("hostile plugin name must be 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPluginInstall_EmptySpecAfterSchemeRejected(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"github://"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("empty spec")) {
+		t.Errorf("error should mention 'empty spec': %s", w.Body.String())
+	}
+}
+
+// ---- resolveAndStage in isolation (now testable sans gin.Context) ----
+
+func TestResolveAndStage_HappyPath_Local(t *testing.T) {
+	base := t.TempDir()
+	pluginDir := filepath.Join(base, "demo")
+	_ = os.MkdirAll(pluginDir, 0o755)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: demo\n"), 0o644)
+	h := NewPluginsHandler(base, nil, nil)
+
+	res, err := h.resolveAndStage(context.Background(), installRequest{Source: "local://demo"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	defer os.RemoveAll(res.StagedDir)
+
+	if res.PluginName != "demo" {
+		t.Errorf("got plugin %q", res.PluginName)
+	}
+	if _, err := os.Stat(filepath.Join(res.StagedDir, "plugin.yaml")); err != nil {
+		t.Errorf("plugin.yaml not staged: %v", err)
+	}
+}
+
+func TestResolveAndStage_EmptyRequest(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	_, err := h.resolveAndStage(context.Background(), installRequest{})
+	var he *httpErr
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		t.Errorf("want typed httpErr with 400, got %v", err)
+	}
+}
+
+func TestResolveAndStage_NotFoundFromResolver(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil) // local resolver pointed at empty dir
+	_, err := h.resolveAndStage(context.Background(), installRequest{Source: "local://absent"})
+	var he *httpErr
+	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
+		t.Errorf("want 404 via ErrPluginNotFound, got %v", err)
+	}
+}
+
+func TestResolveAndStage_CleansUpStagedDirOnError(t *testing.T) {
+	// Hostile resolver emits a file then returns a traversal name → 400.
+	// Verify the staged dir it used is NOT left behind.
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(emitsName("hostile", "../../../etc/passwd"))
+	_, err := h.resolveAndStage(context.Background(), installRequest{Source: "hostile://x"})
+	var he *httpErr
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %v", err)
+	}
+	// Walk /tmp for leftover "starfire-plugin-fetch-*" dirs with the
+	// hostile resolver's marker. Probabilistic (can't pinpoint the exact
+	// dir), but a clean cleanup means none contain the plugin.yaml blob
+	// the resolver writes.
+	entries, _ := filepath.Glob(filepath.Join(os.TempDir(), "starfire-plugin-fetch-*"))
+	for _, e := range entries {
+		if _, err := os.Stat(filepath.Join(e, "plugin.yaml")); err == nil {
+			t.Errorf("leaked staging dir with plugin.yaml still present: %s", e)
+		}
+	}
+}
+
+func TestHTTPErr_WrapsCleanly(t *testing.T) {
+	e := newHTTPErr(http.StatusTeapot, gin.H{"error": "I'm a teapot"})
+	if !strings.Contains(e.Error(), "418") {
+		t.Errorf("Error() should include status: %q", e.Error())
+	}
+	var he *httpErr
+	if !errors.As(e, &he) || he.Status != http.StatusTeapot {
+		t.Errorf("errors.As should extract typed error")
+	}
+}
+
+func TestLogInstallLimitsOnce(t *testing.T) {
+	// sync.Once guarantees exactly one emission per process, so this
+	// test can't reset it. We call with a local buffer writer and assert
+	// behaviour that holds regardless of ordering:
+	//   - first caller sees the line
+	//   - later callers see nothing
+	//   - no panic either way
+	// If another test's NewPluginsHandler already fired the Once, our
+	// buffer stays empty — that's correct, not a bug.
+	var buf bytes.Buffer
+	logInstallLimitsOnce(&buf)
+	logInstallLimitsOnce(&buf) // must not panic; Once is idempotent
+
+	if buf.Len() > 0 {
+		// We were the first caller. Verify the line contains all three
+		// limit names so operators can grep for them.
+		out := buf.String()
+		for _, want := range []string{"Plugin install limits", "body=", "timeout=", "staged="} {
+			if !strings.Contains(out, want) {
+				t.Errorf("log line missing %q: %s", want, out)
+			}
+		}
+	}
+	// If buf is empty: another test's NewPluginsHandler already called
+	// Once. That's also correct behavior — nothing to assert beyond "it
+	// didn't panic."
 }

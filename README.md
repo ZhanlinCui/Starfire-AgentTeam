@@ -161,10 +161,10 @@ Most agent systems stop at "a smart runtime." Starfire pushes further: it gives 
 
 | Core mechanism | Starfire module(s) | Why it matters |
 |---|---|---|
-| **Durable memory that survives sessions** | `workspace-template/tools/memory.py`, `workspace-template/tools/awareness_client.py`, `platform/internal/handlers/memories.go` | Memory is not just durable, it is **workspace-scoped** and can route into awareness namespaces tied to the org structure |
+| **Durable memory that survives sessions** | `workspace-template/builtin_tools/memory.py`, `workspace-template/builtin_tools/awareness_client.py`, `platform/internal/handlers/memories.go` | Memory is not just durable, it is **workspace-scoped** and can route into awareness namespaces tied to the org structure |
 | **Cross-session recall** | `platform/internal/handlers/activity.go` (`/workspaces/:id/session-search`) | Recall spans both activity history and memory rows, so the system can search what happened and what was learned without inventing a separate hidden store |
-| **Skills built from experience** | `workspace-template/tools/memory.py` (`_maybe_log_skill_promotion`) | Promotion from memory into a skill candidate is surfaced as an explicit platform activity, not a silent internal side effect |
-| **Skill improvement during use** | `workspace-template/skills/watcher.py`, `workspace-template/skills/loader.py`, `workspace-template/main.py` | Skills hot-reload into the live runtime, so improvements become available on the next A2A task without restarting the workspace |
+| **Skills built from experience** | `workspace-template/builtin_tools/memory.py` (`_maybe_log_skill_promotion`) | Promotion from memory into a skill candidate is surfaced as an explicit platform activity, not a silent internal side effect |
+| **Skill improvement during use** | `workspace-template/skill_loader/watcher.py`, `workspace-template/skill_loader/loader.py`, `workspace-template/main.py` | Skills hot-reload into the live runtime, so improvements become available on the next A2A task without restarting the workspace |
 | **Persistent skill lifecycle** | `platform/cmd/cli/cmd_agent_skill.go`, `workspace-template/plugins.py` | Skills are not just generated once; they can be audited, installed, published, shared, mounted by plugins, and governed as reusable operational assets |
 
 ### Why this matters in Starfire

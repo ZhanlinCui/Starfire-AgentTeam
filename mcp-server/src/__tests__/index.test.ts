@@ -869,7 +869,7 @@ describe("Response format invariants", () => {
     // New tools — plugins, global secrets, pause/resume, org
     ["handleListPluginRegistry", () => handleListPluginRegistry()],
     ["handleListInstalledPlugins", () => handleListInstalledPlugins({ workspace_id: "x" })],
-    ["handleInstallPlugin", () => handleInstallPlugin({ workspace_id: "x", name: "ecc" })],
+    ["handleInstallPlugin", () => handleInstallPlugin({ workspace_id: "x", source: "local://ecc" })],
     ["handleUninstallPlugin", () => handleUninstallPlugin({ workspace_id: "x", name: "ecc" })],
     ["handleListGlobalSecrets", () => handleListGlobalSecrets()],
     ["handleSetGlobalSecret", () => handleSetGlobalSecret({ key: "K", value: "V" })],
@@ -908,17 +908,29 @@ describe("Plugin handlers", () => {
     expectJsonContent(result, [{ name: "ecc", version: "1.0.0", skills: ["coding-standards"] }]);
   });
 
-  test("handleInstallPlugin calls POST /workspaces/:id/plugins", async () => {
-    global.fetch = mockFetch({ status: "installed", plugin: "ecc" });
-    const result = await handleInstallPlugin({ workspace_id: "ws-1", name: "ecc" });
+  test("handleInstallPlugin sends source URL to POST /workspaces/:id/plugins", async () => {
+    global.fetch = mockFetch({ status: "installed", plugin: "ecc", source: "local://ecc" });
+    const result = await handleInstallPlugin({ workspace_id: "ws-1", source: "local://ecc" });
     expect(global.fetch).toHaveBeenCalledWith(
       `${PLATFORM_URL}/workspaces/ws-1/plugins`,
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ name: "ecc" }),
+        body: JSON.stringify({ source: "local://ecc" }),
       })
     );
-    expectJsonContent(result, { status: "installed", plugin: "ecc" });
+    expectJsonContent(result, { status: "installed", plugin: "ecc", source: "local://ecc" });
+  });
+
+  test("handleInstallPlugin supports github:// source", async () => {
+    global.fetch = mockFetch({ status: "installed", plugin: "my-plugin", source: "github://org/my-plugin#v1.0" });
+    await handleInstallPlugin({ workspace_id: "ws-1", source: "github://org/my-plugin#v1.0" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/workspaces/ws-1/plugins`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ source: "github://org/my-plugin#v1.0" }),
+      })
+    );
   });
 
   test("handleUninstallPlugin calls DELETE /workspaces/:id/plugins/:name", async () => {

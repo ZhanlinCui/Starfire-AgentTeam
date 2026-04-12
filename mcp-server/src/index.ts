@@ -342,9 +342,9 @@ export async function handleListInstalledPlugins(params: { workspace_id: string 
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
-export async function handleInstallPlugin(params: { workspace_id: string; name: string }) {
-  const { workspace_id, name } = params;
-  const data = await apiCall("POST", `/workspaces/${workspace_id}/plugins`, { name });
+export async function handleInstallPlugin(params: { workspace_id: string; source: string }) {
+  const { workspace_id, source } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/plugins`, { source });
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
@@ -865,10 +865,14 @@ export function createServer() {
 
   srv.tool(
     "install_plugin",
-    "Install a plugin from the registry into a workspace (auto-restarts)",
+    "Install a plugin into a workspace from any registered source (auto-restarts). Use GET /plugins/sources to list schemes.",
     {
       workspace_id: z.string().describe("Workspace ID"),
-      name: z.string().describe("Plugin name from registry"),
+      source: z
+        .string()
+        .describe(
+          "Source URL: 'local://<name>' for platform registry, 'github://<owner>/<repo>[#<ref>]' for GitHub, or any registered scheme."
+        ),
     },
     handleInstallPlugin
   );

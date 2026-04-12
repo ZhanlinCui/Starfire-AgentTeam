@@ -215,6 +215,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	plgh := handlers.NewPluginsHandler(pluginsDir, dockerCli, wh.RestartByID).
 		WithRuntimeLookup(runtimeLookup)
 	r.GET("/plugins", plgh.ListRegistry)
+	r.GET("/plugins/sources", plgh.ListSources)
 	r.GET("/workspaces/:id/plugins", plgh.ListInstalled)
 	r.GET("/workspaces/:id/plugins/available", plgh.ListAvailableForWorkspace)
 	r.GET("/workspaces/:id/plugins/compatibility", plgh.CheckRuntimeCompatibility)

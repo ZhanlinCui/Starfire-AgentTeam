@@ -728,7 +728,7 @@ requires:
 
 ## 16. Tools & Capabilities
 
-### Workspace Tools (`workspace-template/tools/`)
+### Workspace Tools (`workspace-template/builtin_tools/`)
 
 | Tool File | Purpose | RBAC |
 |-----------|---------|------|

@@ -158,6 +158,7 @@ class BaseAdapter(ABC):
                 workspace_id=config.workspace_id,
                 runtime=runtime,
                 plugin_root=Path(plugin.path),
+                memory_filename=self.memory_filename(),
                 register_tool=self.register_tool_hook,
                 register_subagent=self.register_subagent_hook,
                 append_to_memory=lambda fn, c, _cfg=config: self.append_to_memory_hook(_cfg, fn, c),

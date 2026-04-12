@@ -24,6 +24,17 @@ interface PluginInfo {
   author: string;
   tags: string[];
   skills: string[];
+  // Declared supported runtimes (e.g. ["claude_code", "deepagents"]).
+  // Empty / absent = "unspecified, try it".
+  runtimes?: string[];
+  // Only present on /workspaces/:id/plugins responses — true if the
+  // plugin declared support for the workspace's current runtime (or
+  // declared no runtimes at all). Lets us grey out inert installs.
+  supported_on_runtime?: boolean;
+}
+
+interface SourceSchemesResponse {
+  schemes: string[];
 }
 
 // Delay before reloading installed plugins after install/uninstall (workspace restarts)
@@ -37,9 +48,11 @@ export function SkillsTab({ data }: Props) {
 
   const [registry, setRegistry] = useState<PluginInfo[]>([]);
   const [installed, setInstalled] = useState<PluginInfo[]>([]);
+  const [sourceSchemes, setSourceSchemes] = useState<string[]>([]);
   const [installing, setInstalling] = useState<string | null>(null);
   const [uninstalling, setUninstalling] = useState<string | null>(null);
   const [showRegistry, setShowRegistry] = useState(false);
+  const [customSource, setCustomSource] = useState("");
   const mountedRef = useRef(true);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -66,24 +79,45 @@ export function SkillsTab({ data }: Props) {
     } catch { /* ignore */ }
   }, []);
 
+  const loadSourceSchemes = useCallback(async () => {
+    try {
+      const result = await api.get<SourceSchemesResponse>("/plugins/sources");
+      if (mountedRef.current) setSourceSchemes(result.schemes ?? []);
+    } catch { /* ignore — falls back to "local only" UX */ }
+  }, []);
+
   useEffect(() => {
     loadInstalled();
     loadRegistry();
-  }, [loadInstalled, loadRegistry]);
+    loadSourceSchemes();
+  }, [loadInstalled, loadRegistry, loadSourceSchemes]);
 
   const installedNames = useMemo(() => new Set(installed.map((p) => p.name)), [installed]);
 
-  const handleInstall = async (pluginName: string) => {
-    setInstalling(pluginName);
+  // Install always goes through the source-based API. For registry
+  // plugins we build the local:// source on the fly; custom sources
+  // (github://, clawhub://, …) are typed into the input below.
+  const installFromSource = async (source: string, labelOverride?: string) => {
+    const label = labelOverride ?? source;
+    setInstalling(label);
     try {
-      await api.post(`/workspaces/${workspaceId}/plugins`, { name: pluginName });
-      showToast(`Installed ${pluginName} — restarting workspace`, "success");
+      await api.post(`/workspaces/${workspaceId}/plugins`, { source });
+      showToast(`Installed ${label} — restarting workspace`, "success");
       reloadTimerRef.current = setTimeout(() => loadInstalled(), PLUGIN_RELOAD_DELAY_MS);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Install failed", "error");
     } finally {
       setInstalling(null);
     }
+  };
+
+  const handleInstall = (pluginName: string) => installFromSource(`local://${pluginName}`, pluginName);
+
+  const handleInstallCustom = async () => {
+    const source = customSource.trim();
+    if (!source) return;
+    await installFromSource(source);
+    setCustomSource("");
   };
 
   const handleUninstall = async (pluginName: string) => {
@@ -122,40 +156,103 @@ export function SkillsTab({ data }: Props) {
         {/* Installed plugins */}
         {installed.length > 0 && (
           <div className="mt-3 space-y-1.5">
-            {installed.map((p) => (
-              <div key={p.name} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800/60 bg-zinc-950/40 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-medium text-zinc-200">{p.name}</span>
-                    {p.version && <span className="text-[9px] text-zinc-600">v{p.version}</span>}
-                  </div>
-                  {p.description && <div className="text-[10px] text-zinc-500 truncate">{p.description}</div>}
-                  {p.skills && p.skills.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {p.skills.slice(0, 4).map((s) => (
-                        <span key={s} className="rounded-full bg-zinc-800/60 px-1.5 py-0.5 text-[8px] text-zinc-400">{s}</span>
-                      ))}
-                      {p.skills.length > 4 && (
-                        <span className="text-[8px] text-zinc-600">+{p.skills.length - 4}</span>
+            {installed.map((p) => {
+              // Plugin was installed but does NOT declare support for
+              // the workspace's current runtime — grey it out so users
+              // see it's inert. Happens after a runtime change or when
+              // someone installs a runtime-specific plugin on a wrong
+              // workspace.
+              const inert = p.supported_on_runtime === false;
+              return (
+                <div
+                  key={p.name}
+                  className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                    inert
+                      ? "border-amber-800/40 bg-amber-950/10 opacity-70"
+                      : "border-zinc-800/60 bg-zinc-950/40"
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-medium text-zinc-200">{p.name}</span>
+                      {p.version && <span className="text-[9px] text-zinc-600">v{p.version}</span>}
+                      {inert && (
+                        <span className="rounded-full border border-amber-700/50 bg-amber-950/30 px-1.5 py-0.5 text-[8px] text-amber-300">
+                          inert on this runtime
+                        </span>
                       )}
                     </div>
-                  )}
+                    {p.description && <div className="text-[10px] text-zinc-500 truncate">{p.description}</div>}
+                    {p.skills && p.skills.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {p.skills.slice(0, 4).map((s) => (
+                          <span key={s} className="rounded-full bg-zinc-800/60 px-1.5 py-0.5 text-[8px] text-zinc-400">{s}</span>
+                        ))}
+                        {p.skills.length > 4 && (
+                          <span className="text-[8px] text-zinc-600">+{p.skills.length - 4}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleUninstall(p.name)}
+                    disabled={uninstalling === p.name}
+                    className="shrink-0 rounded-full border border-red-800/40 bg-red-950/20 px-2 py-0.5 text-[9px] text-red-400 hover:bg-red-900/30 disabled:opacity-30"
+                  >
+                    {uninstalling === p.name ? "..." : "Remove"}
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleUninstall(p.name)}
-                  disabled={uninstalling === p.name}
-                  className="shrink-0 rounded-full border border-red-800/40 bg-red-950/20 px-2 py-0.5 text-[9px] text-red-400 hover:bg-red-900/30 disabled:opacity-30"
-                >
-                  {uninstalling === p.name ? "..." : "Remove"}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         {/* Plugin registry (expandable) */}
         {showRegistry && (
           <div className="mt-3 border-t border-zinc-800/40 pt-3">
+            {/* Install from any source (github://, clawhub://, …) */}
+            <div className="mb-3 rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-2.5">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-600">
+                  Install from source
+                </div>
+                {sourceSchemes.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {sourceSchemes.map((s) => (
+                      <span
+                        key={s}
+                        className="rounded-full border border-zinc-700/50 bg-zinc-900/50 px-1.5 py-0.5 text-[8px] text-zinc-500"
+                      >
+                        {s}://
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={customSource}
+                  onChange={(e) => setCustomSource(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !installing) handleInstallCustom();
+                  }}
+                  placeholder="e.g. github://owner/repo#v1.0"
+                  spellCheck={false}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-[10px] text-zinc-200 placeholder:text-zinc-600 focus:border-violet-600 focus:outline-none"
+                />
+                <button
+                  onClick={handleInstallCustom}
+                  disabled={!customSource.trim() || installing !== null}
+                  className="shrink-0 rounded-full border border-violet-700/50 bg-violet-950/30 px-2.5 py-1 text-[9px] text-violet-300 hover:bg-violet-900/40 disabled:opacity-30"
+                >
+                  {installing === customSource.trim() ? "Installing..." : "Install"}
+                </button>
+              </div>
+              <div className="mt-1 text-[9px] text-zinc-600">
+                Local registry plugins below; paste any scheme URL above for GitHub or other sources.
+              </div>
+            </div>
             <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">Available plugins</div>
             {registry.length === 0 ? (
               <div className="text-[10px] text-zinc-600">No plugins in registry</div>
@@ -175,6 +272,13 @@ export function SkillsTab({ data }: Props) {
                           <div className="mt-1 flex flex-wrap gap-1">
                             {p.tags.map((t) => (
                               <span key={t} className="rounded-full border border-zinc-700/40 px-1.5 py-0.5 text-[8px] text-zinc-500">{t}</span>
+                            ))}
+                          </div>
+                        )}
+                        {p.runtimes && p.runtimes.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {p.runtimes.map((r) => (
+                              <span key={r} className="rounded-full border border-blue-800/40 bg-blue-950/20 px-1.5 py-0.5 text-[8px] text-blue-300">{r}</span>
                             ))}
                           </div>
                         )}

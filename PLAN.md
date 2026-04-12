@@ -160,14 +160,21 @@ E2E: 68/68 comprehensive checks passing, 62 API tests.
 
 ## Future Work — Plugin Adaptor System
 
-Landed (see `feat/plugin-adaptor-registry`): per-runtime plugin adaptors,
-hybrid resolver (registry > plugin-shipped > raw-drop), `GenericPluginAdaptor`
-covering rule+skill plugins for all runtimes, `/plugins?runtime=` filter,
-`/workspaces/:id/plugins/available` endpoint, `starfire-plugin` SDK, and
-gemini org parity with starfire-dev.
+Landed (see `feat/plugin-adaptor-registry` and `feat/agentskills-compliance`):
+per-runtime plugin adaptors, hybrid resolver (registry > plugin-shipped >
+raw-drop), `AgentskillsAdaptor` covering rule+skill plugins for all
+runtimes, `/plugins?runtime=` filter, `/workspaces/:id/plugins/available`
+endpoint, `starfire-plugin` SDK, gemini org parity with starfire-dev,
+and **full agentskills.io spec compliance** for all first-party skills
+(installable in Claude Code, Cursor, Codex, and ~35 other skill-compatible
+tools — see `docs/plugins/agentskills-compat.md`).
 
 Deferred, not blocking:
 
+- **Upstream `runtime-adapters/` extension to agentskills.io spec** —
+  once we've lived with our own per-runtime adapter model for ~month,
+  propose it as a spec extension to `agentskills/agentskills` so other
+  tools can share Starfire-authored adaptors.
 - **Install-from-GitHub-URL flow** — `POST /plugins/install {git_url}` that
   clones a repo into the registry, validates the manifest, and runs the
   adaptor through a sandbox. Needs signature/version pinning and a review

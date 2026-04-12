@@ -1,12 +1,15 @@
 """Load skill packages from the workspace config directory."""
 
 import importlib.util
+import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 try:
     from builtin_tools.security_scan import SkillSecurityError, scan_skill_dependencies
@@ -32,7 +35,15 @@ class LoadedSkill:
 
 
 def parse_skill_frontmatter(skill_md_path: Path) -> tuple[dict, str]:
-    """Parse YAML frontmatter from a SKILL.md file."""
+    """Parse YAML frontmatter from a SKILL.md file.
+
+    Runtime-side: tolerant of malformed frontmatter (returns ``({}, body)``
+    so the skill loads with empty metadata rather than crashing the
+    workspace at startup). The SDK's :func:`starfire_plugin.parse_skill_md`
+    is the authoring-time strict validator that surfaces the same errors.
+    Keep behaviour aligned: if you change acceptance rules here, mirror
+    them in the SDK's parser.
+    """
     content = skill_md_path.read_text()
 
     if not content.startswith("---"):
@@ -42,20 +53,35 @@ def parse_skill_frontmatter(skill_md_path: Path) -> tuple[dict, str]:
     if len(parts) < 3:
         return {}, content
 
-    frontmatter = yaml.safe_load(parts[1]) or {}
+    try:
+        frontmatter = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        logger.warning("SKILL.md at %s has malformed frontmatter; loading with empty metadata", skill_md_path)
+        frontmatter = {}
+    if not isinstance(frontmatter, dict):
+        logger.warning("SKILL.md at %s frontmatter is not a mapping; ignoring", skill_md_path)
+        frontmatter = {}
+
     body = parts[2].strip()
     return frontmatter, body
 
 
-def load_skill_tools(tools_dir: Path) -> list[Any]:
-    """Dynamically load tool functions from a skill's tools/ directory."""
-    from langchain_core.tools import BaseTool
+def load_skill_tools(scripts_dir: Path) -> list[Any]:
+    """Dynamically load tool functions from a skill's scripts/ directory.
 
+    Follows the agentskills.io spec layout: each skill's executable code
+    lives under ``scripts/``. Returns an empty list if the directory
+    doesn't exist.
+    """
     tools = []
-    if not tools_dir.exists():
+    if not scripts_dir.exists():
         return tools
 
-    for py_file in sorted(tools_dir.glob("*.py")):
+    # Import langchain only when we actually have scripts to process.
+    # Keeps test environments (and empty skills) from needing langchain.
+    from langchain_core.tools import BaseTool
+
+    for py_file in sorted(scripts_dir.glob("*.py")):
         if py_file.name.startswith("_"):
             continue
 
@@ -97,7 +123,7 @@ def load_skills(config_path: str, skill_names: list[str]) -> list[LoadedSkill]:
         skill_md = skill_path / "SKILL.md"
 
         if not skill_md.exists():
-            print(f"Warning: SKILL.md not found for {skill_name}, skipping")
+            logger.warning("SKILL.md not found for %s, skipping", skill_name)
             continue
 
         # --- Security scan before loading any code from the skill ------------
@@ -105,7 +131,7 @@ def load_skills(config_path: str, skill_names: list[str]) -> list[LoadedSkill]:
             try:
                 scan_skill_dependencies(skill_name, skill_path, scan_mode)
             except SkillSecurityError as exc:
-                print(f"Skipping skill '{skill_name}': blocked by security scan — {exc}")
+                logger.warning("Skipping skill '%s': blocked by security scan — %s", skill_name, exc)
                 continue
 
         frontmatter, instructions = parse_skill_frontmatter(skill_md)
@@ -118,7 +144,8 @@ def load_skills(config_path: str, skill_names: list[str]) -> list[LoadedSkill]:
             examples=frontmatter.get("examples", []),
         )
 
-        tools = load_skill_tools(skill_path / "tools")
+        # Executables live under scripts/ per the agentskills.io spec.
+        tools = load_skill_tools(skill_path / "scripts")
 
         loaded.append(LoadedSkill(
             metadata=metadata,

@@ -88,3 +88,17 @@ jobs:
           cache-dependency-path: workspace-template/requirements.txt
       - run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov
       - run: python -m pytest --tb=short -q --cov=. --cov-report=term-missing
+
+      # Lint first-party plugins. The validator checks each plugin
+      # against the format it declares — currently agentskills.io for all
+      # of ours, but the same command covers any future shape that lands
+      # under a sibling adapter (MCP, DeepAgents sub-agent, etc.).
+      - name: Install starfire-plugin SDK
+        working-directory: sdk/python
+        run: pip install -e .
+      - name: Lint first-party plugins
+        working-directory: ${{ github.workspace }}
+        run: python -m starfire_plugin validate plugins/starfire-dev plugins/superpowers plugins/ecc
+      - name: Run SDK tests
+        working-directory: sdk/python
+        run: python -m pytest --tb=short -q

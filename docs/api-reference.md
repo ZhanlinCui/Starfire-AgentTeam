@@ -290,9 +290,12 @@ If error_rate > 0.5, broadcasts `WORKSPACE_DEGRADED`. Recovery broadcasts `WORKS
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/plugins` | List available plugins from registry |
+| `GET` | `/plugins` | List available plugins (`?runtime=<name>` filters to compatible) |
+| `GET` | `/plugins/sources` | List registered install-source schemes (e.g. `github`, `local`) |
 | `GET` | `/workspaces/:id/plugins` | List plugins installed in workspace |
-| `POST` | `/workspaces/:id/plugins` | Install plugin (`{"name":"ecc"}`) — auto-restarts |
+| `GET` | `/workspaces/:id/plugins/available` | Plugins filtered to the workspace's runtime |
+| `GET` | `/workspaces/:id/plugins/compatibility?runtime=X` | Preflight runtime change |
+| `POST` | `/workspaces/:id/plugins` | Install plugin (`{"source":"<scheme>://<spec>"}`, e.g. `local://ecc`, `github://owner/repo#v1.0`) — auto-restarts |
 | `DELETE` | `/workspaces/:id/plugins/:name` | Uninstall plugin — auto-restarts |
 
 ---

@@ -4,15 +4,19 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
-	"time"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/agent-molecule/platform/internal/envx"
+	"github.com/agent-molecule/platform/internal/plugins"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -20,6 +24,74 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
+
+// Install-layer defaults. Overridable via env for deployments whose
+// plugin sources are fast (or slow) enough to warrant different caps.
+const (
+	defaultInstallBodyMaxBytes = 64 * 1024         // 64 KiB JSON body cap
+	defaultInstallFetchTimeout = 5 * time.Minute   // per-fetch deadline
+	defaultInstallMaxDirBytes  = 100 * 1024 * 1024 // 100 MiB staged tree
+)
+
+// httpErr is the typed error returned by Install helpers. The handler
+// matches it with errors.As and emits the attached status + body. Using
+// a typed error instead of a 5-value tuple keeps helper signatures Go-
+// idiomatic and makes them testable without a gin.Context.
+type httpErr struct {
+	Status int
+	Body   gin.H
+}
+
+func (e *httpErr) Error() string {
+	return fmt.Sprintf("%d: %v", e.Status, e.Body)
+}
+
+// newHTTPErr constructs an *httpErr without the caller worrying about
+// pointer receivers. Keeps call sites terse.
+func newHTTPErr(status int, body gin.H) *httpErr { return &httpErr{Status: status, Body: body} }
+
+// installLimitsLogOnce gates the single operator-facing log line
+// describing the effective install caps + timeout. sync.Once guarantees
+// exactly one emission per process lifetime, regardless of how many
+// PluginsHandler instances are constructed. Safe to call from any
+// goroutine.
+var installLimitsLogOnce sync.Once
+
+// logInstallLimitsOnce writes the effective install limits to `w`,
+// exactly once per process. Taking the writer as a parameter (instead
+// of a package-level var) removes the last piece of mutable global
+// state from this file — production passes os.Stderr, tests pass a
+// bytes.Buffer with no t.Cleanup dance.
+func logInstallLimitsOnce(w io.Writer) {
+	installLimitsLogOnce.Do(func() {
+		fmt.Fprintf(w,
+			"Plugin install limits: body=%d bytes  timeout=%s  staged=%d bytes\n",
+			envx.Int64("PLUGIN_INSTALL_BODY_MAX_BYTES", defaultInstallBodyMaxBytes),
+			envx.Duration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout),
+			envx.Int64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes),
+		)
+	})
+}
+
+// dirSize returns the total bytes of files under dir. Short-circuits
+// as soon as the byte limit is exceeded so pathological inputs don't
+// run the full walk.
+func dirSize(dir string, limit int64) (int64, error) {
+	var total int64
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() {
+			total += info.Size()
+			if total > limit {
+				return fmt.Errorf("staged plugin exceeds cap of %d bytes", limit)
+			}
+		}
+		return nil
+	})
+	return total, err
+}
 
 // validatePluginName ensures the name is safe (no path traversal).
 func validatePluginName(name string) error {
@@ -43,14 +115,37 @@ type RuntimeLookup func(workspaceID string) (string, error)
 
 // PluginsHandler manages the plugin registry and per-workspace plugin installation.
 type PluginsHandler struct {
-	pluginsDir    string         // host path to plugins/ registry
-	docker        *client.Client // Docker client for container operations
-	restartFunc   func(string)   // auto-restart workspace after install/uninstall
-	runtimeLookup RuntimeLookup  // workspace_id → runtime (optional)
+	pluginsDir    string            // host path to plugins/ registry
+	docker        *client.Client    // Docker client for container operations
+	restartFunc   func(string)      // auto-restart workspace after install/uninstall
+	runtimeLookup RuntimeLookup     // workspace_id → runtime (optional)
+	sources       *plugins.Registry // pluggable install sources (local, github, clawhub, …)
 }
 
+// NewPluginsHandler constructs a PluginsHandler with the default source
+// registry (local + github resolvers). Deployments can add more schemes
+// via WithSourceResolver before routes are wired — e.g. a private
+// enterprise registry or ClawHub. Logs the effective install limits
+// exactly once per process on first construction.
 func NewPluginsHandler(pluginsDir string, docker *client.Client, restartFunc func(string)) *PluginsHandler {
-	return &PluginsHandler{pluginsDir: pluginsDir, docker: docker, restartFunc: restartFunc}
+	sources := plugins.NewRegistry()
+	sources.Register(plugins.NewLocalResolver(pluginsDir))
+	sources.Register(plugins.NewGithubResolver())
+	logInstallLimitsOnce(os.Stderr)
+	return &PluginsHandler{
+		pluginsDir:  pluginsDir,
+		docker:      docker,
+		restartFunc: restartFunc,
+		sources:     sources,
+	}
+}
+
+// WithSourceResolver registers a custom source resolver (e.g. a ClawHub
+// client) alongside the defaults. Call during router wiring, before the
+// first request. Chainable.
+func (h *PluginsHandler) WithSourceResolver(resolver plugins.SourceResolver) *PluginsHandler {
+	h.sources.Register(resolver)
+	return h
 }
 
 // WithRuntimeLookup installs a workspace-runtime resolver. Used by the
@@ -69,9 +164,9 @@ type pluginInfo struct {
 	Tags        []string `json:"tags"`
 	Skills      []string `json:"skills"`
 	// Runtimes declares which workspace runtimes this plugin ships an adaptor
-	// for. Empty means "unknown / legacy plugin" — the canvas should still
-	// allow install (the raw-drop fallback will surface a warning at install
-	// time). Runtime names use underscore form (e.g. "claude_code").
+	// for. Empty means "unspecified" — the canvas still allows install (the
+	// raw-drop fallback surfaces a warning at install time). Runtime names
+	// use underscore form (e.g. "claude_code").
 	Runtimes []string `json:"runtimes"`
 	// SupportedOnRuntime is populated by ListInstalled/compatibility only.
 	// When a workspace changes runtime, plugins whose manifest doesn't
@@ -82,8 +177,8 @@ type pluginInfo struct {
 }
 
 // supportsRuntime returns true if the plugin declares support for the given
-// runtime OR if it declares no runtimes at all (legacy). Comparison is
-// normalized — "claude-code" and "claude_code" are treated as equal.
+// runtime OR if it declares no runtimes at all (treat as "unspecified, try it").
+// Comparison is normalized — "claude-code" and "claude_code" are equal.
 func (p pluginInfo) supportsRuntime(runtime string) bool {
 	if len(p.Runtimes) == 0 {
 		return true
@@ -99,8 +194,8 @@ func (p pluginInfo) supportsRuntime(runtime string) bool {
 
 // ListRegistry handles GET /plugins — lists all available plugins from the registry.
 // Supports optional ?runtime=<name> query param to filter to plugins that
-// declare support for the given runtime (plus legacy plugins with no
-// `runtimes` field, which are assumed compatible).
+// declare support for the given runtime. Plugins with no declared
+// `runtimes` field are treated as "unspecified, try it" and included.
 func (h *PluginsHandler) ListRegistry(c *gin.Context) {
 	runtime := c.Query("runtime")
 	c.JSON(http.StatusOK, h.listRegistryFiltered(runtime))
@@ -125,6 +220,13 @@ func (h *PluginsHandler) listRegistryFiltered(runtime string) []pluginInfo {
 		plugins = append(plugins, info)
 	}
 	return plugins
+}
+
+// ListSources handles GET /plugins/sources — returns the list of
+// registered install-source schemes so clients can show users which
+// kinds of plugin sources they can install from.
+func (h *PluginsHandler) ListSources(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"schemes": h.sources.Schemes()})
 }
 
 // ListAvailableForWorkspace handles GET /workspaces/:id/plugins/available —
@@ -213,10 +315,10 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 	if containerName == "" {
 		// Workspace not running — nothing installed yet, trivially compatible.
 		c.JSON(http.StatusOK, gin.H{
-			"target_runtime":   targetRuntime,
-			"compatible":       []pluginInfo{},
-			"incompatible":     []pluginInfo{},
-			"all_compatible":   true,
+			"target_runtime": targetRuntime,
+			"compatible":     []pluginInfo{},
+			"incompatible":   []pluginInfo{},
+			"all_compatible": true,
 		})
 		return
 	}
@@ -260,64 +362,177 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 	})
 }
 
-// Install handles POST /workspaces/:id/plugins — installs a plugin from the registry.
+// Install handles POST /workspaces/:id/plugins — installs a plugin.
+//
+// Body: {"source": "<scheme>://<spec>"}
+//
+//   - {"source": "local://my-plugin"}               → install from platform registry
+//   - {"source": "github://owner/repo"}             → install from GitHub
+//   - {"source": "github://owner/repo#v1.2.0"}      → pinned ref
+//   - {"source": "clawhub://sonoscli@1.2.0"}        → when a ClawHub resolver is registered
+//
+// The shape of the plugin (agentskills.io format, MCP server, DeepAgents
+// sub-agent, …) is orthogonal and handled by the per-runtime adapter
+// inside the workspace at startup.
+// installRequest is the decoded, validated payload a caller submits.
+// Held out as its own type so resolveAndStage is testable without a
+// gin.Context; the handler just decodes into this shape.
+type installRequest struct {
+	Source string `json:"source"`
+}
+
+// stageResult bundles the outputs of resolveAndStage for the caller.
+// Avoids a 5-value tuple return.
+type stageResult struct {
+	StagedDir  string
+	PluginName string
+	Source     plugins.Source
+}
+
 func (h *PluginsHandler) Install(c *gin.Context) {
 	workspaceID := c.Param("id")
-	ctx := c.Request.Context()
+	// Cap the JSON body so a pathological POST can't exhaust parser memory.
+	bodyMax := envx.Int64("PLUGIN_INSTALL_BODY_MAX_BYTES", defaultInstallBodyMaxBytes)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, bodyMax)
 
-	var body struct {
-		Name string `json:"name" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
+	// Bound the whole install (fetch + copy) so a slow/malicious source
+	// can't tie up an HTTP handler goroutine indefinitely. Overridable
+	// via PLUGIN_INSTALL_FETCH_TIMEOUT (duration string, e.g. "10m").
+	timeout := envx.Duration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+	defer cancel()
+
+	var req installRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := validatePluginName(body.Name); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	result, err := h.resolveAndStage(ctx, req)
+	if err != nil {
+		var he *httpErr
+		if errors.As(err, &he) {
+			c.JSON(he.Status, he.Body)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// On success, we own stagedDir cleanup. On error, resolveAndStage
+	// has already cleaned it up (and its returned result is nil).
+	defer os.RemoveAll(result.StagedDir)
+
+	if err := h.deliverToContainer(ctx, workspaceID, result); err != nil {
+		var he *httpErr
+		if errors.As(err, &he) {
+			c.JSON(he.Status, he.Body)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Validate plugin exists in registry
-	pluginSrc := filepath.Join(h.pluginsDir, body.Name)
-	info, err := os.Stat(pluginSrc)
-	if err != nil || !info.IsDir() {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("plugin '%s' not found in registry", body.Name)})
-		return
+	log.Printf("Plugin install: %s via %s → workspace %s (restarting)", result.PluginName, result.Source.Scheme, workspaceID)
+	c.JSON(http.StatusOK, gin.H{
+		"status": "installed",
+		"plugin": result.PluginName,
+		"source": result.Source.Raw(),
+	})
+}
+
+// resolveAndStage parses a validated request, dispatches to the right
+// SourceResolver, fetches the plugin into a temp dir, and validates the
+// returned name + staged size.
+//
+// On any error the staging tempdir (if created) is removed before return,
+// and the returned *stageResult is nil. Callers own cleanup of
+// result.StagedDir on success via defer os.RemoveAll.
+func (h *PluginsHandler) resolveAndStage(ctx context.Context, req installRequest) (*stageResult, error) {
+	if req.Source == "" {
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
+			"error": "'source' is required (e.g. \"local://my-plugin\" or \"github://owner/repo\")",
+		})
 	}
 
-	// Find container
+	source, err := plugins.ParseSource(req.Source)
+	if err != nil {
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{"error": err.Error()})
+	}
+	resolver, err := h.sources.Resolve(source)
+	if err != nil {
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
+			"error":             err.Error(),
+			"available_schemes": h.sources.Schemes(),
+		})
+	}
+	// Front-run obvious input validation for local sources so path-
+	// traversal attempts yield 400 rather than a resolver-level 502.
+	if source.Scheme == "local" {
+		if err := validatePluginName(source.Spec); err != nil {
+			return nil, newHTTPErr(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+	}
+
+	stagedDir, err := os.MkdirTemp("", "starfire-plugin-fetch-*")
+	if err != nil {
+		return nil, newHTTPErr(http.StatusInternalServerError, gin.H{"error": "failed to create staging dir"})
+	}
+	// From here, we own stagedDir. Every error path below removes it
+	// before returning; the caller's defer takes over on success.
+	cleanup := func() { _ = os.RemoveAll(stagedDir) }
+
+	pluginName, err := resolver.Fetch(ctx, source.Spec, stagedDir)
+	if err != nil {
+		cleanup()
+		log.Printf("Plugin install: resolver %s failed for %s: %v", source.Scheme, source.Spec, err)
+		status := http.StatusBadGateway
+		if errors.Is(err, plugins.ErrPluginNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		return nil, newHTTPErr(status, gin.H{
+			"error":  fmt.Sprintf("failed to fetch plugin from %s: %v", source.Scheme, err),
+			"source": source.Raw(),
+		})
+	}
+	if err := validatePluginName(pluginName); err != nil {
+		cleanup()
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
+			"error":  fmt.Sprintf("resolver returned invalid plugin name %q: %v", pluginName, err),
+			"source": source.Raw(),
+		})
+	}
+	limit := envx.Int64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes)
+	if _, err := dirSize(stagedDir, limit); err != nil {
+		cleanup()
+		return nil, newHTTPErr(http.StatusRequestEntityTooLarge, gin.H{
+			"error":  err.Error(),
+			"source": source.Raw(),
+		})
+	}
+	return &stageResult{StagedDir: stagedDir, PluginName: pluginName, Source: source}, nil
+}
+
+// deliverToContainer copies the staged plugin dir into the workspace
+// container, chowns it for the agent user, and triggers a restart.
+// Returns a typed *httpErr on failure; nil on success.
+func (h *PluginsHandler) deliverToContainer(ctx context.Context, workspaceID string, r *stageResult) error {
 	containerName := h.findRunningContainer(ctx, workspaceID)
 	if containerName == "" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace container not running"})
-		return
+		return newHTTPErr(http.StatusServiceUnavailable, gin.H{"error": "workspace container not running"})
 	}
-
-	// Copy plugin into /configs/plugins/<name>/ — tar is prefixed with plugins/<name>/ so
-	// Docker creates the directory structure automatically under /configs
-	if err := h.copyPluginToContainer(ctx, containerName, pluginSrc, body.Name); err != nil {
-		log.Printf("Plugin install: failed to copy %s to %s: %v", body.Name, workspaceID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to copy plugin to container"})
-		return
+	if err := h.copyPluginToContainer(ctx, containerName, r.StagedDir, r.PluginName); err != nil {
+		log.Printf("Plugin install: failed to copy %s to %s: %v", r.PluginName, workspaceID, err)
+		return newHTTPErr(http.StatusInternalServerError, gin.H{"error": "failed to copy plugin to container"})
 	}
-
-	// Fix ownership of the newly copied plugin dir so the agent user can
-	// read it. The entrypoint handles /configs broadly on startup, but
-	// mid-run plugin installs copy files as root into a running container.
 	h.execAsRoot(ctx, containerName, []string{
-		"chown", "-R", "1000:1000", "/configs/plugins/" + body.Name,
+		"chown", "-R", "1000:1000", "/configs/plugins/" + r.PluginName,
 	})
-
-	// Auto-restart workspace to pick up the plugin
 	if h.restartFunc != nil {
 		go h.restartFunc(workspaceID)
 	}
-
-	log.Printf("Plugin install: %s → workspace %s (restarting)", body.Name, workspaceID)
-	c.JSON(http.StatusOK, gin.H{
-		"status": "installed",
-		"plugin": body.Name,
-	})
+	return nil
 }
 
 // Uninstall handles DELETE /workspaces/:id/plugins/:name — removes a plugin.

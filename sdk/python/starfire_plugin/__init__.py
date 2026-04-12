@@ -9,8 +9,9 @@ This SDK exposes:
 * :class:`PluginAdaptor` — the Protocol every adaptor must satisfy.
 * :class:`InstallContext`, :class:`InstallResult` — data classes passed to
   ``install()`` and returned from it.
-* :class:`GenericPluginAdaptor` — a drop-in adaptor for plugins that only
-  ship rules + skill directories (covers the vast majority of cases).
+* :class:`AgentskillsAdaptor` — a drop-in adaptor for plugins that ship
+  agentskills.io-format skills + Starfire's optional rules (covers the
+  vast majority of cases).
 * :data:`PLUGIN_YAML_SCHEMA` — the manifest schema for validation tooling.
 
 Example: a minimal plugin that's installable on Claude Code and DeepAgents
@@ -22,7 +23,7 @@ Example: a minimal plugin that's installable on Claude Code and DeepAgents
     ├── rules/my-rule.md
     ├── skills/my-skill/SKILL.md
     └── adapters/
-        ├── claude_code.py   # `from starfire_plugin import GenericPluginAdaptor as Adaptor`
+        ├── claude_code.py   # `from starfire_plugin import AgentskillsAdaptor as Adaptor`
         └── deepagents.py    # same one-liner
 
 Full docs + cookiecutter template: see ``sdk/python/README.md``.
@@ -42,17 +43,38 @@ from .protocol import (  # noqa: F401
     InstallResult,
     PluginAdaptor,
 )
-from .builtins import GenericPluginAdaptor  # noqa: F401
-from .manifest import PLUGIN_YAML_SCHEMA, validate_manifest  # noqa: F401
+from .builtins import AgentskillsAdaptor, SKIP_ROOT_MD  # noqa: F401
+from .manifest import (  # noqa: F401
+    PLUGIN_YAML_SCHEMA,
+    SKILL_COMPAT_MAX,
+    SKILL_DESC_MAX,
+    SKILL_NAME_MAX,
+    SKILL_NAME_RE,
+    parse_skill_md,
+    validate_manifest,
+    validate_plugin,
+    validate_skill,
+)
+from .protocol import DEFAULT_MEMORY_FILENAME, SKILLS_SUBDIR  # noqa: F401
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "GenericPluginAdaptor",
+    "AgentskillsAdaptor",
+    "DEFAULT_MEMORY_FILENAME",
     "InstallContext",
     "InstallResult",
     "PLUGIN_YAML_SCHEMA",
     "PluginAdaptor",
+    "SKILLS_SUBDIR",
+    "SKILL_COMPAT_MAX",
+    "SKILL_DESC_MAX",
+    "SKILL_NAME_MAX",
+    "SKILL_NAME_RE",
+    "SKIP_ROOT_MD",
+    "parse_skill_md",
     "validate_manifest",
+    "validate_plugin",
+    "validate_skill",
     "__version__",
 ]

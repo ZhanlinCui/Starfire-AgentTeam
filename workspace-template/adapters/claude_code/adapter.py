@@ -39,7 +39,7 @@ class ClaudeCodeAdapter(BaseAdapter):
         per-runtime adaptor, and ``BaseAdapter.install_plugins_via_registry``
         routes installs through it. The Claude Code SDK still reads
         ``CLAUDE.md`` and ``/configs/skills/`` natively, and the default
-        :class:`GenericPluginAdaptor` writes to both.
+        :class:`AgentskillsAdaptor` writes to both.
         """
         from plugins import load_plugins
         workspace_plugins_dir = os.path.join(config.config_path, "plugins")

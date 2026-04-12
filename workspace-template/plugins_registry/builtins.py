@@ -1,27 +1,41 @@
-"""Generic built-in plugin adaptors for the common install patterns.
+"""Built-in plugin adaptors — one per agent shape.
 
-Most platform plugins fit one of two shapes:
-
-* **Rule plugin** — ships ``rules/*.md`` that should be appended to the runtime's
-  long-lived memory file (CLAUDE.md for Claude Code and DeepAgents), plus
-  optional ``prompt_fragments`` also appended to memory.
-* **Skill plugin** — ships ``skills/<skill_name>/`` directories (SKILL.md +
-  ``tools/*.py``) that the workspace runtime already discovers via a
-  filesystem scan. Install step copies the skill dirs to
-  ``/configs/skills/<name>/`` so both Claude Code (which reloads that dir)
-  and DeepAgents (which globs for tools) pick them up.
-
-Most plugins are "mixed" — they have both rules and skills. :class:`GenericPluginAdaptor`
-handles all three cases with the same code path; individual plugins just
-import it as their per-runtime adaptor:
+The adapter layer is our extensibility surface. Each agent "shape" (form
+of installable capability) gets its own named sub-type adapter. A plugin
+picks which sub-type to use by importing it as ``Adaptor`` in its
+per-runtime file:
 
 .. code-block:: python
 
     # plugins/<name>/adapters/claude_code.py
-    from plugins_registry.builtins import GenericPluginAdaptor as Adaptor
+    from plugins_registry.builtins import AgentskillsAdaptor as Adaptor
 
-Plugins that need runtime-specific behavior (e.g. a DeepAgents plugin that
-registers a sub-agent) ship a custom adaptor instead.
+Shape taxonomy (one class per shape; add more as the ecosystem evolves):
+
+* :class:`AgentskillsAdaptor` — skills in the `agentskills.io
+  <https://agentskills.io>`_ format (``SKILL.md`` + ``scripts/`` +
+  ``references/`` + ``assets/``), plus Starfire's optional ``rules/`` and
+  root-level prompt fragments at the plugin level. Works on every runtime
+  we support (the spec's filesystem layout makes activation trivial on
+  Claude Code, our adapter code does the equivalent on DeepAgents /
+  LangGraph / etc.). **This is the default and covers the common case.**
+
+Planned as the ecosystem matures (none are implemented yet — rule of
+three: promote a class here only after 3+ plugins ship the same custom
+shape via their own ``adapters/<runtime>.py``):
+
+* ``MCPServerAdaptor`` — install a plugin as an MCP server *(TODO)*
+* ``DeepAgentsSubagentAdaptor`` — register a DeepAgents sub-agent
+  (runtime-locked to deepagents) *(TODO)*
+* ``LangGraphSubgraphAdaptor`` — install a LangGraph sub-graph *(TODO)*
+* ``RAGPipelineAdaptor`` — wire a retriever + index *(TODO)*
+* ``SwarmAdaptor`` — bind an OpenAI-swarm / AutoGen-swarm *(TODO)*
+* ``WebhookAdaptor`` — register an event handler *(TODO)*
+
+Plugins whose shape doesn't match any built-in ship their own adapter
+class in ``plugins/<name>/adapters/<runtime>.py`` — full Python, no
+constraint. When 3+ plugins ship the same custom pattern, we promote
+the class into this module.
 """
 
 from __future__ import annotations
@@ -29,7 +43,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from .protocol import InstallContext, InstallResult
+from .protocol import SKILLS_SUBDIR, InstallContext, InstallResult
+
+# Files at the plugin root that are never treated as prompt fragments,
+# even if they're markdown. Module-level so tests and other adapters can
+# import the set rather than re-declaring it.
+SKIP_ROOT_MD = frozenset({"readme.md", "changelog.md", "license.md", "contributing.md"})
 
 
 def _read_md_files(directory: Path) -> list[tuple[str, str]]:
@@ -43,27 +62,40 @@ def _read_md_files(directory: Path) -> list[tuple[str, str]]:
     return out
 
 
-class GenericPluginAdaptor:
-    """Filesystem-based adaptor that mirrors what the legacy
-    ``claude_code.inject_plugins()`` did, but runtime-agnostic.
+class AgentskillsAdaptor:
+    """Sub-type adaptor for `agentskills.io <https://agentskills.io>`_-format skills.
+
+    This is the default adapter for the "skills + rules" shape — the most
+    common pattern. A plugin using this adapter ships:
+
+    * ``skills/<name>/SKILL.md`` (+ optional ``scripts/``, ``references/``,
+      ``assets/``) — each skill is a spec-compliant agentskills unit,
+      portable to Claude Code, Cursor, Codex, and ~35 other skill-compatible
+      tools without modification.
+    * ``rules/*.md`` (optional, Starfire extension) — always-on prose that
+      gets appended to the runtime's memory file (CLAUDE.md).
+    * Root-level ``*.md`` (optional) — prompt fragments, also appended to
+      memory.
 
     On ``install()``:
-      1. Rules (``rules/*.md``) → append to ``/configs/<memory_filename>``.
-         Idempotent: each rule block is wrapped in a ``# Plugin: <name>`` header
-         that is checked for before re-appending.
+      1. Rules → append to ``/configs/<memory_filename>``, wrapped in a
+         ``# Plugin: <name>`` marker for idempotent re-install.
       2. Prompt fragments (``*.md`` at plugin root, excl. README/CHANGELOG/etc.)
          → same treatment.
       3. Skills (``skills/<skill_name>/``) → copied to
-         ``/configs/skills/<skill_name>/`` so both Claude Code's skill loader
-         and DeepAgents' ``**/*.py`` tool discovery see them.
+         ``/configs/skills/<skill_name>/``. Runtimes with native agentskills
+         activation (Claude Code) pick them up automatically; other runtimes'
+         loaders scan the same path.
 
     Uninstall reverses the file copies and strips the rule/fragment block by
     marker (best-effort — if the user edited CLAUDE.md manually, only the
     marker line itself is removed).
-    """
 
-    # Files at the plugin root that are never treated as prompt fragments.
-    _SKIP_ROOT_MD = frozenset({"readme.md", "changelog.md", "license.md", "contributing.md"})
+    For shapes other than agentskills (MCP server, DeepAgents sub-agent,
+    LangGraph sub-graph, RAG pipeline, swarm, webhook handler, etc.), see
+    the module docstring for the planned sibling adapters, or ship a custom
+    adapter class in the plugin's ``adapters/<runtime>.py``.
+    """
 
     def __init__(self, plugin_name: str, runtime: str) -> None:
         self.plugin_name = plugin_name
@@ -86,7 +118,7 @@ class GenericPluginAdaptor:
         root_fragments: list[tuple[str, str]] = []
         if ctx.plugin_root.is_dir():
             for p in sorted(ctx.plugin_root.iterdir()):
-                if p.is_file() and p.suffix == ".md" and p.name.lower() not in self._SKIP_ROOT_MD:
+                if p.is_file() and p.suffix == ".md" and p.name.lower() not in SKIP_ROOT_MD:
                     content = p.read_text().strip()
                     if content:
                         root_fragments.append((p.name, content))
@@ -99,16 +131,16 @@ class GenericPluginAdaptor:
 
         if memory_blocks:
             joined = "\n\n".join(memory_blocks)
-            ctx.append_to_memory("CLAUDE.md", joined)
+            ctx.append_to_memory(ctx.memory_filename, joined)
             ctx.logger.info(
-                "%s: injected %d rule+fragment block(s) into CLAUDE.md",
-                self.plugin_name, len(memory_blocks),
+                "%s: injected %d rule+fragment block(s) into %s",
+                self.plugin_name, len(memory_blocks), ctx.memory_filename,
             )
 
         # 3. Skills — copy each skill dir to /configs/skills/.
         src_skills_dir = ctx.plugin_root / "skills"
         if src_skills_dir.is_dir():
-            dst_skills_root = ctx.configs_dir / "skills"
+            dst_skills_root = ctx.configs_dir / SKILLS_SUBDIR
             dst_skills_root.mkdir(parents=True, exist_ok=True)
             copied = 0
             for entry in sorted(src_skills_dir.iterdir()):
@@ -116,7 +148,7 @@ class GenericPluginAdaptor:
                     continue
                 dst = dst_skills_root / entry.name
                 if dst.exists():
-                    ctx.logger.info("%s: skill %s already present, skipping", self.plugin_name, entry.name)
+                    ctx.logger.debug("%s: skill %s already present, skipping", self.plugin_name, entry.name)
                     continue
                 shutil.copytree(entry, dst)
                 copied += 1
@@ -137,7 +169,7 @@ class GenericPluginAdaptor:
         src_skills_dir = ctx.plugin_root / "skills"
         if src_skills_dir.is_dir():
             for entry in src_skills_dir.iterdir():
-                dst = ctx.configs_dir / "skills" / entry.name
+                dst = ctx.configs_dir / SKILLS_SUBDIR / entry.name
                 if dst.exists() and dst.is_dir():
                     shutil.rmtree(dst)
                     ctx.logger.info("%s: removed %s", self.plugin_name, dst)
@@ -145,7 +177,7 @@ class GenericPluginAdaptor:
         # Best-effort strip of our markers from CLAUDE.md. Users can always
         # edit manually; we only guarantee the injected block's first line
         # is removed so re-install re-adds cleanly.
-        memory_path = ctx.configs_dir / "CLAUDE.md"
+        memory_path = ctx.configs_dir / ctx.memory_filename
         if not memory_path.exists():
             return
         text = memory_path.read_text()
@@ -154,4 +186,6 @@ class GenericPluginAdaptor:
         kept = [line for line in lines if not line.startswith(prefix)]
         if len(kept) != len(lines):
             memory_path.write_text("".join(kept))
-            ctx.logger.info("%s: stripped markers from CLAUDE.md", self.plugin_name)
+            ctx.logger.info("%s: stripped markers from %s", self.plugin_name, ctx.memory_filename)
+
+
