@@ -20,7 +20,8 @@
 │   registered via plugins.Registry            │
 └──────────────────────────────────────────────┘
                      │
-                     │ fetch → /configs/plugins/<name>/
+                     │  1. resolver.Fetch() → platform-local staging dir
+                     │  2. tar + copy → workspace container /configs/plugins/<name>/
                      ▼
 ┌──────────────────────────────────────────────┐
 │ SHAPE — what the plugin's files mean         │
@@ -148,7 +149,10 @@ beyond `local` + `github` is extension territory.
   code-execution grant for the workspace's runtime. Audit plugin
   sources as you would any dependency.
 - Network egress from resolvers isn't sandboxed (no netns/cgroup
-  isolation around `git clone`).
+  isolation around `git clone`). If you self-host Starfire in a
+  multi-tenant or untrusted-tenant context, restrict egress at the
+  network layer — an egress firewall, VPC NAT with allowlist, or
+  equivalent. The platform itself does not isolate resolver traffic.
 - No signature or checksum verification on fetched content — planned
   alongside an OCI-based resolver where content addressability is
   native.

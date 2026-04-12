@@ -231,3 +231,24 @@ func TestLocalResolver_NonNotExistStatErrorIsNotErrPluginNotFound(t *testing.T) 
 		t.Errorf("permission-denied stat must not be surfaced as ErrPluginNotFound: %v", err)
 	}
 }
+
+
+func TestLocalResolver_RejectsOverlongName(t *testing.T) {
+	// 129-char name (1 + 128 tail); max is 1 + 127 = 128.
+	long := "a" + strings.Repeat("b", 128)
+	r := NewLocalResolver(t.TempDir())
+	_, err := r.Fetch(context.Background(), long, t.TempDir())
+	if err == nil {
+		t.Error("overlong name should be rejected")
+	}
+	// Exactly at limit should still work (just the regex check; will
+	// still fail at the stat step since the dir doesn't exist, but with
+	// ErrPluginNotFound, not a format error).
+	atLimit := "a" + strings.Repeat("b", 127)
+	_, err = r.Fetch(context.Background(), atLimit, t.TempDir())
+	if err == nil {
+		t.Error("at-limit name with missing dir should still err")
+	} else if !errors.Is(err, ErrPluginNotFound) {
+		t.Errorf("at-limit name should err with ErrPluginNotFound (format is fine), got %v", err)
+	}
+}

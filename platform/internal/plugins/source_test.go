@@ -177,3 +177,27 @@ func TestRegistry_ConcurrentRegisterResolve_NoRace(t *testing.T) {
 		<-done
 	}
 }
+
+
+// ---- C1: empty spec after scheme ----
+
+func TestParseSource_EmptySpecAfterSchemeRejected(t *testing.T) {
+	for _, in := range []string{"local://", "github://", "https://", "local://   "} {
+		t.Run(in, func(t *testing.T) {
+			_, err := ParseSource(in)
+			if err == nil {
+				t.Errorf("ParseSource(%q) should reject empty spec", in)
+			} else if !strings.Contains(err.Error(), "empty spec") {
+				t.Errorf("error message should mention 'empty spec': %v", err)
+			}
+		})
+	}
+}
+
+func TestParseSource_BareNameStillAccepted(t *testing.T) {
+	// The empty-spec guard must not break back-compat for bare names.
+	s, err := ParseSource("my-plugin")
+	if err != nil || s.Scheme != "local" || s.Spec != "my-plugin" {
+		t.Errorf("bare name broke: %+v err=%v", s, err)
+	}
+}

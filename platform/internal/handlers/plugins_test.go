@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -780,41 +779,8 @@ func TestPluginInstall_OversizedStagedTreeIs413(t *testing.T) {
 	}
 }
 
-func TestEnvHelpers(t *testing.T) {
-	// envDuration: valid, invalid, negative, unset.
-	if d := envDuration("__test_unset", 42*time.Second); d != 42*time.Second {
-		t.Errorf("unset should fall back to default, got %v", d)
-	}
-	t.Setenv("__test_d", "30s")
-	if d := envDuration("__test_d", time.Second); d != 30*time.Second {
-		t.Errorf("expected 30s, got %v", d)
-	}
-	t.Setenv("__test_d", "garbage")
-	if d := envDuration("__test_d", 5*time.Second); d != 5*time.Second {
-		t.Errorf("garbage should fall back to default, got %v", d)
-	}
-	t.Setenv("__test_d", "-1h")
-	if d := envDuration("__test_d", 5*time.Second); d != 5*time.Second {
-		t.Errorf("negative should fall back to default, got %v", d)
-	}
-
-	// envInt64: valid, invalid, zero, unset.
-	if n := envInt64("__test_unset_n", 99); n != 99 {
-		t.Errorf("unset should default, got %d", n)
-	}
-	t.Setenv("__test_n", "123")
-	if n := envInt64("__test_n", 1); n != 123 {
-		t.Errorf("expected 123, got %d", n)
-	}
-	t.Setenv("__test_n", "bad")
-	if n := envInt64("__test_n", 5); n != 5 {
-		t.Errorf("garbage should default, got %d", n)
-	}
-	t.Setenv("__test_n", "0")
-	if n := envInt64("__test_n", 5); n != 5 {
-		t.Errorf("zero should default, got %d", n)
-	}
-}
+// envDuration / envInt64 moved to platform/internal/envx; see
+// envx/envx_test.go for their tests.
 
 func TestDirSize_ShortCircuitsOnCap(t *testing.T) {
 	dir := t.TempDir()
@@ -880,4 +846,22 @@ func (h *hostileResolver) Fetch(ctx context.Context, spec, dst string) (string, 
 	// Emit files into dst (so dirSize passes) but return a traversal name.
 	_ = os.WriteFile(filepath.Join(dst, "plugin.yaml"), []byte("name: x\n"), 0o644)
 	return "../../../etc/passwd", nil
+}
+
+
+func TestPluginInstall_EmptySpecAfterSchemeRejected(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"github://"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("empty spec")) {
+		t.Errorf("error should mention 'empty spec': %s", w.Body.String())
+	}
 }

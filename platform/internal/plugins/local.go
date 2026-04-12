@@ -31,7 +31,11 @@ func (r *LocalResolver) Scheme() string { return "local" }
 // localNameRE constrains plugin names to safe identifiers. Matches
 // validatePluginName in the handlers package; duplicated here so the
 // plugins package has no reverse dependency.
-var localNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+//
+// Length-bounded at 128 chars (1 + 127 tail). agentskills.io caps
+// skill names at 64; our plugin-level names are a superset (collection
+// of skills) so we allow a bit more headroom, but not unbounded.
+var localNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 
 // Fetch copies the plugin directory from BaseDir/<spec> into dst.
 //

@@ -69,8 +69,11 @@ func (s Source) Raw() string {
 func (s Source) String() string { return s.Raw() }
 
 // schemeRE matches "<scheme>://" where scheme is the usual URL-scheme
-// grammar (ASCII letters, digits, +, -, .).
-var schemeRE = regexp.MustCompile(`^([a-zA-Z][a-zA-Z0-9+\-.]*)://(.+)$`)
+// grammar (ASCII letters, digits, +, -, .). The body match is `.*` (can
+// be empty) so we can emit a targeted error for `local://` rather than
+// letting it fall through to the bare-name branch and produce a
+// nonsensical Source{Scheme:"local", Spec:"local://"}.
+var schemeRE = regexp.MustCompile(`^([a-zA-Z][a-zA-Z0-9+\-.]*)://(.*)$`)
 
 // ParseSource parses a plugin source spec.
 //
@@ -92,6 +95,9 @@ func ParseSource(input string) (Source, error) {
 	if m == nil {
 		// Bare name → local.
 		return Source{Scheme: "local", Spec: input}, nil
+	}
+	if strings.TrimSpace(m[2]) == "" {
+		return Source{}, fmt.Errorf("source %q has empty spec after %q scheme", input, m[1])
 	}
 	return Source{Scheme: m[1], Spec: m[2]}, nil
 }

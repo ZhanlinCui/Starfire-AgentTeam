@@ -87,11 +87,12 @@ func (r *GithubResolver) Fetch(ctx context.Context, spec string, dst string) (st
 	cloneTarget := filepath.Join(workDir, "repo")
 	args := []string{"clone", "--depth=1"}
 	if ref != "" {
-		// `--` guards against a ref that looks like a flag (e.g. "-evil"),
-		// even though our regex already rejects a leading hyphen.
-		args = append(args, "--branch", ref, "--")
+		args = append(args, "--branch", ref)
 	}
-	args = append(args, url, cloneTarget)
+	// `--` unconditionally separates flags from positional args; URL +
+	// target are positional. Defense in depth against any future arg-
+	// parser quirks.
+	args = append(args, "--", url, cloneTarget)
 	if err := runner(ctx, workDir, args...); err != nil {
 		// Map common "repository / ref doesn't exist" outputs to
 		// ErrPluginNotFound so the handler returns 404. Everything else
@@ -126,15 +127,18 @@ func defaultGitRunner(ctx context.Context, dir string, args ...string) error {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	// Build a per-child env. `git clone` touches HOME for credential
-	// helpers even on anonymous HTTPS; set it to the work dir if the
-	// parent process doesn't have one. We never mutate os.Environ()'s
-	// backing slice — append returns a fresh slice here because the
-	// underlying array may have exact capacity.
+	// Build a per-child env. We never mutate os.Environ()'s backing
+	// slice.
 	childEnv := os.Environ()
+	//  - HOME: `git clone` touches HOME for credential helpers even on
+	//    anonymous HTTPS; set to work dir if the parent process has none.
 	if os.Getenv("HOME") == "" && dir != "" {
 		childEnv = append(childEnv, "HOME="+dir)
 	}
+	//  - LANG=C / LC_ALL=C: force English output so our ErrPluginNotFound
+	//    mapping ("repository not found", "remote branch ... not found")
+	//    doesn't silently stop working under a different locale.
+	childEnv = append(childEnv, "LANG=C", "LC_ALL=C")
 	cmd.Env = childEnv
 	out, err := cmd.CombinedOutput()
 	if err != nil {
