@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agent-molecule/platform/internal/envx"
@@ -50,21 +51,25 @@ func (e *httpErr) Error() string {
 func newHTTPErr(status int, body gin.H) *httpErr { return &httpErr{Status: status, Body: body} }
 
 // logInstallLimitsOnce emits a single operator-facing line describing
-// the effective install caps + timeout. Called once at router wiring.
+// the effective install caps + timeout. Safe to call from any goroutine;
+// sync.Once guarantees exactly one log emission per process lifetime.
 // Helps self-hosters confirm their env overrides took effect.
-var installLimitsLogged = false
+var installLimitsLogOnce sync.Once
+
+// installLimitsLogWriter is the destination for the one-shot log line.
+// Tests swap this to a buffer to observe the output without poking
+// package-level state or touching the stdlib logger's global sink.
+var installLimitsLogWriter io.Writer = os.Stderr
 
 func logInstallLimitsOnce() {
-	if installLimitsLogged {
-		return
-	}
-	installLimitsLogged = true
-	log.Printf(
-		"Plugin install limits: body=%d bytes  timeout=%s  staged=%d bytes",
-		envx.Int64("PLUGIN_INSTALL_BODY_MAX_BYTES", defaultInstallBodyMaxBytes),
-		envx.Duration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout),
-		envx.Int64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes),
-	)
+	installLimitsLogOnce.Do(func() {
+		fmt.Fprintf(installLimitsLogWriter,
+			"Plugin install limits: body=%d bytes  timeout=%s  staged=%d bytes\n",
+			envx.Int64("PLUGIN_INSTALL_BODY_MAX_BYTES", defaultInstallBodyMaxBytes),
+			envx.Duration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout),
+			envx.Int64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes),
+		)
+	})
 }
 
 // dirSize returns the total bytes of files under dir. Short-circuits

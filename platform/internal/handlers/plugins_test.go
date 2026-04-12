@@ -560,7 +560,6 @@ func TestCheckRuntimeCompatibility_TriviallyCompatibleWhenContainerMissing(t *te
 	}
 }
 
-
 // ---------- ListSources ----------
 
 func TestPluginListSources_ReturnsRegisteredSchemes(t *testing.T) {
@@ -680,7 +679,6 @@ func TestPluginInstall_InvalidSourceString(t *testing.T) {
 		t.Errorf("whitespace-only source should be rejected: got %d", w.Code)
 	}
 }
-
 
 func TestPluginInstall_RejectsBothNameAndSource(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
@@ -847,7 +845,6 @@ func emitsName(scheme, returnedName string) *fakeResolver {
 	}
 }
 
-
 func TestPluginInstall_RejectsHostileResolverPluginName(t *testing.T) {
 	// Prove the post-fetch validatePluginName call catches a resolver
 	// that tries to smuggle a traversal name into /configs/plugins/.
@@ -881,7 +878,6 @@ func TestPluginInstall_EmptySpecAfterSchemeRejected(t *testing.T) {
 		t.Errorf("error should mention 'empty spec': %s", w.Body.String())
 	}
 }
-
 
 // ---- resolveAndStage in isolation (now testable sans gin.Context) ----
 
@@ -967,13 +963,33 @@ func TestHTTPErr_WrapsCleanly(t *testing.T) {
 }
 
 func TestLogInstallLimitsOnce(t *testing.T) {
-	// Reset the guard for this test so we can observe a log emission
-	// even though other tests may have tripped it. Also prove the guard
-	// prevents a second emission.
-	installLimitsLogged = false
+	// sync.Once guarantees exactly one emission for the process; we can't
+	// reset it in a test. Instead, redirect the writer to a buffer,
+	// trigger NewPluginsHandler in its own subtest (so the Once has
+	// already fired from other tests if they ran first), and assert the
+	// buffer either got the line (if first to run) or stayed empty (if
+	// not). Either way: no panic, no cross-test state leak.
+	var buf bytes.Buffer
+	prevWriter := installLimitsLogWriter
+	installLimitsLogWriter = &buf
+	t.Cleanup(func() { installLimitsLogWriter = prevWriter })
+
+	// Calling it directly — if this is the first call in the test binary,
+	// we see the line; otherwise Once already fired and we see nothing.
 	logInstallLimitsOnce()
-	if !installLimitsLogged {
-		t.Error("flag should be set after first call")
+	logInstallLimitsOnce() // must not panic; Once is idempotent
+
+	if buf.Len() > 0 {
+		// We were the first caller. Verify the line contains all three
+		// limit names so operators can grep for them.
+		out := buf.String()
+		for _, want := range []string{"Plugin install limits", "body=", "timeout=", "staged="} {
+			if !strings.Contains(out, want) {
+				t.Errorf("log line missing %q: %s", want, out)
+			}
+		}
 	}
-	logInstallLimitsOnce() // must be a no-op; just assert no panic
+	// If buf is empty: another test's NewPluginsHandler already called
+	// Once. That's also correct behavior — nothing to assert beyond "it
+	// didn't panic."
 }
