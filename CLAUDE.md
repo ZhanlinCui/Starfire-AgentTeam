@@ -93,9 +93,9 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 
 ### Unit Tests
 ```bash
-cd platform && go test -race ./...               # 406 Go tests (handlers, registry, provisioner, CLI, delegation, org — sqlmock + miniredis)
+cd platform && go test -race ./...               # 448 Go tests (handlers, registry, provisioner, CLI, delegation, org, channels — sqlmock + miniredis)
 cd canvas && npm test                            # 325 Vitest tests (store, components, hydration, buildTree, secrets API)
-cd workspace-template && python -m pytest -v     # 983 pytest tests (config, heartbeat, prompt, skills, a2a, executor, sdk-executor, memory, mcp, plugins, cli, delegation)
+cd workspace-template && python -m pytest -v     # 990 pytest tests (config, heartbeat, prompt, skills, a2a, executor, sdk-executor, memory, mcp, plugins, cli, delegation, preflight)
 ```
 
 ### Integration Tests
@@ -117,7 +117,7 @@ cd mcp-server
 npm install && npm run build   # Build MCP server
 node dist/index.js             # Run (stdio transport)
 ```
-Exposes 54 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Includes workspace CRUD, async delegation, plugins (install/uninstall/list), global secrets, pause/resume, org import, A2A chat, approvals, memory, files, config, discovery, bundles, templates, traces, and activity logs. Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
+Exposes 61 tools for managing Starfire from Claude Code, Cursor, Codex, or any MCP client. Includes workspace CRUD, async delegation, plugins (install/uninstall/list), global secrets, pause/resume, org import, A2A chat, approvals, memory, files, config, discovery, bundles, templates, traces, activity logs, and social channels (add/update/remove/send/test). Configured in `.mcp.json`. Env: `STARFIRE_URL` (default http://localhost:8080).
 
 ### CI Pipeline
 GitHub Actions (`.github/workflows/ci.yml`) runs on push to main and PRs:
@@ -236,6 +236,13 @@ Agents can auto-execute a prompt on startup before any user interaction. Configu
 | PATCH/DELETE | /workspaces/:id/schedules/:scheduleId | schedules.go |
 | POST | /workspaces/:id/schedules/:scheduleId/run | schedules.go (manual trigger) |
 | GET | /workspaces/:id/schedules/:scheduleId/history | schedules.go (past runs) |
+| GET/POST | /workspaces/:id/channels | channels.go (social channel CRUD) |
+| PATCH/DELETE | /workspaces/:id/channels/:channelId | channels.go |
+| POST | /workspaces/:id/channels/:channelId/send | channels.go (outbound message) |
+| POST | /workspaces/:id/channels/:channelId/test | channels.go (test connection) |
+| GET | /channels/adapters | channels.go (list available platforms) |
+| POST | /channels/discover | channels.go (auto-detect chats for a bot token) |
+| POST | /webhooks/:type | channels.go (incoming social webhook) |
 | GET | /workspaces/:id/shared-context | templates.go |
 | GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
 | GET/PUT | /canvas/viewport | viewport.go |
@@ -257,7 +264,7 @@ Agents can auto-execute a prompt on startup before any user interaction. Configu
 
 ## Database
 
-15 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `workspace_schedules` (cron tasks with expression, timezone, prompt, run history), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
+16 migration files in `platform/migrations/`. Key tables: `workspaces` (core entity with status, runtime, agent_card JSONB, heartbeat columns, current_task, awareness_namespace, workspace_dir), `canvas_layouts` (x/y position), `structure_events` (append-only event log), `activity_logs` (A2A communications, task updates, agent logs, errors), `workspace_schedules` (cron tasks with expression, timezone, prompt, run history), `workspace_channels` (social channel integrations — Telegram, Slack, etc., with JSONB config and allowlist), `agents`, `workspace_secrets`, `global_secrets`, `agent_memories` (HMA scoped memory), `approvals`.
 
 The platform auto-discovers and runs migrations on startup from several candidate paths.
 

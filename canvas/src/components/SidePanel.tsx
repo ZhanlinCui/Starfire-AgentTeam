@@ -16,6 +16,7 @@ import { TracesTab } from "./tabs/TracesTab";
 import { EventsTab } from "./tabs/EventsTab";
 import { ActivityTab } from "./tabs/ActivityTab";
 import { ScheduleTab } from "./tabs/ScheduleTab";
+import { ChannelsTab } from "./tabs/ChannelsTab";
 import { summarizeWorkspaceCapabilities } from "@/store/canvas";
 
 const TABS: { id: PanelTab; label: string; icon: string }[] = [
@@ -26,6 +27,7 @@ const TABS: { id: PanelTab; label: string; icon: string }[] = [
   { id: "terminal", label: "Terminal", icon: "▸" },
   { id: "config", label: "Config", icon: "⚙" },
   { id: "schedule", label: "Schedule", icon: "⏲" },
+  { id: "channels", label: "Channels", icon: "⇌" },
   { id: "files", label: "Files", icon: "⊞" },
   { id: "memory", label: "Memory", icon: "◇" },
   { id: "traces", label: "Traces", icon: "◎" },
@@ -189,6 +191,7 @@ export function SidePanel() {
         {panelTab === "terminal" && <TerminalTab key={selectedNodeId} workspaceId={selectedNodeId} />}
         {panelTab === "config" && <ConfigTab key={selectedNodeId} workspaceId={selectedNodeId} />}
         {panelTab === "schedule" && <ScheduleTab key={selectedNodeId} workspaceId={selectedNodeId} />}
+        {panelTab === "channels" && <ChannelsTab key={selectedNodeId} workspaceId={selectedNodeId} />}
         {panelTab === "files" && <FilesTab key={selectedNodeId} workspaceId={selectedNodeId} />}
         {panelTab === "memory" && <MemoryTab key={selectedNodeId} workspaceId={selectedNodeId} />}
         {panelTab === "traces" && <TracesTab key={selectedNodeId} workspaceId={selectedNodeId} />}

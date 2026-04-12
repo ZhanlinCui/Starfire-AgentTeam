@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agent-molecule/platform/internal/channels"
 	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
@@ -128,8 +129,12 @@ func main() {
 	cronSched := scheduler.New(wh, broadcaster)
 	go cronSched.Start(ctx)
 
+	// Channel Manager — social channel integrations (Telegram, Slack, etc.)
+	channelMgr := channels.NewManager(wh, broadcaster)
+	go channelMgr.Start(ctx)
+
 	// Router
-	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir, wh)
+	r := router.Setup(hub, broadcaster, prov, platformURL, configsDir, wh, channelMgr)
 
 	// HTTP server with graceful shutdown
 	srv := &http.Server{

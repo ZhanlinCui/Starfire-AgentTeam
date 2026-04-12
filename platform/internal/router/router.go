@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agent-molecule/platform/internal/channels"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/handlers"
 	"github.com/agent-molecule/platform/internal/metrics"
@@ -19,7 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provisioner, platformURL, configsDir string, wh *handlers.WorkspaceHandler) *gin.Engine {
+func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provisioner, platformURL, configsDir string, wh *handlers.WorkspaceHandler, channelMgr *channels.Manager) *gin.Engine {
 	r := gin.Default()
 
 	// CORS origins — configurable via CORS_ORIGINS env var (comma-separated)
@@ -214,6 +215,18 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	orgh := handlers.NewOrgHandler(wh, broadcaster, prov, configsDir, orgDir)
 	r.GET("/org/templates", orgh.ListTemplates)
 	r.POST("/org/import", orgh.Import)
+
+	// Channels (social integrations — Telegram, Slack, Discord, etc.)
+	chh := handlers.NewChannelHandler(channelMgr)
+	r.GET("/channels/adapters", chh.ListAdapters)
+	r.GET("/workspaces/:id/channels", chh.List)
+	r.POST("/workspaces/:id/channels", chh.Create)
+	r.PATCH("/workspaces/:id/channels/:channelId", chh.Update)
+	r.DELETE("/workspaces/:id/channels/:channelId", chh.Delete)
+	r.POST("/workspaces/:id/channels/:channelId/send", chh.Send)
+	r.POST("/workspaces/:id/channels/:channelId/test", chh.Test)
+	r.POST("/channels/discover", chh.Discover)
+	r.POST("/webhooks/:type", chh.Webhook)
 
 	// WebSocket
 	sh := handlers.NewSocketHandler(hub)

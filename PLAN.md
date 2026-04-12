@@ -32,6 +32,8 @@
 | 22 | Cron Scheduling | PR #49 — recurring tasks via cron expressions, Canvas Schedule tab |
 | 23 | Code Quality & Multi-Provider | PR #50 — model fallback, DeepAgents full SDK, 7 LLM providers, 100% test coverage |
 | 24 | Async Delegation | PR #41 — non-blocking delegation with status polling, `check_delegation_status` tool |
+| 25 | Social Channels | PR #54 — adapter-based Telegram integration, Canvas Channels tab, 7 MCP tools, hot reload, multi-chat IDs, auto-detect, /start auto-reply, full Telegram Bot API audit fixes |
+| 26 | Auth Env Vars | PR #55 — `required_env` config replaces `.auth-token` files, env-var only path; reno-stars 15-agent org template |
 
 ---
 
@@ -108,6 +110,13 @@ All PRs must follow this checklist:
 6. **Remote plugin registry** — install plugins from npm/git (currently local only)
 7. **Agent git worktrees** — per-agent branches without full clone
 8. **SDK follow-ups** — live tool-call visibility, cost telemetry, cancel UX, governance hooks
+9. **Real webhook mode for channels** — Phase 27 candidate. Currently polling-only; webhook needs:
+   - `mode: "webhook"|"polling"` config field
+   - `PUBLIC_URL` env var
+   - Platform calls `setWebhook` on channel create (with random `webhook_secret`), `deleteWebhook` on delete
+   - Canvas toggle to enable webhook mode (only when PUBLIC_URL is set)
+   - Polling works fine for ≤hundreds of bots; webhook needed at thousands+ scale or for serverless
+10. **More channel adapters** — Slack (OAuth + Events API), Discord (Bot + Gateway), WhatsApp (Cloud API)
 
 ---
 
@@ -115,10 +124,10 @@ All PRs must follow this checklist:
 
 | Stack | Tests | Framework |
 |-------|-------|-----------|
-| Go (platform) | 406 | `go test -race` |
-| Python (workspace) | 973 | pytest |
+| Go (platform) | 448 | `go test -race` |
+| Python (workspace) | 990 | pytest |
 | Canvas (frontend) | 345 | Vitest |
-| **Total** | **1,724** | |
+| **Total** | **1,783** | |
 
 E2E: 68/68 comprehensive checks passing, 62 API tests.
 
