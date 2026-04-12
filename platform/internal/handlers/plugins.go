@@ -164,9 +164,9 @@ type pluginInfo struct {
 	Tags        []string `json:"tags"`
 	Skills      []string `json:"skills"`
 	// Runtimes declares which workspace runtimes this plugin ships an adaptor
-	// for. Empty means "unknown / legacy plugin" — the canvas should still
-	// allow install (the raw-drop fallback will surface a warning at install
-	// time). Runtime names use underscore form (e.g. "claude_code").
+	// for. Empty means "unspecified" — the canvas still allows install (the
+	// raw-drop fallback surfaces a warning at install time). Runtime names
+	// use underscore form (e.g. "claude_code").
 	Runtimes []string `json:"runtimes"`
 	// SupportedOnRuntime is populated by ListInstalled/compatibility only.
 	// When a workspace changes runtime, plugins whose manifest doesn't
@@ -177,8 +177,8 @@ type pluginInfo struct {
 }
 
 // supportsRuntime returns true if the plugin declares support for the given
-// runtime OR if it declares no runtimes at all (legacy). Comparison is
-// normalized — "claude-code" and "claude_code" are treated as equal.
+// runtime OR if it declares no runtimes at all (treat as "unspecified, try it").
+// Comparison is normalized — "claude-code" and "claude_code" are equal.
 func (p pluginInfo) supportsRuntime(runtime string) bool {
 	if len(p.Runtimes) == 0 {
 		return true
@@ -194,8 +194,8 @@ func (p pluginInfo) supportsRuntime(runtime string) bool {
 
 // ListRegistry handles GET /plugins — lists all available plugins from the registry.
 // Supports optional ?runtime=<name> query param to filter to plugins that
-// declare support for the given runtime (plus legacy plugins with no
-// `runtimes` field, which are assumed compatible).
+// declare support for the given runtime. Plugins with no declared
+// `runtimes` field are treated as "unspecified, try it" and included.
 func (h *PluginsHandler) ListRegistry(c *gin.Context) {
 	runtime := c.Query("runtime")
 	c.JSON(http.StatusOK, h.listRegistryFiltered(runtime))
@@ -364,10 +364,9 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 
 // Install handles POST /workspaces/:id/plugins — installs a plugin.
 //
-// Accepts EITHER:
+// Body: {"source": "<scheme>://<spec>"}
 //
-//   - {"name": "my-plugin"}                         → local registry (back-compat)
-//   - {"source": "local://my-plugin"}               → explicit local
+//   - {"source": "local://my-plugin"}               → install from platform registry
 //   - {"source": "github://owner/repo"}             → install from GitHub
 //   - {"source": "github://owner/repo#v1.2.0"}      → pinned ref
 //   - {"source": "clawhub://sonoscli@1.2.0"}        → when a ClawHub resolver is registered
@@ -379,7 +378,6 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 // Held out as its own type so resolveAndStage is testable without a
 // gin.Context; the handler just decodes into this shape.
 type installRequest struct {
-	Name   string `json:"name"`
 	Source string `json:"source"`
 }
 
@@ -450,22 +448,13 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 // and the returned *stageResult is nil. Callers own cleanup of
 // result.StagedDir on success via defer os.RemoveAll.
 func (h *PluginsHandler) resolveAndStage(ctx context.Context, req installRequest) (*stageResult, error) {
-	if req.Name != "" && req.Source != "" {
+	if req.Source == "" {
 		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
-			"error": "specify either 'name' (local shortcut) or 'source' (full scheme://spec), not both",
-		})
-	}
-	rawSource := req.Source
-	if rawSource == "" {
-		rawSource = req.Name
-	}
-	if rawSource == "" {
-		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
-			"error": "either 'name' or 'source' is required",
+			"error": "'source' is required (e.g. \"local://my-plugin\" or \"github://owner/repo\")",
 		})
 	}
 
-	source, err := plugins.ParseSource(rawSource)
+	source, err := plugins.ParseSource(req.Source)
 	if err != nil {
 		return nil, newHTTPErr(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}

@@ -149,9 +149,9 @@ skills:
 	}
 }
 
-// ---------- Install: missing name → 400 ----------
+// ---------- Install: missing source → 400 ----------
 
-func TestPluginInstall_MissingName(t *testing.T) {
+func TestPluginInstall_MissingSource(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
 
 	w := httptest.NewRecorder()
@@ -167,7 +167,7 @@ func TestPluginInstall_MissingName(t *testing.T) {
 	}
 }
 
-// ---------- Install: invalid name (path traversal) → 400 ----------
+// ---------- Install: invalid name in local source (path traversal) → 400 ----------
 
 func TestPluginInstall_InvalidName_PathTraversal(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
@@ -175,7 +175,7 @@ func TestPluginInstall_InvalidName_PathTraversal(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
-	body := `{"name":"../../../etc/passwd"}`
+	body := `{"source":"local://../../../etc/passwd"}`
 	c.Request = httptest.NewRequest("POST", "/workspaces/ws-123/plugins", bytes.NewBufferString(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -194,7 +194,7 @@ func TestPluginInstall_NotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
-	body := `{"name":"nonexistent-plugin"}`
+	body := `{"source":"local://nonexistent-plugin"}`
 	c.Request = httptest.NewRequest("POST", "/workspaces/ws-123/plugins", bytes.NewBufferString(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -622,32 +622,7 @@ func TestPluginInstall_RejectsUnknownScheme(t *testing.T) {
 	}
 }
 
-func TestPluginInstall_BareNameBackCompatRoutesToLocal(t *testing.T) {
-	base := t.TempDir()
-	pluginDir := filepath.Join(base, "demo")
-	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: demo\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := NewPluginsHandler(base, nil, nil)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Params = gin.Params{{Key: "id", Value: "ws"}}
-	c.Request = httptest.NewRequest("POST", "/x",
-		bytes.NewBufferString(`{"name":"demo"}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	h.Install(c)
-	// No docker client configured → resolves source, then 503 on container
-	// lookup. That's enough to prove the source dispatch works.
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("want 503 (no container), got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestPluginInstall_LocalSchemeAlias(t *testing.T) {
+func TestPluginInstall_LocalSourceReachesContainerLookup(t *testing.T) {
 	base := t.TempDir()
 	pluginDir := filepath.Join(base, "demo")
 	_ = os.MkdirAll(pluginDir, 0o755)
@@ -661,6 +636,8 @@ func TestPluginInstall_LocalSchemeAlias(t *testing.T) {
 		bytes.NewBufferString(`{"source":"local://demo"}`))
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.Install(c)
+	// No docker client configured → source resolves, stage succeeds, then
+	// 503 on container lookup. Proves the local dispatch + stage worked.
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("local:// should reach container lookup: got %d: %s", w.Code, w.Body.String())
 	}
@@ -680,23 +657,6 @@ func TestPluginInstall_InvalidSourceString(t *testing.T) {
 	}
 }
 
-func TestPluginInstall_RejectsBothNameAndSource(t *testing.T) {
-	h := NewPluginsHandler(t.TempDir(), nil, nil)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Params = gin.Params{{Key: "id", Value: "ws"}}
-	c.Request = httptest.NewRequest("POST", "/x",
-		bytes.NewBufferString(`{"name":"x","source":"local://y"}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	h.Install(c)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("not both")) {
-		t.Errorf("response should explain the conflict: %s", w.Body.String())
-	}
-}
-
 func TestPluginInstall_RejectsOversizedBody(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
 	// Build a JSON body larger than the cap (default 64 KiB).
@@ -712,14 +672,14 @@ func TestPluginInstall_RejectsOversizedBody(t *testing.T) {
 	}
 }
 
-// Install 404 via the local sentinel (replaces the old string-match test).
+// Install 404 via the typed sentinel (replaces the old string-match test).
 func TestPluginInstall_NotFoundUsesTypedSentinel(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
 	c.Request = httptest.NewRequest("POST", "/x",
-		bytes.NewBufferString(`{"name":"nonexistent"}`))
+		bytes.NewBufferString(`{"source":"local://nonexistent"}`))
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.Install(c)
 	if w.Code != http.StatusNotFound {
@@ -888,7 +848,7 @@ func TestResolveAndStage_HappyPath_Local(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: demo\n"), 0o644)
 	h := NewPluginsHandler(base, nil, nil)
 
-	res, err := h.resolveAndStage(context.Background(), installRequest{Name: "demo"})
+	res, err := h.resolveAndStage(context.Background(), installRequest{Source: "local://demo"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -899,15 +859,6 @@ func TestResolveAndStage_HappyPath_Local(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(res.StagedDir, "plugin.yaml")); err != nil {
 		t.Errorf("plugin.yaml not staged: %v", err)
-	}
-}
-
-func TestResolveAndStage_BothFieldsRejected(t *testing.T) {
-	h := NewPluginsHandler(t.TempDir(), nil, nil)
-	_, err := h.resolveAndStage(context.Background(), installRequest{Name: "a", Source: "local://b"})
-	var he *httpErr
-	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
-		t.Errorf("want typed httpErr with 400, got %v", err)
 	}
 }
 
@@ -922,7 +873,7 @@ func TestResolveAndStage_EmptyRequest(t *testing.T) {
 
 func TestResolveAndStage_NotFoundFromResolver(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil) // local resolver pointed at empty dir
-	_, err := h.resolveAndStage(context.Background(), installRequest{Name: "absent"})
+	_, err := h.resolveAndStage(context.Background(), installRequest{Source: "local://absent"})
 	var he *httpErr
 	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
 		t.Errorf("want 404 via ErrPluginNotFound, got %v", err)
