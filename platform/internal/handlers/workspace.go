@@ -15,6 +15,7 @@ import (
 	"github.com/agent-molecule/platform/internal/models"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	"github.com/google/uuid"
 )
 
@@ -425,36 +426,55 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// Cascade delete children — stop containers individually, batch DB updates
-	childIDs := make([]string, 0, len(children))
-	for _, child := range children {
-		childID := child["id"]
-		childIDs = append(childIDs, childID)
-		if h.provisioner != nil {
-			h.provisioner.Stop(ctx, childID)
-			if err := h.provisioner.RemoveVolume(ctx, childID); err != nil {
-				log.Printf("Delete child %s volume removal warning: %v", childID, err)
-			}
-		}
-		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", childID, map[string]interface{}{})
-	}
-	// Batch DB update — recursive CTE marks all descendants as removed in one query
-	if len(childIDs) > 0 {
-		if _, err := db.DB.ExecContext(ctx, `
+	// Cascade delete: collect ALL descendants (not just direct children) via
+	// recursive CTE, then stop each container and remove each volume.
+	// Previous bug: only direct children's containers were stopped, leaving
+	// grandchildren as orphan running containers after a cascade delete.
+	descendantIDs := []string{}
+	if len(children) > 0 {
+		descRows, err := db.DB.QueryContext(ctx, `
 			WITH RECURSIVE descendants AS (
 				SELECT id FROM workspaces WHERE parent_id = $1 AND status != 'removed'
 				UNION ALL
 				SELECT w.id FROM workspaces w JOIN descendants d ON w.parent_id = d.id WHERE w.status != 'removed'
 			)
-			UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id IN (SELECT id FROM descendants)
-		`, id); err != nil {
-			log.Printf("Delete cascade error for %s: %v", id, err)
+			SELECT id FROM descendants
+		`, id)
+		if err != nil {
+			log.Printf("Delete: descendant query error for %s: %v", id, err)
+		} else {
+			for descRows.Next() {
+				var descID string
+				if descRows.Scan(&descID) == nil {
+					descendantIDs = append(descendantIDs, descID)
+				}
+			}
+			descRows.Close()
 		}
-		if _, err := db.DB.ExecContext(ctx, `
-			DELETE FROM canvas_layouts WHERE workspace_id IN (
-				SELECT id FROM workspaces WHERE parent_id = $1 AND status = 'removed'
-			)
-		`, id); err != nil {
+	}
+
+	// Stop containers + remove volumes for all descendants (any depth)
+	for _, descID := range descendantIDs {
+		if h.provisioner != nil {
+			h.provisioner.Stop(ctx, descID)
+			if err := h.provisioner.RemoveVolume(ctx, descID); err != nil {
+				log.Printf("Delete descendant %s volume removal warning: %v", descID, err)
+			}
+		}
+		db.ClearWorkspaceKeys(ctx, descID)
+		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", descID, map[string]interface{}{})
+	}
+
+	// Batch DB update — mark all descendants removed + clear their canvas layouts
+	if len(descendantIDs) > 0 {
+		if _, err := db.DB.ExecContext(ctx,
+			`UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = ANY($1::uuid[])`,
+			pq.Array(descendantIDs)); err != nil {
+			log.Printf("Delete cascade DB error for %s: %v", id, err)
+		}
+		if _, err := db.DB.ExecContext(ctx,
+			`DELETE FROM canvas_layouts WHERE workspace_id = ANY($1::uuid[])`,
+			pq.Array(descendantIDs)); err != nil {
 			log.Printf("Delete cascade layouts error for %s: %v", id, err)
 		}
 	}
@@ -474,8 +494,8 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	}
 
 	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", id, map[string]interface{}{
-		"cascade_deleted": len(children),
+		"cascade_deleted": len(descendantIDs),
 	})
 
-	c.JSON(http.StatusOK, gin.H{"status": "removed", "cascade_deleted": len(children)})
+	c.JSON(http.StatusOK, gin.H{"status": "removed", "cascade_deleted": len(descendantIDs)})
 }
