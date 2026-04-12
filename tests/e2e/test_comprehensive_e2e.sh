@@ -179,8 +179,14 @@ R=$(curl -s -X PUT "$BASE/workspaces/$RT_LG_ID/files/config.yaml" \
   -d '{"content":"name: RT LangGraph\nruntime: deepagents\nmodel: openai:gpt-4.1-mini\ntier: 2\n"}')
 if echo "$R" | grep -qF "saved"; then
   curl -s -X POST "$BASE/workspaces/$RT_LG_ID/restart" > /dev/null 2>&1
-  sleep 10
+  # Poll up to 30s for the new container image to appear (restart can take a while)
   if command -v docker &>/dev/null; then
+    short_id="${RT_LG_ID:0:12}"
+    for i in 1 2 3 4 5 6; do
+      sleep 5
+      actual=$(docker inspect "ws-${short_id}" --format '{{.Config.Image}}' 2>/dev/null || echo "")
+      if echo "$actual" | grep -qF "deepagents"; then break; fi
+    done
     _check_image "$RT_LG_ID" "deepagents" "Runtime change langgraph→deepagents on restart"
   else
     echo "  SKIP: Docker not available"
