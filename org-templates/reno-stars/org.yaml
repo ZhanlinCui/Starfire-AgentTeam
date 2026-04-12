@@ -7,7 +7,7 @@ description: >
 defaults:
   runtime: claude-code
   tier: 2
-  auth_token_file: ".auth-token"
+  auth_token_file: ""
   initial_prompt: |
     You just started. Set up silently — do NOT contact other agents yet.
     1. Read your system prompt at /configs/system-prompt.md
