@@ -5,11 +5,15 @@ import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
 import { SettingsButton } from "@/components/settings/SettingsButton";
 import { settingsGearRef } from "@/components/settings/SettingsPanel";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { showToast } from "@/components/Toaster";
 
 export function Toolbar() {
   const nodes = useCanvasStore((s) => s.nodes);
 
   const [stopping, setStopping] = useState(false);
+  const [restartingAll, setRestartingAll] = useState(false);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const helpRef = useRef<HTMLDivElement>(null);
 
@@ -37,6 +41,37 @@ export function Toolbar() {
     );
     setStopping(false);
   }, [nodes]);
+
+  // Workspaces flagged as needing restart (config edited, global secret changed, etc.)
+  const needsRestartNodes = useMemo(
+    () => nodes.filter((n) => n.data.needsRestart),
+    [nodes]
+  );
+
+  const restartAll = useCallback(async () => {
+    setRestartConfirmOpen(false);
+    setRestartingAll(true);
+    const targets = needsRestartNodes;
+    const results = await Promise.allSettled(
+      targets.map((n) => api.post(`/workspaces/${n.id}/restart`))
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    setRestartingAll(false);
+    // Clear needsRestart on successfully-restarted workspaces
+    const store = useCanvasStore.getState();
+    targets.forEach((n, i) => {
+      if (results[i].status === "fulfilled") {
+        store.updateNodeData(n.id, { needsRestart: false });
+      }
+    });
+    if (failed === 0) {
+      showToast(`Restarted ${targets.length} workspace${targets.length === 1 ? "" : "s"}`, "success");
+    } else if (failed === targets.length) {
+      showToast(`Failed to restart any workspaces`, "error");
+    } else {
+      showToast(`Restarted ${targets.length - failed} of ${targets.length} (${failed} failed)`, "error");
+    }
+  }, [needsRestartNodes]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -104,6 +139,23 @@ export function Toolbar() {
         </button>
       )}
 
+      {/* Restart All — only shows when workspaces are flagged as needsRestart */}
+      {needsRestartNodes.length > 0 && (
+        <button
+          onClick={() => setRestartConfirmOpen(true)}
+          disabled={restartingAll}
+          className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/40 rounded-lg transition-colors disabled:opacity-50"
+          title={`Restart ${needsRestartNodes.length} workspace${needsRestartNodes.length === 1 ? "" : "s"} that need to pick up config or secret changes`}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-amber-400">
+            <path d="M2 8a6 6 0 1 1 1.76 4.24M2 13v-3h3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="text-[10px] text-amber-300 font-medium">
+            {restartingAll ? "Restarting..." : `Restart Pending (${needsRestartNodes.length})`}
+          </span>
+        </button>
+      )}
+
       {/* Search shortcut */}
       <button
         onClick={() => useCanvasStore.getState().setSearchOpen(true)}
@@ -156,6 +208,16 @@ export function Toolbar() {
 
       {/* Settings gear icon */}
       <SettingsButton ref={settingsGearRef} />
+
+      <ConfirmDialog
+        open={restartConfirmOpen}
+        title={`Restart ${needsRestartNodes.length} workspace${needsRestartNodes.length === 1 ? "" : "s"}?`}
+        message="These workspaces have pending config or secret changes that need a restart to take effect."
+        confirmLabel="Restart"
+        confirmVariant="warning"
+        onConfirm={restartAll}
+        onCancel={() => setRestartConfirmOpen(false)}
+      />
     </div>
   );
 }
