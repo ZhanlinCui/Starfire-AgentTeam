@@ -517,3 +517,42 @@ func TestSupportsRuntime_EmptyMeansLegacy(t *testing.T) {
 		t.Error("legacy plugins (no runtimes field) must be treated as compatible")
 	}
 }
+
+// ---------- CheckRuntimeCompatibility ----------
+
+func TestCheckRuntimeCompatibility_RejectsMissingRuntimeParam(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws/plugins/compatibility", nil)
+	h.CheckRuntimeCompatibility(c)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestCheckRuntimeCompatibility_TriviallyCompatibleWhenContainerMissing(t *testing.T) {
+	// No docker client + no container → treated as "nothing installed, all compatible".
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws/plugins/compatibility?runtime=deepagents", nil)
+	h.CheckRuntimeCompatibility(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["all_compatible"] != true {
+		t.Errorf("expected all_compatible=true, got %v", body["all_compatible"])
+	}
+	if body["target_runtime"] != "deepagents" {
+		t.Errorf("target_runtime mismatch: %v", body["target_runtime"])
+	}
+}

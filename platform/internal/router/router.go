@@ -217,6 +217,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/plugins", plgh.ListRegistry)
 	r.GET("/workspaces/:id/plugins", plgh.ListInstalled)
 	r.GET("/workspaces/:id/plugins/available", plgh.ListAvailableForWorkspace)
+	r.GET("/workspaces/:id/plugins/compatibility", plgh.CheckRuntimeCompatibility)
 	r.POST("/workspaces/:id/plugins", plgh.Install)
 	r.DELETE("/workspaces/:id/plugins/:name", plgh.Uninstall)
 

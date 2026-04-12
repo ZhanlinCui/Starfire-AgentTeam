@@ -73,6 +73,12 @@ type pluginInfo struct {
 	// allow install (the raw-drop fallback will surface a warning at install
 	// time). Runtime names use underscore form (e.g. "claude_code").
 	Runtimes []string `json:"runtimes"`
+	// SupportedOnRuntime is populated by ListInstalled/compatibility only.
+	// When a workspace changes runtime, plugins whose manifest doesn't
+	// declare the new runtime become inert (files present, tools unwired).
+	// The canvas reads this to grey out rows.
+	// Pointer so the field is omitted on endpoints that don't compute it.
+	SupportedOnRuntime *bool `json:"supported_on_runtime,omitempty"`
 }
 
 // supportsRuntime returns true if the plugin declares support for the given
@@ -174,7 +180,84 @@ func (h *PluginsHandler) ListInstalled(c *gin.Context) {
 		plugins = append(plugins, info)
 	}
 
+	// Annotate each installed plugin with whether it still supports the
+	// workspace's current runtime. Lets the canvas grey out plugins that
+	// went inert after a runtime change.
+	if h.runtimeLookup != nil {
+		if runtime, err := h.runtimeLookup(workspaceID); err == nil && runtime != "" {
+			for i := range plugins {
+				ok := plugins[i].supportsRuntime(runtime)
+				plugins[i].SupportedOnRuntime = &ok
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, plugins)
+}
+
+// CheckRuntimeCompatibility handles GET /workspaces/:id/plugins/compatibility?runtime=<name>
+// — preflight for runtime changes. Reports which installed plugins would
+// become inert if the workspace switched to <runtime>. Canvas uses this
+// to show a confirm dialog before applying the change.
+func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
+	workspaceID := c.Param("id")
+	targetRuntime := c.Query("runtime")
+	ctx := c.Request.Context()
+
+	if targetRuntime == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "runtime query parameter is required"})
+		return
+	}
+
+	containerName := h.findRunningContainer(ctx, workspaceID)
+	if containerName == "" {
+		// Workspace not running — nothing installed yet, trivially compatible.
+		c.JSON(http.StatusOK, gin.H{
+			"target_runtime":   targetRuntime,
+			"compatible":       []pluginInfo{},
+			"incompatible":     []pluginInfo{},
+			"all_compatible":   true,
+		})
+		return
+	}
+
+	output, err := h.execInContainer(ctx, containerName, []string{
+		"sh", "-c", "ls -1 /configs/plugins/ 2>/dev/null || true",
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list installed plugins"})
+		return
+	}
+
+	compatible := []pluginInfo{}
+	incompatible := []pluginInfo{}
+	for _, name := range strings.Split(output, "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" || validatePluginName(name) != nil {
+			continue
+		}
+		manifestOutput, err := h.execInContainer(ctx, containerName, []string{
+			"cat", fmt.Sprintf("/configs/plugins/%s/plugin.yaml", name),
+		})
+		var info pluginInfo
+		if err != nil || manifestOutput == "" {
+			info = pluginInfo{Name: name}
+		} else {
+			info = parseManifestYAML(name, []byte(manifestOutput))
+		}
+		if info.supportsRuntime(targetRuntime) {
+			compatible = append(compatible, info)
+		} else {
+			incompatible = append(incompatible, info)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"target_runtime": targetRuntime,
+		"compatible":     compatible,
+		"incompatible":   incompatible,
+		"all_compatible": len(incompatible) == 0,
+	})
 }
 
 // Install handles POST /workspaces/:id/plugins — installs a plugin from the registry.
