@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -453,5 +454,71 @@ func TestIsSystemCaller(t *testing.T) {
 		if got != tc.expected {
 			t.Errorf("isSystemCaller(%q) = %v, want %v", tc.caller, got, tc.expected)
 		}
+	}
+}
+
+// ==================== detectPlatformInDocker ====================
+
+func TestDetectPlatformInDocker_EnvVar(t *testing.T) {
+	// Deterministic: asserts the function returns exactly the env-var
+	// value when strconv.ParseBool accepts it. Unparseable values are
+	// covered separately below because their outcome depends on whether
+	// /.dockerenv exists on the host running the test.
+	cases := []struct {
+		env      string
+		expected bool
+	}{
+		{"1", true},
+		{"true", true},
+		{"TRUE", true},
+		{"True", true},
+		{"t", true},
+		{"0", false},
+		{"false", false},
+		{"FALSE", false},
+		{"f", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			t.Setenv("STARFIRE_IN_DOCKER", tc.env)
+			got := detectPlatformInDocker()
+			if got != tc.expected {
+				t.Errorf("STARFIRE_IN_DOCKER=%q → detectPlatformInDocker() = %v, want %v",
+					tc.env, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestDetectPlatformInDocker_UnparseableFallsThroughToFilesystemCheck(t *testing.T) {
+	// Unparseable env values must NOT be treated as "true" — they fall
+	// through to the /.dockerenv filesystem check. The result therefore
+	// depends on the host; we only assert the return matches what the
+	// filesystem check would report (keeps the test stable on Docker-
+	// based CI as well as host-mode dev boxes).
+	_, dockerenvErr := os.Stat("/.dockerenv")
+	dockerenvExists := dockerenvErr == nil
+	for _, env := range []string{"yes", "on", "bogus", "maybe", "2"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv("STARFIRE_IN_DOCKER", env)
+			got := detectPlatformInDocker()
+			if got != dockerenvExists {
+				t.Errorf("STARFIRE_IN_DOCKER=%q → detectPlatformInDocker() = %v, want %v (matches /.dockerenv presence)",
+					env, got, dockerenvExists)
+			}
+		})
+	}
+}
+
+func TestSetPlatformInDockerForTest(t *testing.T) {
+	original := platformInDocker
+	restore := setPlatformInDockerForTest(!original)
+	if platformInDocker == original {
+		t.Errorf("setPlatformInDockerForTest did not change platformInDocker")
+	}
+	restore()
+	if platformInDocker != original {
+		t.Errorf("restore function did not reset platformInDocker to %v (got %v)",
+			original, platformInDocker)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,18 +29,37 @@ import (
 // resolve Docker bridge hostnames).
 //
 // Detection: /.dockerenv is the canonical marker inside the default
-// Docker runtime. STARFIRE_IN_DOCKER=1 is an explicit override for
+// Docker runtime. STARFIRE_IN_DOCKER is an explicit override for
 // environments where /.dockerenv is absent (Podman, custom runtimes).
+// Accepts any value strconv.ParseBool recognises — 1, 0, t, f, T, F,
+// true, false, TRUE, FALSE, True, False. Anything else (including
+// "yes"/"on") is treated as unset and falls through to the /.dockerenv
+// check.
+//
+// Exposed as a var (not a const) so tests can toggle it via
+// setPlatformInDockerForTest without fiddling with real filesystem
+// markers or env vars. Production callers never mutate it.
 var platformInDocker = detectPlatformInDocker()
 
 func detectPlatformInDocker() bool {
-	if os.Getenv("STARFIRE_IN_DOCKER") == "1" {
-		return true
+	if v := os.Getenv("STARFIRE_IN_DOCKER"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
 	}
 	return false
+}
+
+// setPlatformInDockerForTest overrides platformInDocker for the duration of
+// a test and returns a function to restore the previous value. Use with
+// defer in *_test.go only.
+func setPlatformInDockerForTest(v bool) func() {
+	prev := platformInDocker
+	platformInDocker = v
+	return func() { platformInDocker = prev }
 }
 
 // maxProxyRequestBody is the maximum size of an A2A proxy request body (1MB).
