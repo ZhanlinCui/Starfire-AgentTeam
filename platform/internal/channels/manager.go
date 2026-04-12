@@ -1,0 +1,380 @@
+package channels
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/agent-molecule/platform/internal/db"
+)
+
+const (
+	// A2A timeout for channel messages (shorter than workspace-to-workspace).
+	channelA2ATimeout = 5 * time.Minute
+	// Max conversation history entries stored in Redis per chat.
+	maxHistoryEntries = 10
+	// Redis TTL for conversation history.
+	historyTTL = 24 * time.Hour
+)
+
+// A2AProxy sends messages to workspaces via the A2A protocol.
+type A2AProxy interface {
+	ProxyA2ARequest(ctx context.Context, workspaceID string, body []byte, callerID string, logActivity bool) (int, []byte, error)
+}
+
+// Broadcaster records events and pushes them to WebSocket clients.
+type Broadcaster interface {
+	RecordAndBroadcast(ctx context.Context, eventType, workspaceID string, data interface{}) error
+}
+
+// Manager orchestrates all channel adapters with hot-reload support.
+// When channels are added/removed/updated via API, call Reload() to
+// pick up changes without restarting the platform.
+type Manager struct {
+	proxy       A2AProxy
+	broadcaster Broadcaster
+
+	mu      sync.RWMutex
+	pollers map[string]context.CancelFunc // channelID → cancel func
+}
+
+// NewManager creates a channel manager.
+func NewManager(proxy A2AProxy, broadcaster Broadcaster) *Manager {
+	return &Manager{
+		proxy:       proxy,
+		broadcaster: broadcaster,
+		pollers:     make(map[string]context.CancelFunc),
+	}
+}
+
+// Start loads all enabled channels from DB and starts polling goroutines.
+func (m *Manager) Start(ctx context.Context) {
+	log.Println("Channels: manager started")
+	m.Reload(ctx)
+}
+
+// Stop cancels all running pollers.
+func (m *Manager) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, cancel := range m.pollers {
+		cancel()
+		delete(m.pollers, id)
+	}
+	log.Println("Channels: manager stopped")
+}
+
+// Reload re-reads enabled channels from DB and diffs against running pollers.
+// New channels get started, removed/disabled channels get stopped.
+func (m *Manager) Reload(ctx context.Context) {
+	rows, err := db.DB.QueryContext(ctx, `
+		SELECT id, workspace_id, channel_type, channel_config, enabled, allowed_users
+		FROM workspace_channels
+		WHERE enabled = true
+	`)
+	if err != nil {
+		log.Printf("Channels: reload query error: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	desired := make(map[string]ChannelRow)
+	for rows.Next() {
+		var ch ChannelRow
+		var configJSON, allowedJSON []byte
+		if err := rows.Scan(&ch.ID, &ch.WorkspaceID, &ch.ChannelType, &configJSON, &ch.Enabled, &allowedJSON); err != nil {
+			log.Printf("Channels: reload scan error: %v", err)
+			continue
+		}
+		json.Unmarshal(configJSON, &ch.Config)
+		json.Unmarshal(allowedJSON, &ch.AllowedUsers)
+		desired[ch.ID] = ch
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Stop pollers that are no longer in the desired set
+	for id, cancel := range m.pollers {
+		if _, exists := desired[id]; !exists {
+			cancel()
+			delete(m.pollers, id)
+			log.Printf("Channels: stopped poller for %s", truncID(id))
+		}
+	}
+
+	// Start pollers for new channels
+	for id, ch := range desired {
+		if _, running := m.pollers[id]; running {
+			continue
+		}
+
+		adapter, ok := GetAdapter(ch.ChannelType)
+		if !ok {
+			log.Printf("Channels: unknown adapter type %q for channel %s", ch.ChannelType, truncID(id))
+			continue
+		}
+
+		pollCtx, cancel := context.WithCancel(ctx)
+		m.pollers[id] = cancel
+
+		// Inject channel ID into config for the polling callback
+		ch.Config["_channel_id"] = ch.ID
+
+		go func(a ChannelAdapter, c ChannelRow, pCtx context.Context) {
+			if err := a.StartPolling(pCtx, c.Config, m.onInboundMessage); err != nil {
+				log.Printf("Channels: polling error for %s/%s: %v", c.ChannelType, truncID(c.ID), err)
+			}
+		}(adapter, ch, pollCtx)
+
+		log.Printf("Channels: started poller for %s/%s (workspace %s)", ch.ChannelType, truncID(id), truncID(ch.WorkspaceID))
+	}
+
+	log.Printf("Channels: reload complete — %d active pollers", len(m.pollers))
+}
+
+// onInboundMessage is called by polling adapters when a message arrives.
+func (m *Manager) onInboundMessage(ctx context.Context, channelID string, msg *InboundMessage) error {
+	ch, err := m.loadChannel(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("load channel: %w", err)
+	}
+	return m.HandleInbound(ctx, ch, msg)
+}
+
+// HandleInbound processes an incoming message from any social channel.
+func (m *Manager) HandleInbound(ctx context.Context, ch ChannelRow, msg *InboundMessage) error {
+	// Check allowlist
+	if len(ch.AllowedUsers) > 0 {
+		allowed := false
+		for _, uid := range ch.AllowedUsers {
+			if uid == msg.UserID || uid == msg.ChatID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			log.Printf("Channels: blocked message from unauthorized user %s (chat %s)", msg.UserID, msg.ChatID)
+			return nil
+		}
+	}
+
+	// Load conversation history from Redis
+	historyKey := fmt.Sprintf("channel:%s:%s:history", ch.ChannelType, msg.ChatID)
+	history := m.loadHistory(ctx, historyKey)
+
+	// Build A2A JSON-RPC payload
+	a2aBody, _ := json.Marshal(map[string]interface{}{
+		"method": "message/send",
+		"params": map[string]interface{}{
+			"message": map[string]interface{}{
+				"role":      "user",
+				"messageId": fmt.Sprintf("channel-%s-%s", ch.ChannelType, msg.MessageID),
+				"parts":     []map[string]interface{}{{"kind": "text", "text": msg.Text}},
+			},
+			"metadata": map[string]interface{}{
+				"source":       ch.ChannelType,
+				"channel_id":   ch.ID,
+				"chat_id":      msg.ChatID,
+				"user_id":      msg.UserID,
+				"username":     msg.Username,
+				"message_id":   msg.MessageID,
+				"history":      history,
+				"extra":        msg.Metadata,
+			},
+		},
+	})
+
+	callerID := "channel:" + ch.ChannelType
+
+	log.Printf("Channels: %s message from @%s → workspace %s", ch.ChannelType, msg.Username, truncID(ch.WorkspaceID))
+
+	fireCtx, cancel := context.WithTimeout(ctx, channelA2ATimeout)
+	defer cancel()
+
+	statusCode, respBody, err := m.proxy.ProxyA2ARequest(fireCtx, ch.WorkspaceID, a2aBody, callerID, true)
+	if err != nil {
+		log.Printf("Channels: A2A error for %s: %v", truncID(ch.WorkspaceID), err)
+		return fmt.Errorf("a2a proxy: %w", err)
+	}
+
+	// Extract response text
+	replyText := m.extractReplyText(respBody, statusCode)
+
+	// Send reply back to social platform
+	adapter, ok := GetAdapter(ch.ChannelType)
+	if !ok {
+		return fmt.Errorf("no adapter for %s", ch.ChannelType)
+	}
+
+	if replyText != "" {
+		if err := adapter.SendMessage(ctx, ch.Config, msg.ChatID, replyText); err != nil {
+			log.Printf("Channels: send reply error: %v", err)
+			return fmt.Errorf("send reply: %w", err)
+		}
+	}
+
+	// Update conversation history in Redis
+	m.appendHistory(ctx, historyKey, msg.Username, msg.Text, replyText)
+
+	// Update stats in DB
+	if db.DB != nil {
+		db.DB.ExecContext(ctx, `
+			UPDATE workspace_channels
+			SET last_message_at = now(), message_count = message_count + 1, updated_at = now()
+			WHERE id = $1
+		`, ch.ID)
+	}
+
+	// Broadcast event
+	if m.broadcaster != nil {
+		m.broadcaster.RecordAndBroadcast(ctx, "CHANNEL_MESSAGE", ch.WorkspaceID, map[string]interface{}{
+			"channel_id":   ch.ID,
+			"channel_type": ch.ChannelType,
+			"username":     msg.Username,
+			"direction":    "inbound",
+		})
+	}
+
+	return nil
+}
+
+// SendOutbound sends a message from a workspace to its connected social channel.
+func (m *Manager) SendOutbound(ctx context.Context, channelID string, text string) error {
+	ch, err := m.loadChannel(ctx, channelID)
+	if err != nil {
+		return err
+	}
+
+	adapter, ok := GetAdapter(ch.ChannelType)
+	if !ok {
+		return fmt.Errorf("no adapter for %s", ch.ChannelType)
+	}
+
+	chatID, _ := ch.Config["chat_id"].(string)
+	if chatID == "" {
+		return fmt.Errorf("no chat_id configured for channel %s", channelID)
+	}
+
+	if err := adapter.SendMessage(ctx, ch.Config, chatID, text); err != nil {
+		return fmt.Errorf("send outbound: %w", err)
+	}
+
+	if db.DB != nil {
+		db.DB.ExecContext(ctx, `
+			UPDATE workspace_channels
+			SET last_message_at = now(), message_count = message_count + 1, updated_at = now()
+			WHERE id = $1
+		`, channelID)
+	}
+
+	if m.broadcaster != nil {
+		m.broadcaster.RecordAndBroadcast(ctx, "CHANNEL_MESSAGE", ch.WorkspaceID, map[string]interface{}{
+			"channel_id":   ch.ID,
+			"channel_type": ch.ChannelType,
+			"direction":    "outbound",
+		})
+	}
+
+	return nil
+}
+
+func truncID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+func (m *Manager) loadChannel(ctx context.Context, channelID string) (ChannelRow, error) {
+	var ch ChannelRow
+	var configJSON, allowedJSON []byte
+	err := db.DB.QueryRowContext(ctx, `
+		SELECT id, workspace_id, channel_type, channel_config, enabled, allowed_users
+		FROM workspace_channels WHERE id = $1
+	`, channelID).Scan(&ch.ID, &ch.WorkspaceID, &ch.ChannelType, &configJSON, &ch.Enabled, &allowedJSON)
+	if err != nil {
+		return ch, fmt.Errorf("channel %s not found: %w", channelID, err)
+	}
+	json.Unmarshal(configJSON, &ch.Config)
+	json.Unmarshal(allowedJSON, &ch.AllowedUsers)
+	return ch, nil
+}
+
+func (m *Manager) extractReplyText(respBody []byte, statusCode int) string {
+	if statusCode < 200 || statusCode >= 300 {
+		return fmt.Sprintf("Error: agent returned HTTP %d", statusCode)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return ""
+	}
+
+	// Try result.parts[].text (standard A2A response)
+	if result, ok := resp["result"].(map[string]interface{}); ok {
+		if parts, ok := result["parts"].([]interface{}); ok {
+			for _, p := range parts {
+				if part, ok := p.(map[string]interface{}); ok {
+					if text, ok := part["text"].(string); ok {
+						return text
+					}
+				}
+			}
+		}
+		// Try result.artifacts[].parts[].text
+		if artifacts, ok := result["artifacts"].([]interface{}); ok {
+			for _, a := range artifacts {
+				if artifact, ok := a.(map[string]interface{}); ok {
+					if parts, ok := artifact["parts"].([]interface{}); ok {
+						for _, p := range parts {
+							if part, ok := p.(map[string]interface{}); ok {
+								if text, ok := part["text"].(string); ok {
+									return text
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func (m *Manager) loadHistory(ctx context.Context, key string) []map[string]string {
+	if db.RDB == nil {
+		return nil
+	}
+	entries, err := db.RDB.LRange(ctx, key, 0, int64(maxHistoryEntries-1)).Result()
+	if err != nil {
+		return nil
+	}
+	history := make([]map[string]string, 0, len(entries))
+	for _, e := range entries {
+		var h map[string]string
+		if json.Unmarshal([]byte(e), &h) == nil {
+			history = append(history, h)
+		}
+	}
+	return history
+}
+
+func (m *Manager) appendHistory(ctx context.Context, key string, username, userMsg, agentReply string) {
+	if db.RDB == nil {
+		return
+	}
+	entry, _ := json.Marshal(map[string]string{
+		"user":    username,
+		"message": userMsg,
+		"reply":   agentReply,
+		"time":    time.Now().UTC().Format(time.RFC3339),
+	})
+	db.RDB.LPush(ctx, key, string(entry))
+	db.RDB.LTrim(ctx, key, 0, int64(maxHistoryEntries-1))
+	db.RDB.Expire(ctx, key, historyTTL)
+}

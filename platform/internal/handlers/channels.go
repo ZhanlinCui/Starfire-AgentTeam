@@ -1,0 +1,312 @@
+package handlers
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"log"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/agent-molecule/platform/internal/channels"
+	"github.com/agent-molecule/platform/internal/db"
+)
+
+// ChannelHandler manages workspace social channel integrations.
+type ChannelHandler struct {
+	manager *channels.Manager
+}
+
+// NewChannelHandler creates a channel handler with the given manager.
+func NewChannelHandler(manager *channels.Manager) *ChannelHandler {
+	return &ChannelHandler{manager: manager}
+}
+
+// ListAdapters returns all available channel adapter types.
+func (h *ChannelHandler) ListAdapters(c *gin.Context) {
+	c.JSON(http.StatusOK, channels.ListAdapters())
+}
+
+// List returns all channels for a workspace.
+func (h *ChannelHandler) List(c *gin.Context) {
+	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	rows, err := db.DB.QueryContext(ctx, `
+		SELECT id, workspace_id, channel_type, channel_config, enabled, allowed_users,
+		       last_message_at, message_count, created_at, updated_at
+		FROM workspace_channels WHERE workspace_id = $1
+		ORDER BY created_at
+	`, workspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query failed"})
+		return
+	}
+	defer rows.Close()
+
+	result := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var id, wsID, chType string
+		var configJSON, allowedJSON []byte
+		var enabled bool
+		var lastMsg sql.NullTime
+		var msgCount int
+		var createdAt, updatedAt sql.NullTime
+
+		if err := rows.Scan(&id, &wsID, &chType, &configJSON, &enabled, &allowedJSON, &lastMsg, &msgCount, &createdAt, &updatedAt); err != nil {
+			continue
+		}
+
+		var config map[string]interface{}
+		json.Unmarshal(configJSON, &config)
+		// Mask bot_token in list response
+		if _, ok := config["bot_token"]; ok {
+			token, _ := config["bot_token"].(string)
+			if len(token) > 8 {
+				config["bot_token"] = token[:4] + "..." + token[len(token)-4:]
+			} else {
+				config["bot_token"] = "***"
+			}
+		}
+
+		var allowed []string
+		json.Unmarshal(allowedJSON, &allowed)
+
+		entry := map[string]interface{}{
+			"id":            id,
+			"workspace_id":  wsID,
+			"channel_type":  chType,
+			"config":        config,
+			"enabled":       enabled,
+			"allowed_users": allowed,
+			"message_count": msgCount,
+			"created_at":    createdAt.Time,
+			"updated_at":    updatedAt.Time,
+		}
+		if lastMsg.Valid {
+			entry["last_message_at"] = lastMsg.Time
+		}
+		result = append(result, entry)
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// Create adds a new channel to a workspace.
+func (h *ChannelHandler) Create(c *gin.Context) {
+	workspaceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	var body struct {
+		ChannelType  string                 `json:"channel_type"`
+		Config       map[string]interface{} `json:"config"`
+		AllowedUsers []string               `json:"allowed_users"`
+		Enabled      *bool                  `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+		return
+	}
+
+	if body.ChannelType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "channel_type is required"})
+		return
+	}
+
+	adapter, ok := channels.GetAdapter(body.ChannelType)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported channel_type: " + body.ChannelType})
+		return
+	}
+
+	if err := adapter.ValidateConfig(body.Config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid config: " + err.Error()})
+		return
+	}
+
+	configJSON, _ := json.Marshal(body.Config)
+	allowedJSON, _ := json.Marshal(body.AllowedUsers)
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+
+	var id string
+	err := db.DB.QueryRowContext(ctx, `
+		INSERT INTO workspace_channels (workspace_id, channel_type, channel_config, enabled, allowed_users)
+		VALUES ($1, $2, $3::jsonb, $4, $5::jsonb)
+		RETURNING id
+	`, workspaceID, body.ChannelType, string(configJSON), enabled, string(allowedJSON)).Scan(&id)
+	if err != nil {
+		log.Printf("Channels: create failed for workspace %s: %v", workspaceID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create channel"})
+		return
+	}
+
+	// Hot reload
+	h.manager.Reload(ctx)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":           id,
+		"channel_type": body.ChannelType,
+		"enabled":      enabled,
+	})
+}
+
+// Update modifies a channel's config, allowlist, or enabled state.
+func (h *ChannelHandler) Update(c *gin.Context) {
+	workspaceID := c.Param("id")
+	channelID := c.Param("channelId")
+	ctx := c.Request.Context()
+
+	var body struct {
+		Config       map[string]interface{} `json:"config"`
+		AllowedUsers []string               `json:"allowed_users"`
+		Enabled      *bool                  `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+		return
+	}
+
+	// COALESCE-based update
+	var configArg, allowedArg interface{}
+	if body.Config != nil {
+		j, _ := json.Marshal(body.Config)
+		configArg = string(j)
+	}
+	if body.AllowedUsers != nil {
+		j, _ := json.Marshal(body.AllowedUsers)
+		allowedArg = string(j)
+	}
+
+	result, err := db.DB.ExecContext(ctx, `
+		UPDATE workspace_channels
+		SET channel_config = COALESCE($3::jsonb, channel_config),
+		    allowed_users = COALESCE($4::jsonb, allowed_users),
+		    enabled = COALESCE($5, enabled),
+		    updated_at = now()
+		WHERE id = $1 AND workspace_id = $2
+	`, channelID, workspaceID, configArg, allowedArg, body.Enabled)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+
+	if n, _ := result.RowsAffected(); n == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+		return
+	}
+
+	// Hot reload
+	h.manager.Reload(ctx)
+
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+// Delete removes a channel from a workspace.
+func (h *ChannelHandler) Delete(c *gin.Context) {
+	workspaceID := c.Param("id")
+	channelID := c.Param("channelId")
+	ctx := c.Request.Context()
+
+	result, err := db.DB.ExecContext(ctx, `
+		DELETE FROM workspace_channels WHERE id = $1 AND workspace_id = $2
+	`, channelID, workspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete failed"})
+		return
+	}
+
+	if n, _ := result.RowsAffected(); n == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+		return
+	}
+
+	// Hot reload
+	h.manager.Reload(ctx)
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+}
+
+// Send sends an outbound message from a workspace to its social channel.
+func (h *ChannelHandler) Send(c *gin.Context) {
+	channelID := c.Param("channelId")
+	ctx := c.Request.Context()
+
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "text is required"})
+		return
+	}
+
+	if err := h.manager.SendOutbound(ctx, channelID, body.Text); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "sent"})
+}
+
+// Test sends a test message to verify the channel is working.
+func (h *ChannelHandler) Test(c *gin.Context) {
+	channelID := c.Param("channelId")
+	ctx := c.Request.Context()
+
+	if err := h.manager.SendOutbound(ctx, channelID, "🔔 Starfire channel test — connection successful!"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "test message sent"})
+}
+
+// Webhook handles incoming webhooks from any social platform.
+func (h *ChannelHandler) Webhook(c *gin.Context) {
+	channelType := c.Param("type")
+	ctx := c.Request.Context()
+
+	adapter, ok := channels.GetAdapter(channelType)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "unknown channel type"})
+		return
+	}
+
+	// For webhooks, we need to find the channel by type and match by chat_id in the message
+	// Parse the webhook first to get the chat_id
+	msg, err := adapter.ParseWebhook(c, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "parse error: " + err.Error()})
+		return
+	}
+	if msg == nil {
+		c.JSON(http.StatusOK, gin.H{"status": "ignored"}) // Non-message update
+		return
+	}
+
+	// Look up channel by type + chat_id
+	var ch channels.ChannelRow
+	var configJSON, allowedJSON []byte
+	err = db.DB.QueryRowContext(ctx, `
+		SELECT id, workspace_id, channel_type, channel_config, enabled, allowed_users
+		FROM workspace_channels
+		WHERE channel_type = $1 AND enabled = true AND channel_config->>'chat_id' = $2
+	`, channelType, msg.ChatID).Scan(&ch.ID, &ch.WorkspaceID, &ch.ChannelType, &configJSON, &ch.Enabled, &allowedJSON)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"status": "no_channel"}) // No channel configured for this chat
+		return
+	}
+	json.Unmarshal(configJSON, &ch.Config)
+	json.Unmarshal(allowedJSON, &ch.AllowedUsers)
+
+	// Process asynchronously — don't block the webhook response
+	go func() {
+		bgCtx := context.Background()
+		_ = h.manager.HandleInbound(bgCtx, ch, msg)
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"status": "accepted"})
+}

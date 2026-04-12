@@ -22,7 +22,7 @@ const maxProxyRequestBody = 1 << 20
 
 // systemCallerPrefixes are caller IDs that bypass workspace access control.
 // These are non-workspace internal callers (webhooks, system services, tests).
-var systemCallerPrefixes = []string{"webhook:", "system:", "test:"}
+var systemCallerPrefixes = []string{"webhook:", "system:", "test:", "channel:"}
 
 // isSystemCaller returns true if callerID is a non-workspace internal caller.
 func isSystemCaller(callerID string) bool {
