@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -187,6 +188,21 @@ func (h *OrgHandler) Import(c *gin.Context) {
 		if err := h.createWorkspaceTree(ws, nil, tmpl.Defaults, orgBaseDir, &results); err != nil {
 			createErr = err
 			break
+		}
+	}
+
+	// Hot-reload channel manager once after all channels are inserted
+	// (instead of per-workspace, avoiding N redundant DB queries + diffs).
+	if h.channelMgr != nil {
+		hasAnyChannels := false
+		for _, r := range results {
+			if _, ok := r["channels"]; ok {
+				hasAnyChannels = true
+				break
+			}
+		}
+		if hasAnyChannels {
+			h.channelMgr.Reload(context.Background())
 		}
 	}
 
@@ -431,59 +447,91 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		}
 	}
 
-	// Insert channels if defined (Telegram, Slack, etc.).
-	// Config values support ${VAR} expansion from the workspace's .env files
-	// (workspace-specific .env > org root .env > platform process env).
-	channelEnv := map[string]string{}
-	if orgBaseDir != "" {
-		parseEnvFile(filepath.Join(orgBaseDir, ".env"), channelEnv)
-		if ws.FilesDir != "" {
-			parseEnvFile(filepath.Join(orgBaseDir, ws.FilesDir, ".env"), channelEnv)
-		}
-	}
+	// Insert channels if defined (Telegram, Slack, etc.). Config values
+	// support ${VAR} expansion from .env files. The manager is reloaded
+	// once at the end of org import (in Import), not per-workspace.
+	channelEnv := loadWorkspaceEnv(orgBaseDir, ws.FilesDir)
+	wsChannelsCreated := []string{}
+	wsChannelsSkipped := []map[string]string{}
 	for _, ch := range ws.Channels {
 		if ch.Type == "" {
+			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "reason": "empty type"})
 			log.Printf("Org import: skipping channel with empty type for %s", ws.Name)
 			continue
 		}
+		// Validate adapter exists upfront — fail fast instead of inserting orphan rows
+		adapter, ok := channels.GetAdapter(ch.Type)
+		if !ok {
+			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "type": ch.Type, "reason": "unknown adapter"})
+			log.Printf("Org import: skipping %s channel for %s — no adapter registered", ch.Type, ws.Name)
+			continue
+		}
+
 		expandedConfig := make(map[string]interface{}, len(ch.Config))
 		missing := []string{}
 		for k, v := range ch.Config {
 			expanded := expandWithEnv(v, channelEnv)
-			if strings.Contains(v, "$") && expanded == "" {
+			if hasUnresolvedVarRef(v, expanded) {
 				missing = append(missing, v)
 			}
 			expandedConfig[k] = expanded
 		}
 		if len(missing) > 0 {
+			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "type": ch.Type, "reason": fmt.Sprintf("missing env: %v", missing)})
 			log.Printf("Org import: skipping %s channel for %s — env vars not set: %v", ch.Type, ws.Name, missing)
 			continue
 		}
-		configJSON, _ := json.Marshal(expandedConfig)
-		allowedJSON, _ := json.Marshal(ch.AllowedUsers)
+
+		// Adapter-level config validation
+		if err := adapter.ValidateConfig(expandedConfig); err != nil {
+			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "type": ch.Type, "reason": err.Error()})
+			log.Printf("Org import: skipping %s channel for %s — invalid config: %v", ch.Type, ws.Name, err)
+			continue
+		}
+
+		configJSON, err := json.Marshal(expandedConfig)
+		if err != nil {
+			log.Printf("Org import: failed to marshal config for %s channel: %v", ch.Type, err)
+			continue
+		}
+		allowedJSON, err := json.Marshal(ch.AllowedUsers)
+		if err != nil {
+			log.Printf("Org import: failed to marshal allowed_users for %s channel: %v", ch.Type, err)
+			continue
+		}
 		enabled := true
 		if ch.Enabled != nil {
 			enabled = *ch.Enabled
 		}
+		// Idempotent insert — if same workspace+type already exists, update config
 		if _, err := db.DB.ExecContext(context.Background(), `
 			INSERT INTO workspace_channels (workspace_id, channel_type, channel_config, enabled, allowed_users)
 			VALUES ($1, $2, $3::jsonb, $4, $5::jsonb)
+			ON CONFLICT (workspace_id, channel_type) DO UPDATE
+			SET channel_config = EXCLUDED.channel_config,
+			    enabled = EXCLUDED.enabled,
+			    allowed_users = EXCLUDED.allowed_users,
+			    updated_at = now()
 		`, id, ch.Type, string(configJSON), enabled, string(allowedJSON)); err != nil {
 			log.Printf("Org import: failed to create %s channel for %s: %v", ch.Type, ws.Name, err)
 		} else {
+			wsChannelsCreated = append(wsChannelsCreated, ch.Type)
 			log.Printf("Org import: %s channel created for %s", ch.Type, ws.Name)
 		}
 	}
-	// If any channels were created, hot-reload the manager so pollers start.
-	if len(ws.Channels) > 0 && h.channelMgr != nil {
-		h.channelMgr.Reload(context.Background())
-	}
 
-	*results = append(*results, map[string]interface{}{
+	resultEntry := map[string]interface{}{
 		"id":   id,
 		"name": ws.Name,
-		"tier":  tier,
-	})
+		"tier": tier,
+	}
+	if len(wsChannelsCreated) > 0 {
+		resultEntry["channels"] = wsChannelsCreated
+	}
+	if len(wsChannelsSkipped) > 0 {
+		resultEntry["channels_skipped"] = wsChannelsSkipped
+	}
+	*results = append(*results, resultEntry)
 
 	// Recurse into children. Brief pacing avoids overwhelming Docker when
 	// creating many containers in sequence; container provisioning runs in
@@ -506,6 +554,21 @@ func countWorkspaces(workspaces []OrgWorkspace) int {
 	return count
 }
 
+// envVarRefPattern matches actual ${VAR} or $VAR references (not literal $).
+// Used to detect unresolved placeholders without false positives like "$5".
+var envVarRefPattern = regexp.MustCompile(`\$\{?[A-Za-z_][A-Za-z0-9_]*\}?`)
+
+// hasUnresolvedVarRef returns true if the original string had a ${VAR} or $VAR
+// reference that the expanded string didn't fully replace (i.e. the var was unset).
+func hasUnresolvedVarRef(original, expanded string) bool {
+	if !envVarRefPattern.MatchString(original) {
+		return false // no var refs to resolve
+	}
+	// If expansion produced the same string and that string still has refs, unresolved.
+	// If expansion stripped them to "", also unresolved.
+	return expanded == "" || envVarRefPattern.MatchString(expanded)
+}
+
 // expandWithEnv expands ${VAR} and $VAR references in s using the env map.
 // Falls back to the platform process env if a var isn't in the map.
 func expandWithEnv(s string, env map[string]string) string {
@@ -515,6 +578,21 @@ func expandWithEnv(s string, env map[string]string) string {
 		}
 		return os.Getenv(key)
 	})
+}
+
+// loadWorkspaceEnv reads the org root .env and the workspace-specific .env
+// (workspace overrides org root). Used by both secret injection and channel
+// config expansion.
+func loadWorkspaceEnv(orgBaseDir, filesDir string) map[string]string {
+	envVars := map[string]string{}
+	if orgBaseDir == "" {
+		return envVars
+	}
+	parseEnvFile(filepath.Join(orgBaseDir, ".env"), envVars)
+	if filesDir != "" {
+		parseEnvFile(filepath.Join(orgBaseDir, filesDir, ".env"), envVars)
+	}
+	return envVars
 }
 
 // parseEnvFile reads a .env file and adds KEY=VALUE pairs to the map.
