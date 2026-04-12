@@ -48,12 +48,18 @@ def parse_skill_frontmatter(skill_md_path: Path) -> tuple[dict, str]:
 
 
 def load_skill_tools(tools_dir: Path) -> list[Any]:
-    """Dynamically load tool functions from a skill's tools/ directory."""
-    from langchain_core.tools import BaseTool
+    """Dynamically load tool functions from a skill's scripts/ directory.
 
+    (Legacy `tools/` dir is no longer supported — skills must use the
+    agentskills.io spec layout with `scripts/`.)
+    """
     tools = []
     if not tools_dir.exists():
         return tools
+
+    # Import langchain only when we actually have scripts to process.
+    # Keeps test environments (and empty skills) from needing langchain.
+    from langchain_core.tools import BaseTool
 
     for py_file in sorted(tools_dir.glob("*.py")):
         if py_file.name.startswith("_"):
@@ -118,7 +124,8 @@ def load_skills(config_path: str, skill_names: list[str]) -> list[LoadedSkill]:
             examples=frontmatter.get("examples", []),
         )
 
-        tools = load_skill_tools(skill_path / "tools")
+        # Executables live under scripts/ per the agentskills.io spec.
+        tools = load_skill_tools(skill_path / "scripts")
 
         loaded.append(LoadedSkill(
             metadata=metadata,

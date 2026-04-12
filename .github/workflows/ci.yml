@@ -88,3 +88,16 @@ jobs:
           cache-dependency-path: workspace-template/requirements.txt
       - run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov
       - run: python -m pytest --tb=short -q --cov=. --cov-report=term-missing
+
+      # agentskills.io spec validation — every first-party plugin must pass
+      # the open standard so our skills remain installable in Claude Code,
+      # Cursor, Codex, and the ~35 other skills-compatible agent products.
+      - name: Install starfire-plugin SDK
+        working-directory: sdk/python
+        run: pip install -e .
+      - name: Validate first-party plugins against agentskills.io spec
+        working-directory: ${{ github.workspace }}
+        run: python -m starfire_plugin validate plugins/starfire-dev plugins/superpowers plugins/ecc
+      - name: Run SDK tests
+        working-directory: sdk/python
+        run: python -m pytest --tb=short -q

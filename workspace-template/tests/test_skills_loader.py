@@ -505,3 +505,44 @@ def test_load_skills_config_load_error_defaults_to_warn(tmp_path, monkeypatch):
     assert len(scan_modes) == 1
     assert scan_modes[0] == "warn"
     assert len(loaded) == 1
+
+
+# ---------- scripts/ (agentskills.io spec) precedence + legacy tools/ ----------
+
+
+def test_load_skills_prefers_scripts_dir(tmp_path, monkeypatch, capsys):
+    """agentskills.io spec says skill executables live under scripts/."""
+    skill = tmp_path / "skills" / "demo"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: demo\ndescription: d\n---\nbody")
+    (skill / "scripts").mkdir()
+    (skill / "scripts" / "tool.py").write_text("# no tools to load")
+
+    import skill_loader.loader as loader_module
+    from unittest.mock import patch
+
+    calls = []
+    def spy(tools_dir):
+        calls.append(tools_dir)
+        return []
+
+    with patch.object(loader_module, "load_skill_tools", side_effect=spy):
+        loader_module.load_skills(str(tmp_path), ["demo"])
+
+    assert len(calls) == 1
+    assert calls[0].name == "scripts"
+    # No deprecation warning should have been printed.
+    out = capsys.readouterr().out
+    assert "legacy" not in out
+
+
+def test_load_skills_no_scripts_yields_empty_tools(tmp_path):
+    """Skill with only SKILL.md (no scripts/ dir) loads with tools=[]."""
+    skill = tmp_path / "skills" / "bare"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: bare\ndescription: d\n---\nbody")
+
+    import skill_loader.loader as loader_module
+    loaded = loader_module.load_skills(str(tmp_path), ["bare"])
+    assert len(loaded) == 1
+    assert loaded[0].tools == []

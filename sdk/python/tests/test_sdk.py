@@ -20,7 +20,10 @@ from starfire_plugin import (  # noqa: E402
     GenericPluginAdaptor,
     InstallContext,
     PluginAdaptor,
+    parse_skill_md,
     validate_manifest,
+    validate_plugin,
+    validate_skill,
 )
 
 
@@ -188,3 +191,186 @@ async def test_generic_adaptor_uninstall_when_nothing_installed(tmp_path: Path):
     )
     # Should not raise even with no CLAUDE.md and no skills/
     await GenericPluginAdaptor("bare", "claude_code").uninstall(ctx)
+
+
+# ---------------------------------------------------------------------------
+# agentskills.io SKILL.md validation
+# ---------------------------------------------------------------------------
+
+
+def _write_skill(dir: Path, name: str, content: str) -> Path:
+    skill = dir / name
+    skill.mkdir(parents=True, exist_ok=True)
+    (skill / "SKILL.md").write_text(content)
+    return skill
+
+
+def test_parse_skill_md_missing_file(tmp_path: Path):
+    fm, body, errs = parse_skill_md(tmp_path / "missing.md")
+    assert fm == {}
+    assert any("not found" in e for e in errs)
+
+
+def test_parse_skill_md_missing_frontmatter(tmp_path: Path):
+    p = tmp_path / "SKILL.md"
+    p.write_text("no frontmatter at all")
+    fm, body, errs = parse_skill_md(p)
+    assert fm == {}
+    assert any("frontmatter" in e for e in errs)
+
+
+def test_parse_skill_md_malformed_frontmatter(tmp_path: Path):
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\nname: foo\n")
+    _, _, errs = parse_skill_md(p)
+    assert any("malformed" in e for e in errs)
+
+
+def test_parse_skill_md_yaml_parse_error(tmp_path: Path):
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\n: bad\nfoo: [unclosed\n---\nbody")
+    _, _, errs = parse_skill_md(p)
+    assert any("yaml parse error" in e for e in errs)
+
+
+def test_parse_skill_md_non_mapping_frontmatter(tmp_path: Path):
+    p = tmp_path / "SKILL.md"
+    p.write_text("---\n- a\n- b\n---\nbody")
+    _, _, errs = parse_skill_md(p)
+    assert any("mapping" in e for e in errs)
+
+
+def test_validate_skill_accepts_minimal(tmp_path: Path):
+    skill = _write_skill(tmp_path, "good-skill", "---\nname: good-skill\ndescription: Does something useful.\n---\nbody")
+    assert validate_skill(skill) == []
+
+
+def test_validate_skill_requires_name(tmp_path: Path):
+    skill = _write_skill(tmp_path, "foo", "---\ndescription: x\n---\n")
+    errs = validate_skill(skill)
+    assert any("name" in e and "required" in e for e in errs)
+
+
+def test_validate_skill_requires_description(tmp_path: Path):
+    skill = _write_skill(tmp_path, "foo", "---\nname: foo\n---\n")
+    errs = validate_skill(skill)
+    assert any("description" in e and "required" in e for e in errs)
+
+
+def test_validate_skill_name_must_match_dir(tmp_path: Path):
+    skill = _write_skill(tmp_path, "dir-name", "---\nname: different\ndescription: x\n---\n")
+    errs = validate_skill(skill)
+    assert any("match directory name" in e for e in errs)
+
+
+def test_validate_skill_name_uppercase_rejected(tmp_path: Path):
+    skill = _write_skill(tmp_path, "BadName", "---\nname: BadName\ndescription: x\n---\n")
+    errs = validate_skill(skill)
+    assert any("lowercase" in e for e in errs)
+
+
+def test_validate_skill_name_leading_hyphen_rejected(tmp_path: Path):
+    skill = _write_skill(tmp_path, "-foo", "---\nname: -foo\ndescription: x\n---\n")
+    errs = validate_skill(skill)
+    assert any("hyphen" in e for e in errs)
+
+
+def test_validate_skill_name_consecutive_hyphens_rejected(tmp_path: Path):
+    skill = _write_skill(tmp_path, "foo--bar", "---\nname: foo--bar\ndescription: x\n---\n")
+    errs = validate_skill(skill)
+    assert any("hyphen" in e for e in errs)
+
+
+def test_validate_skill_name_too_long(tmp_path: Path):
+    long = "a" * 65
+    skill = _write_skill(tmp_path, long, f"---\nname: {long}\ndescription: x\n---\n")
+    errs = validate_skill(skill)
+    assert any("length" in e for e in errs)
+
+
+def test_validate_skill_description_too_long(tmp_path: Path):
+    long_desc = "x" * 1025
+    skill = _write_skill(tmp_path, "foo", f"---\nname: foo\ndescription: {long_desc}\n---\n")
+    errs = validate_skill(skill)
+    assert any("1024" in e for e in errs)
+
+
+def test_validate_skill_compatibility_too_long(tmp_path: Path):
+    long = "x" * 501
+    skill = _write_skill(tmp_path, "foo", f"---\nname: foo\ndescription: x\ncompatibility: {long}\n---\n")
+    errs = validate_skill(skill)
+    assert any("compatibility" in e.lower() and "500" in e for e in errs)
+
+
+def test_validate_skill_accepts_all_optional_fields(tmp_path: Path):
+    content = """---
+name: full-skill
+description: Does everything.
+license: MIT
+compatibility: Requires Python 3.14+
+metadata:
+  author: test
+  version: "1.0"
+allowed-tools: Bash(git:*) Read
+---
+body
+"""
+    skill = _write_skill(tmp_path, "full-skill", content)
+    assert validate_skill(skill) == []
+
+
+def test_validate_skill_metadata_must_be_mapping(tmp_path: Path):
+    skill = _write_skill(tmp_path, "foo", "---\nname: foo\ndescription: x\nmetadata: str\n---\n")
+    errs = validate_skill(skill)
+    assert any("metadata" in e and "mapping" in e for e in errs)
+
+
+def test_validate_skill_allowed_tools_must_be_string(tmp_path: Path):
+    skill = _write_skill(tmp_path, "foo", "---\nname: foo\ndescription: x\nallowed-tools:\n  - Read\n---\n")
+    errs = validate_skill(skill)
+    assert any("allowed-tools" in e for e in errs)
+
+
+def test_validate_skill_rejects_missing_dir(tmp_path: Path):
+    errs = validate_skill(tmp_path / "nonexistent")
+    assert any("not a directory" in e for e in errs)
+
+
+def test_validate_plugin_walks_all_skills(tmp_path: Path):
+    plugin = tmp_path / "p"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text("name: p\n")
+    (plugin / "skills" / "good").mkdir(parents=True)
+    (plugin / "skills" / "good" / "SKILL.md").write_text("---\nname: good\ndescription: ok\n---\n")
+    (plugin / "skills" / "bad").mkdir()
+    (plugin / "skills" / "bad" / "SKILL.md").write_text("---\nname: wrong-name\ndescription: ok\n---\n")
+
+    results = validate_plugin(plugin)
+    assert "plugin.yaml" not in results
+    assert "skills/good" not in results
+    assert "skills/bad" in results
+    assert any("match" in e for e in results["skills/bad"])
+
+
+def test_validate_plugin_empty_when_all_valid(tmp_path: Path):
+    plugin = tmp_path / "p"
+    plugin.mkdir()
+    (plugin / "plugin.yaml").write_text("name: p\n")
+    assert validate_plugin(plugin) == {}
+
+
+def test_first_party_plugins_are_spec_compliant():
+    """Every plugin in this repo must pass full agentskills.io validation."""
+    repo_root = Path(__file__).resolve().parents[3]
+    plugins_dir = repo_root / "plugins"
+    if not plugins_dir.is_dir():
+        import pytest
+        pytest.skip("not in a checkout with first-party plugins")
+    failures: dict = {}
+    for plugin in sorted(plugins_dir.iterdir()):
+        if not plugin.is_dir():
+            continue
+        results = validate_plugin(plugin)
+        if results:
+            failures[plugin.name] = results
+    assert not failures, f"Spec failures: {failures}"

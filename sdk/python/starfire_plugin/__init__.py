@@ -43,7 +43,13 @@ from .protocol import (  # noqa: F401
     PluginAdaptor,
 )
 from .builtins import GenericPluginAdaptor  # noqa: F401
-from .manifest import PLUGIN_YAML_SCHEMA, validate_manifest  # noqa: F401
+from .manifest import (  # noqa: F401
+    PLUGIN_YAML_SCHEMA,
+    parse_skill_md,
+    validate_manifest,
+    validate_plugin,
+    validate_skill,
+)
 
 __version__ = "0.1.0"
 
@@ -53,6 +59,9 @@ __all__ = [
     "InstallResult",
     "PLUGIN_YAML_SCHEMA",
     "PluginAdaptor",
+    "parse_skill_md",
     "validate_manifest",
+    "validate_plugin",
+    "validate_skill",
     "__version__",
 ]
