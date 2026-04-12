@@ -121,6 +121,7 @@ services:
       PLUGINS_HOST_DIR: "${PLUGINS_HOST_DIR:-${PWD}/plugins}"
     volumes:
       - ./workspace-configs-templates:/configs
+      - ./org-templates:/org-templates:ro
       - ./plugins:/plugins:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:

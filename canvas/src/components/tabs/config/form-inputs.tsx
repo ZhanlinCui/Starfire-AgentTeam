@@ -11,8 +11,10 @@ export interface ConfigData {
   runtime: string;
   runtime_config?: {
     model?: string;
-    auth_token_file?: string;
+    required_env?: string[];
     timeout?: number;
+    // Deprecated
+    auth_token_file?: string;
   };
   prompt_files: string[];
   shared_context: string[];

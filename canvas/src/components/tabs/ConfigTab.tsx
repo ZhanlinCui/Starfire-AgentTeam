@@ -264,9 +264,7 @@ export function ConfigTab({ workspaceId }: Props) {
                 }
               }} placeholder="e.g. anthropic:claude-sonnet-4-6" mono />
             </div>
-            {config.runtime === "claude-code" && (
-              <TextInput label="Auth Token File" value={config.runtime_config?.auth_token_file || ""} onChange={(v) => updateNested("runtime_config" as keyof ConfigData, "auth_token_file", v)} placeholder=".auth-token" mono />
-            )}
+            <TagList label="Required Env Vars" values={config.runtime_config?.required_env || []} onChange={(v) => updateNested("runtime_config" as keyof ConfigData, "required_env", v)} placeholder="e.g. CLAUDE_CODE_OAUTH_TOKEN" />
           </Section>
 
           <Section title="Skills & Tools" defaultOpen={false}>

@@ -27,7 +27,7 @@ class ClaudeCodeAdapter(BaseAdapter):
     def get_config_schema() -> dict:
         return {
             "model": {"type": "string", "description": "Claude model (e.g. sonnet, opus, haiku)", "default": "sonnet"},
-            "auth_token_file": {"type": "string", "description": "OAuth token file path", "default": ".auth-token"},
+            "required_env": {"type": "array", "description": "Required env vars", "default": ["CLAUDE_CODE_OAUTH_TOKEN"]},
             "timeout": {"type": "integer", "description": "Timeout in seconds (0 = no timeout)", "default": 0},
         }
 

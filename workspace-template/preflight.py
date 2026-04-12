@@ -1,5 +1,6 @@
 """Startup preflight checks for workspace runtime configs."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,18 +62,41 @@ def run_preflight(config: WorkspaceConfig, config_path: str) -> PreflightReport:
             )
         )
 
+    # Check required environment variables (e.g. CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY).
+    # These are declared per-runtime in config.yaml and injected via the secrets API.
+    required_env = getattr(config.runtime_config, "required_env", []) or []
+    for env_var in required_env:
+        if not os.environ.get(env_var):
+            report.failures.append(
+                PreflightIssue(
+                    severity="fail",
+                    title="Required env",
+                    detail=f"Missing required environment variable: {env_var}",
+                    fix=f"Set {env_var} via the secrets API (global or workspace-level).",
+                )
+            )
+
+    # Backward compat: if legacy auth_token_file is set, warn but don't block
+    # if the token is available via required_env or auth_token_env.
     token_file = getattr(config.runtime_config, "auth_token_file", "")
     if token_file:
         token_path = config_dir / token_file
         if not token_path.exists():
-            report.failures.append(
-                PreflightIssue(
-                    severity="fail",
-                    title="Auth token",
-                    detail=f"Missing auth token file: {token_file}",
-                    fix="Add the token file to the workspace config directory or clear auth_token_file.",
+            token_env = getattr(config.runtime_config, "auth_token_env", "")
+            env_has_token = bool(token_env and os.environ.get(token_env))
+            # Also check if any required_env is set (covers the new path)
+            if not env_has_token and required_env:
+                env_has_token = all(os.environ.get(e) for e in required_env)
+
+            if not env_has_token:
+                report.failures.append(
+                    PreflightIssue(
+                        severity="fail",
+                        title="Auth token",
+                        detail=f"Missing auth token file: {token_file}",
+                        fix="Remove auth_token_file and use required_env + secrets API instead.",
+                    )
                 )
-            )
 
     prompt_files = config.prompt_files or ["system-prompt.md"]
     for prompt_file in prompt_files:

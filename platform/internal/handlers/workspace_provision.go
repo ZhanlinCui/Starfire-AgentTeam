@@ -235,19 +235,20 @@ func (h *WorkspaceHandler) ensureDefaultConfig(workspaceID string, payload model
 
 	// Model always at top level — config.py reads raw["model"] for all runtimes.
 	configYAML += fmt.Sprintf("model: %s\n", model)
-	if runtime != "langgraph" && runtime != "deepagents" {
-		configYAML += "runtime_config:\n  auth_token_file: .auth-token\n  timeout: 0\n"
+
+	// Add required_env based on runtime — preflight checks these are set via secrets API.
+	switch runtime {
+	case "claude-code":
+		configYAML += "runtime_config:\n  required_env:\n    - CLAUDE_CODE_OAUTH_TOKEN\n  timeout: 0\n"
+	case "codex":
+		configYAML += "runtime_config:\n  required_env:\n    - OPENAI_API_KEY\n  timeout: 0\n"
+	case "langgraph", "deepagents":
+		// These runtimes read API keys from env directly, no runtime_config needed.
+	default:
+		configYAML += "runtime_config:\n  timeout: 0\n"
 	}
 
 	files["config.yaml"] = []byte(configYAML)
-
-	// Copy auth token from the default template if it exists (for CLI runtimes)
-	if runtime != "langgraph" {
-		defaultTokenPath := filepath.Join(h.configsDir, "claude-code-default", ".auth-token")
-		if tokenData, err := os.ReadFile(defaultTokenPath); err == nil {
-			files[".auth-token"] = tokenData
-		}
-	}
 
 	log.Printf("Provisioner: generated %d config files for workspace %s (runtime: %s)", len(files), workspaceID, runtime)
 	return files
