@@ -13,10 +13,19 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 )
+
+// ErrPluginNotFound is returned by a SourceResolver when the requested
+// plugin does not exist at the source (e.g. local dir missing, GitHub
+// repo 404). Handlers use errors.Is to map this to HTTP 404 rather than
+// relying on fragile string matching of the error message.
+var ErrPluginNotFound = errors.New("plugin not found")
 
 // SourceResolver fetches a plugin from a remote or local source into a
 // local directory that the install handler can then tar+copy into the
@@ -49,10 +58,15 @@ type Source struct {
 	Spec   string
 }
 
-// Raw returns the original string form ("scheme://spec").
+// Raw returns the normalized string form ("scheme://spec"). Note this
+// is the normalized form: `ParseSource("foo")` → `{local, foo}` → Raw
+// returns `"local://foo"`, NOT the original input.
 func (s Source) Raw() string {
 	return s.Scheme + "://" + s.Spec
 }
+
+// String is Raw so Source satisfies fmt.Stringer and logs cleanly.
+func (s Source) String() string { return s.Raw() }
 
 // schemeRE matches "<scheme>://" where scheme is the usual URL-scheme
 // grammar (ASCII letters, digits, +, -, .).
@@ -83,8 +97,13 @@ func ParseSource(input string) (Source, error) {
 }
 
 // Registry holds the set of registered SourceResolvers keyed by scheme.
-// Not goroutine-safe for writes; wire all resolvers at startup.
+//
+// Writes (Register) should happen at startup on a single goroutine, but
+// the RWMutex makes concurrent Resolve/Schemes + Register combinations
+// safe should a future deployment register resolvers dynamically (e.g.
+// an enterprise control-plane that enables new schemes at runtime).
 type Registry struct {
+	mu        sync.RWMutex
 	resolvers map[string]SourceResolver
 }
 
@@ -97,12 +116,16 @@ func NewRegistry() *Registry {
 // same scheme; a log line in the router surface is the right place to
 // warn on accidental double-registration.
 func (r *Registry) Register(resolver SourceResolver) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.resolvers[resolver.Scheme()] = resolver
 }
 
 // Resolve returns the resolver for a source's scheme, or an error if
 // no resolver has been registered for that scheme.
 func (r *Registry) Resolve(source Source) (SourceResolver, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	resolver, ok := r.resolvers[source.Scheme]
 	if !ok {
 		return nil, fmt.Errorf("no resolver registered for scheme %q", source.Scheme)
@@ -113,15 +136,12 @@ func (r *Registry) Resolve(source Source) (SourceResolver, error) {
 // Schemes returns the sorted list of registered schemes — useful for
 // surfacing supported sources via the API.
 func (r *Registry) Schemes() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]string, 0, len(r.resolvers))
 	for s := range r.resolvers {
 		out = append(out, s)
 	}
-	// Sort for stable output.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j-1] > out[j]; j-- {
-			out[j-1], out[j] = out[j], out[j-1]
-		}
-	}
+	sort.Strings(out)
 	return out
 }

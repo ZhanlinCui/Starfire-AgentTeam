@@ -2,6 +2,8 @@ package plugins
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -131,5 +133,47 @@ func TestRegistry_EmptyReturnsEmpty(t *testing.T) {
 	reg := NewRegistry()
 	if s := reg.Schemes(); len(s) != 0 {
 		t.Errorf("empty registry should return empty slice, got %v", s)
+	}
+}
+
+
+func TestErrPluginNotFound_IsMatchable(t *testing.T) {
+	// Wrap + unwrap via fmt.Errorf to prove errors.Is works through
+	// the fmt wrappers the resolvers use in their error returns.
+	err := fmt.Errorf("local resolver: plugin \"x\": %w", ErrPluginNotFound)
+	if !errors.Is(err, ErrPluginNotFound) {
+		t.Error("errors.Is did not unwrap ErrPluginNotFound")
+	}
+}
+
+func TestSource_StringEqualsRaw(t *testing.T) {
+	s := Source{Scheme: "github", Spec: "foo/bar#v1"}
+	if s.String() != s.Raw() {
+		t.Errorf("String()=%q Raw()=%q must match", s.String(), s.Raw())
+	}
+}
+
+
+
+func TestRegistry_ConcurrentRegisterResolve_NoRace(t *testing.T) {
+	// Exercises the RWMutex: interleave Register / Resolve / Schemes
+	// from multiple goroutines. `go test -race` fails loudly if the
+	// locking is wrong.
+	reg := NewRegistry()
+	reg.Register(&fakeResolver{scheme: "local"})
+
+	done := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		go func(i int) {
+			for j := 0; j < 50; j++ {
+				reg.Register(&fakeResolver{scheme: fmt.Sprintf("s%d", i)})
+				_, _ = reg.Resolve(Source{Scheme: "local"})
+				_ = reg.Schemes()
+			}
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < 4; i++ {
+		<-done
 	}
 }

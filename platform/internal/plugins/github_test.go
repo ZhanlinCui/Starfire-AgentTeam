@@ -237,3 +237,87 @@ func TestGithubResolver_CopyToDstFailure(t *testing.T) {
 		t.Error("expected copy failure when dst is read-only")
 	}
 }
+
+
+func TestGithubResolver_AlwaysPassesDepth1(t *testing.T) {
+	var seenArgs []string
+	r := &GithubResolver{
+		GitRunner: func(ctx context.Context, dir string, args ...string) error {
+			seenArgs = args
+			target := args[len(args)-1]
+			return os.MkdirAll(target, 0o755)
+		},
+	}
+	if _, err := r.Fetch(context.Background(), "org/repo", t.TempDir()); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !containsArg(seenArgs, "--depth=1") {
+		t.Errorf("expected --depth=1 in git args, got %v", seenArgs)
+	}
+}
+
+func TestGithubResolver_PassesDoubleDashBeforeURL(t *testing.T) {
+	// When a ref is specified, we pass `--` after --branch <ref> as
+	// defense-in-depth against ref-as-flag injection.
+	var seenArgs []string
+	r := &GithubResolver{
+		GitRunner: func(ctx context.Context, dir string, args ...string) error {
+			seenArgs = args
+			target := args[len(args)-1]
+			return os.MkdirAll(target, 0o755)
+		},
+	}
+	if _, err := r.Fetch(context.Background(), "org/repo#main", t.TempDir()); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !containsArg(seenArgs, "--") {
+		t.Errorf("expected `--` separator in git args, got %v", seenArgs)
+	}
+}
+
+func TestGithubResolver_RejectsRefStartingWithHyphen(t *testing.T) {
+	r := NewGithubResolver()
+	_, err := r.Fetch(context.Background(), "org/repo#-exec=/evil", t.TempDir())
+	if err == nil {
+		t.Error("ref starting with '-' must be rejected")
+	}
+}
+
+func TestGithubResolver_MapsRepositoryNotFoundToSentinel(t *testing.T) {
+	r := &GithubResolver{
+		GitRunner: func(ctx context.Context, dir string, args ...string) error {
+			return errors.New("remote: Repository not found.\nfatal: repository 'https://github.com/x/y.git' not found")
+		},
+	}
+	_, err := r.Fetch(context.Background(), "org/repo", t.TempDir())
+	if !errors.Is(err, ErrPluginNotFound) {
+		t.Errorf("expected ErrPluginNotFound, got %v", err)
+	}
+}
+
+func TestGithubResolver_MapsMissingBranchToSentinel(t *testing.T) {
+	r := &GithubResolver{
+		GitRunner: func(ctx context.Context, dir string, args ...string) error {
+			return errors.New("fatal: Remote branch bogus not found in upstream origin")
+		},
+	}
+	_, err := r.Fetch(context.Background(), "org/repo#bogus", t.TempDir())
+	if !errors.Is(err, ErrPluginNotFound) {
+		t.Errorf("expected ErrPluginNotFound for missing ref, got %v", err)
+	}
+}
+
+func TestGithubResolver_AuthFailureIsNotErrPluginNotFound(t *testing.T) {
+	r := &GithubResolver{
+		GitRunner: func(ctx context.Context, dir string, args ...string) error {
+			return errors.New("fatal: Authentication failed for 'https://github.com/private/repo.git/'")
+		},
+	}
+	_, err := r.Fetch(context.Background(), "private/repo", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, ErrPluginNotFound) {
+		t.Errorf("auth failure must not surface as ErrPluginNotFound: %v", err)
+	}
+}

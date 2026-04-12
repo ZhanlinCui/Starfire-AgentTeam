@@ -43,12 +43,16 @@ func NewGithubResolver() *GithubResolver {
 // Scheme returns "github".
 func (r *GithubResolver) Scheme() string { return "github" }
 
-// repoRE matches "<owner>/<repo>" with optional "#<ref>" suffix. Owner +
-// repo names follow GitHub's actual rules: alphanumeric + "-", "_", "."
-// with length 1–100. Refs can contain most ASCII printables except
-// whitespace and shell metacharacters we don't want to pass through.
-var (
-	repoRE = regexp.MustCompile(`^([a-zA-Z0-9][a-zA-Z0-9_.\-]{0,99})/([a-zA-Z0-9][a-zA-Z0-9_.\-]{0,99})(?:#([a-zA-Z0-9_./\-]{1,255}))?$`)
+// repoRE matches "<owner>/<repo>" with optional "#<ref>" suffix.
+//
+//   - Owner / repo: must start with alphanumeric, then 0–99 chars from
+//     [a-zA-Z0-9_.-]. Matches GitHub's validation.
+//   - Ref: must NOT start with `-` (prevents ref-as-flag injection like
+//     "-exec=/evil"). Then 0–254 chars from [a-zA-Z0-9_./-]. Disallows
+//     whitespace and shell metacharacters. The handler additionally
+//     passes `--` before the URL when invoking git, for defense in depth.
+var repoRE = regexp.MustCompile(
+	`^([a-zA-Z0-9][a-zA-Z0-9_.\-]{0,99})/([a-zA-Z0-9][a-zA-Z0-9_.\-]{0,99})(?:#([a-zA-Z0-9_.][a-zA-Z0-9_./\-]{0,254}))?$`,
 )
 
 // Fetch clones the repository and copies its contents (minus .git) into dst.
@@ -83,10 +87,21 @@ func (r *GithubResolver) Fetch(ctx context.Context, spec string, dst string) (st
 	cloneTarget := filepath.Join(workDir, "repo")
 	args := []string{"clone", "--depth=1"}
 	if ref != "" {
-		args = append(args, "--branch", ref)
+		// `--` guards against a ref that looks like a flag (e.g. "-evil"),
+		// even though our regex already rejects a leading hyphen.
+		args = append(args, "--branch", ref, "--")
 	}
 	args = append(args, url, cloneTarget)
 	if err := runner(ctx, workDir, args...); err != nil {
+		// Map common "repository / ref doesn't exist" outputs to
+		// ErrPluginNotFound so the handler returns 404. Everything else
+		// stays as a 502 (network, auth, etc.).
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "repository not found") ||
+			strings.Contains(msg, "could not find remote branch") ||
+			strings.Contains(msg, "remote branch") && strings.Contains(msg, "not found") {
+			return "", fmt.Errorf("github resolver: %s: %w", url, ErrPluginNotFound)
+		}
 		return "", fmt.Errorf("github resolver: clone %s failed: %w", url, err)
 	}
 
@@ -111,14 +126,16 @@ func defaultGitRunner(ctx context.Context, dir string, args ...string) error {
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	// Inherit a minimal env. `git clone` needs HOME for credential
+	// Build a per-child env. `git clone` touches HOME for credential
 	// helpers even on anonymous HTTPS; set it to the work dir if the
-	// parent process didn't.
-	env := os.Environ()
+	// parent process doesn't have one. We never mutate os.Environ()'s
+	// backing slice — append returns a fresh slice here because the
+	// underlying array may have exact capacity.
+	childEnv := os.Environ()
 	if os.Getenv("HOME") == "" && dir != "" {
-		env = append(env, "HOME="+dir)
+		childEnv = append(childEnv, "HOME="+dir)
 	}
-	cmd.Env = env
+	cmd.Env = childEnv
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %v: %w (output: %s)", args, err, string(out))

@@ -4,14 +4,16 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
-	"time"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/agent-molecule/platform/internal/plugins"
 	"github.com/agent-molecule/platform/internal/provisioner"
@@ -21,6 +23,52 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/yaml.v3"
 )
+
+// Install-layer defaults. Overridable via env for deployments whose
+// plugin sources are fast (or slow) enough to warrant different caps.
+const (
+	defaultInstallBodyMaxBytes = 64 * 1024       // 64 KiB JSON body cap
+	defaultInstallFetchTimeout = 5 * time.Minute // per-fetch deadline
+	defaultInstallMaxDirBytes  = 100 * 1024 * 1024 // 100 MiB staged tree
+)
+
+func envDuration(name string, def time.Duration) time.Duration {
+	if v := os.Getenv(name); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return def
+}
+
+func envInt64(name string, def int64) int64 {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+// dirSize returns the total bytes of files under dir. Short-circuits
+// as soon as the cap is exceeded so pathological inputs don't run the
+// full walk.
+func dirSize(dir string, cap int64) (int64, error) {
+	var total int64
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !info.IsDir() {
+			total += info.Size()
+			if total > cap {
+				return fmt.Errorf("staged plugin exceeds cap of %d bytes", cap)
+			}
+		}
+		return nil
+	})
+	return total, err
+}
 
 // validatePluginName ensures the name is safe (no path traversal).
 func validatePluginName(name string) error {
@@ -304,7 +352,16 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 // inside the workspace at startup.
 func (h *PluginsHandler) Install(c *gin.Context) {
 	workspaceID := c.Param("id")
-	ctx := c.Request.Context()
+	// Cap the JSON body so a pathological POST can't exhaust parser memory.
+	bodyMax := envInt64("PLUGIN_INSTALL_BODY_MAX_BYTES", defaultInstallBodyMaxBytes)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, bodyMax)
+
+	// Bound the whole install (fetch + copy) so a slow/malicious source
+	// can't tie up an HTTP handler goroutine indefinitely. Overridable
+	// via PLUGIN_INSTALL_FETCH_TIMEOUT (duration string, e.g. "10m").
+	timeout := envDuration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+	defer cancel()
 
 	var body struct {
 		Name   string `json:"name"`
@@ -314,7 +371,15 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// Back-compat: accept bare `name` and promote it to a local source.
+	// Reject ambiguous calls that set BOTH `name` and `source`. Forces
+	// the caller to pick one explicitly so we don't silently shadow.
+	if body.Name != "" && body.Source != "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "specify either 'name' (local shortcut) or 'source' (full scheme://spec), not both",
+		})
+		return
+	}
+	// Back-compat: bare `name` promotes to local:// source.
 	rawSource := body.Source
 	if rawSource == "" {
 		rawSource = body.Name
@@ -362,14 +427,37 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 	pluginName, err := resolver.Fetch(ctx, source.Spec, fetchDst)
 	if err != nil {
 		log.Printf("Plugin install: resolver %s failed for %s: %v", source.Scheme, source.Spec, err)
-		// Local "not found" is a 404 (back-compat); other resolver
-		// failures (network, auth, bad ref, …) are 502.
 		status := http.StatusBadGateway
-		if source.Scheme == "local" && strings.Contains(err.Error(), "not found") {
+		// Typed sentinel — any resolver can signal "not found" and we
+		// map it to a 404 without string-matching the message.
+		if errors.Is(err, plugins.ErrPluginNotFound) {
 			status = http.StatusNotFound
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
 		}
 		c.JSON(status, gin.H{
 			"error":  fmt.Sprintf("failed to fetch plugin from %s: %v", source.Scheme, err),
+			"source": source.Raw(),
+		})
+		return
+	}
+	// Re-validate the plugin name BEFORE the container check: a hostile
+	// resolver that returns "../../etc/passwd" should be a 400, not a
+	// 503 waiting for a container.
+	if err := validatePluginName(pluginName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  fmt.Sprintf("resolver returned invalid plugin name %q: %v", pluginName, err),
+			"source": source.Raw(),
+		})
+		return
+	}
+	// Enforce a staged-tree size cap before we copy into the container.
+	// Protects both the platform host filesystem and the workspace
+	// container from a huge accidental-or-malicious plugin.
+	maxBytes := envInt64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes)
+	if _, err := dirSize(fetchDst, maxBytes); err != nil {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error":  err.Error(),
 			"source": source.Raw(),
 		})
 		return
@@ -380,17 +468,6 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workspace container not running"})
 		return
 	}
-	// The pluginName flows into /configs/plugins/<name>/; validate it
-	// before we hand it to the tar prefix (prevents a malicious resolver
-	// from returning a traversal name).
-	if err := validatePluginName(pluginName); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  fmt.Sprintf("resolver returned invalid plugin name %q: %v", pluginName, err),
-			"source": source.Raw(),
-		})
-		return
-	}
-
 	if err := h.copyPluginToContainer(ctx, containerName, fetchDst, pluginName); err != nil {
 		log.Printf("Plugin install: failed to copy %s to %s: %v", pluginName, workspaceID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to copy plugin to container"})

@@ -52,7 +52,10 @@ func (r *LocalResolver) Fetch(ctx context.Context, spec string, dst string) (str
 	src := filepath.Join(r.BaseDir, name)
 	info, err := os.Stat(src)
 	if err != nil {
-		return "", fmt.Errorf("local resolver: plugin %q not found in registry %s: %w", name, r.BaseDir, err)
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("local resolver: plugin %q: %w", name, ErrPluginNotFound)
+		}
+		return "", fmt.Errorf("local resolver: stat %s: %w", src, err)
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("local resolver: %q is not a directory", src)

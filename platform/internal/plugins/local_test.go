@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,5 +196,38 @@ func TestLocalResolver_WalkErrorPropagates(t *testing.T) {
 	_, err := r.Fetch(context.Background(), "demo", t.TempDir())
 	if err == nil {
 		t.Error("expected Walk error to propagate")
+	}
+}
+
+
+func TestLocalResolver_MissingReturnsErrPluginNotFound(t *testing.T) {
+	r := NewLocalResolver(t.TempDir())
+	_, err := r.Fetch(context.Background(), "absent", t.TempDir())
+	if !errors.Is(err, ErrPluginNotFound) {
+		t.Errorf("expected ErrPluginNotFound, got %v", err)
+	}
+}
+
+func TestLocalResolver_NonNotExistStatErrorIsNotErrPluginNotFound(t *testing.T) {
+	// stat failing for reasons other than "doesn't exist" should NOT
+	// surface as ErrPluginNotFound. Hard to reliably trigger cross-
+	// platform, but we can at least prove the wrapping on a read-only
+	// permission-denied BaseDir.
+	if os.Getuid() == 0 {
+		t.Skip("running as root — cannot exercise permission branch")
+	}
+	base := t.TempDir()
+	locked := base + "/locked"
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	r := NewLocalResolver(locked)
+	_, err := r.Fetch(context.Background(), "anything", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, ErrPluginNotFound) {
+		t.Errorf("permission-denied stat must not be surfaced as ErrPluginNotFound: %v", err)
 	}
 }

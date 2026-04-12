@@ -2,12 +2,16 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -676,4 +680,204 @@ func TestPluginInstall_InvalidSourceString(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("whitespace-only source should be rejected: got %d", w.Code)
 	}
+}
+
+
+func TestPluginInstall_RejectsBothNameAndSource(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"name":"x","source":"local://y"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("not both")) {
+		t.Errorf("response should explain the conflict: %s", w.Body.String())
+	}
+}
+
+func TestPluginInstall_RejectsOversizedBody(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	// Build a JSON body larger than the cap (default 64 KiB).
+	big := `{"source":"local://` + strings.Repeat("a", 70*1024) + `"}`
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x", bytes.NewBufferString(big))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for oversized body, got %d", w.Code)
+	}
+}
+
+// Install 404 via the local sentinel (replaces the old string-match test).
+func TestPluginInstall_NotFoundUsesTypedSentinel(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-123"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"name":"nonexistent"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 via ErrPluginNotFound, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Install 502 for non-sentinel resolver errors (e.g. network / auth).
+func TestPluginInstall_NonSentinelResolverErrorIs502(t *testing.T) {
+	// Register a stub resolver whose Fetch returns a plain (non-ErrPluginNotFound) error.
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(&erroringResolver{scheme: "broken", err: errors.New("connection refused")})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"broken://whatever"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("non-sentinel resolver error should be 502, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Install returns 504 when fetch honours ctx.DeadlineExceeded.
+func TestPluginInstall_DeadlineExceededIs504(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(&erroringResolver{scheme: "slow", err: context.DeadlineExceeded})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"slow://x"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusGatewayTimeout {
+		t.Errorf("deadline exceeded should be 504, got %d", w.Code)
+	}
+}
+
+// Install 413 when the fetched tree exceeds the configured cap.
+func TestPluginInstall_OversizedStagedTreeIs413(t *testing.T) {
+	t.Setenv("PLUGIN_INSTALL_MAX_DIR_BYTES", "1024") // 1 KiB cap
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(&bigBlobResolver{bytes: 2048}) // 2 KiB blob
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"big://whatever"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversized staged tree should be 413, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestEnvHelpers(t *testing.T) {
+	// envDuration: valid, invalid, negative, unset.
+	if d := envDuration("__test_unset", 42*time.Second); d != 42*time.Second {
+		t.Errorf("unset should fall back to default, got %v", d)
+	}
+	t.Setenv("__test_d", "30s")
+	if d := envDuration("__test_d", time.Second); d != 30*time.Second {
+		t.Errorf("expected 30s, got %v", d)
+	}
+	t.Setenv("__test_d", "garbage")
+	if d := envDuration("__test_d", 5*time.Second); d != 5*time.Second {
+		t.Errorf("garbage should fall back to default, got %v", d)
+	}
+	t.Setenv("__test_d", "-1h")
+	if d := envDuration("__test_d", 5*time.Second); d != 5*time.Second {
+		t.Errorf("negative should fall back to default, got %v", d)
+	}
+
+	// envInt64: valid, invalid, zero, unset.
+	if n := envInt64("__test_unset_n", 99); n != 99 {
+		t.Errorf("unset should default, got %d", n)
+	}
+	t.Setenv("__test_n", "123")
+	if n := envInt64("__test_n", 1); n != 123 {
+		t.Errorf("expected 123, got %d", n)
+	}
+	t.Setenv("__test_n", "bad")
+	if n := envInt64("__test_n", 5); n != 5 {
+		t.Errorf("garbage should default, got %d", n)
+	}
+	t.Setenv("__test_n", "0")
+	if n := envInt64("__test_n", 5); n != 5 {
+		t.Errorf("zero should default, got %d", n)
+	}
+}
+
+func TestDirSize_ShortCircuitsOnCap(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a"), bytes.Repeat([]byte("x"), 2048), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := dirSize(dir, 1024)
+	if err == nil {
+		t.Error("expected cap-exceeded error")
+	}
+	// Under the cap: no error.
+	if _, err := dirSize(dir, 1<<20); err != nil {
+		t.Errorf("1 MiB cap should accept 2 KiB: %v", err)
+	}
+}
+
+// ---- test-only resolver stubs ----
+
+type erroringResolver struct {
+	scheme string
+	err    error
+}
+
+func (e *erroringResolver) Scheme() string { return e.scheme }
+func (e *erroringResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
+	return "", e.err
+}
+
+type bigBlobResolver struct {
+	bytes int
+}
+
+func (b *bigBlobResolver) Scheme() string { return "big" }
+func (b *bigBlobResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
+	if err := os.WriteFile(filepath.Join(dst, "blob"), bytes.Repeat([]byte("a"), b.bytes), 0o644); err != nil {
+		return "", err
+	}
+	return "big", nil
+}
+
+
+func TestPluginInstall_RejectsHostileResolverPluginName(t *testing.T) {
+	// Prove the post-fetch validatePluginName call catches a resolver
+	// that tries to smuggle a traversal name into /configs/plugins/.
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(&hostileResolver{})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws"}}
+	c.Request = httptest.NewRequest("POST", "/x",
+		bytes.NewBufferString(`{"source":"hostile://anything"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Install(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("hostile plugin name must be 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+type hostileResolver struct{}
+
+func (h *hostileResolver) Scheme() string { return "hostile" }
+func (h *hostileResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
+	// Emit files into dst (so dirSize passes) but return a traversal name.
+	_ = os.WriteFile(filepath.Join(dst, "plugin.yaml"), []byte("name: x\n"), 0o644)
+	return "../../../etc/passwd", nil
 }
