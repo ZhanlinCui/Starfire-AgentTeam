@@ -85,8 +85,8 @@ This chunk keeps the agent-facing tools stable and swaps the backend behind them
 ### Task 3: Add an awareness client abstraction to the runtime
 
 **Files:**
-- Create: `workspace-template/tools/awareness_client.py`
-- Modify: `workspace-template/tools/memory.py`
+- Create: `workspace-template/builtin_tools/awareness_client.py`
+- Modify: `workspace-template/builtin_tools/memory.py`
 - Modify: `workspace-template/main.py`
 - Modify: `workspace-template/tests/test_memory.py` or a new awareness-focused test file
 
@@ -111,14 +111,14 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add workspace-template/tools/awareness_client.py workspace-template/tools/memory.py workspace-template/main.py workspace-template/tests/test_memory.py
+git add workspace-template/builtin_tools/awareness_client.py workspace-template/builtin_tools/memory.py workspace-template/main.py workspace-template/tests/test_memory.py
 git commit -m "feat(runtime): route memory tools through awareness client"
 ```
 
 ### Task 4: Preserve the local fallback path for non-aware workspaces
 
 **Files:**
-- Modify: `workspace-template/tools/memory.py`
+- Modify: `workspace-template/builtin_tools/memory.py`
 - Modify: `workspace-template/tests/test_memory.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -142,7 +142,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add workspace-template/tools/memory.py workspace-template/tests/test_memory.py
+git add workspace-template/builtin_tools/memory.py workspace-template/tests/test_memory.py
 git commit -m "fix(runtime): keep memory tools resilient without awareness"
 ```
 

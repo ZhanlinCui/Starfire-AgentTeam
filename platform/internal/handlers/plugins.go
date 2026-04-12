@@ -122,11 +122,12 @@ type PluginsHandler struct {
 	sources       *plugins.Registry // pluggable install sources (local, github, clawhub, …)
 }
 
+// NewPluginsHandler constructs a PluginsHandler with the default source
+// registry (local + github resolvers). Deployments can add more schemes
+// via WithSourceResolver before routes are wired — e.g. a private
+// enterprise registry or ClawHub. Logs the effective install limits
+// exactly once per process on first construction.
 func NewPluginsHandler(pluginsDir string, docker *client.Client, restartFunc func(string)) *PluginsHandler {
-	// Default source registry ships with the local filesystem resolver
-	// (legacy behaviour) and the github resolver (new). Deployments can
-	// register additional schemes via WithSourceResolver before routes
-	// are wired — e.g. a private enterprise registry or ClawHub.
 	sources := plugins.NewRegistry()
 	sources.Register(plugins.NewLocalResolver(pluginsDir))
 	sources.Register(plugins.NewGithubResolver())
