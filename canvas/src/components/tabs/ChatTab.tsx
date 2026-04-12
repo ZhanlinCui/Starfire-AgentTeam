@@ -9,6 +9,7 @@ import { WS_URL } from "@/store/socket";
 import { type ChatMessage, createMessage } from "./chat/types";
 import { extractResponseText, extractRequestText } from "./chat/message-parser";
 import { AgentCommsPanel } from "./chat/AgentCommsPanel";
+import { runtimeDisplayName } from "@/lib/runtime-names";
 
 interface Props {
   workspaceId: string;
@@ -16,6 +17,38 @@ interface Props {
 }
 
 type ChatSubTab = "my-chat" | "agent-comms";
+
+// A2A response shape (subset). The full schema is in @a2a-js/sdk but we only
+// need parts/artifacts text extraction for the synchronous fallback path.
+interface A2APart {
+  kind: string;
+  text: string;
+}
+interface A2AResponse {
+  result?: {
+    parts?: A2APart[];
+    artifacts?: Array<{ parts: A2APart[] }>;
+  };
+}
+
+// extractReplyText pulls the agent's text reply out of an A2A response.
+// Mirrors the Go-side extractReplyText in platform/internal/channels/manager.go.
+function extractReplyText(resp: A2AResponse): string {
+  const result = resp?.result;
+  if (result?.parts) {
+    for (const p of result.parts) {
+      if (p.kind === "text") return p.text;
+    }
+  }
+  if (result?.artifacts) {
+    for (const a of result.artifacts) {
+      for (const p of a.parts || []) {
+        if (p.kind === "text") return p.text;
+      }
+    }
+  }
+  return "";
+}
 
 /**
  * Load chat history from the activity_logs database via the platform API.
@@ -149,17 +182,20 @@ function MyChatPanel({ workspaceId, data }: Props) {
     }
   }, [pendingAgentMsgs, workspaceId]);
 
-  // Consume A2A_RESPONSE events from global store (streaming response delivery)
+  // Consume A2A_RESPONSE events from global store (streaming response delivery).
+  // Guarded by sendingFromAPIRef to avoid duplicate messages when the
+  // synchronous HTTP .then() handler also fires for the same response.
   const pendingA2AResponse = useCanvasStore((s) => s.agentMessages[`a2a:${workspaceId}`]);
   useEffect(() => {
     if (!pendingA2AResponse || pendingA2AResponse.length === 0) return;
     const consume = useCanvasStore.getState().consumeAgentMessages;
     const msgs = consume(`a2a:${workspaceId}`);
+    if (!sendingFromAPIRef.current) return; // HTTP .then() already handled this response
     for (const m of msgs) {
       setMessages((prev) => [...prev, createMessage("agent", m.content)]);
-      setSending(false);
-      sendingFromAPIRef.current = false;
     }
+    setSending(false);
+    sendingFromAPIRef.current = false;
   }, [pendingA2AResponse, workspaceId]);
 
   // Resolve workspace ID → name for activity display
@@ -188,7 +224,7 @@ function MyChatPanel({ workspaceId, data }: Props) {
       setActivityLog([]);
       return;
     }
-    setActivityLog(["Processing with Claude..."]);
+    setActivityLog([`Processing with ${runtimeDisplayName(data.runtime)}...`]);
 
     const ws = new WebSocket(WS_URL);
     ws.onerror = () => {
@@ -258,7 +294,7 @@ function MyChatPanel({ workspaceId, data }: Props) {
         parts: [{ kind: "text", text: m.content }],
       }));
 
-    api.post(`/workspaces/${workspaceId}/a2a`, {
+    api.post<A2AResponse>(`/workspaces/${workspaceId}/a2a`, {
       method: "message/send",
       params: {
         message: {
@@ -268,11 +304,24 @@ function MyChatPanel({ workspaceId, data }: Props) {
         },
         metadata: { history },
       },
-    }).catch(() => {
-      setSending(false);
-      sendingFromAPIRef.current = false;
-      setError("Failed to send message — agent may be unreachable");
-    });
+    })
+      .then((resp) => {
+        // Skip if the WS A2A_RESPONSE event already handled this response.
+        // Both paths (WS + HTTP) check sendingFromAPIRef — whichever clears
+        // it first wins, the other becomes a no-op (no duplicate messages).
+        if (!sendingFromAPIRef.current) return;
+        const replyText = extractReplyText(resp);
+        if (replyText) {
+          setMessages((prev) => [...prev, createMessage("agent", replyText)]);
+        }
+        setSending(false);
+        sendingFromAPIRef.current = false;
+      })
+      .catch(() => {
+        setSending(false);
+        sendingFromAPIRef.current = false;
+        setError("Failed to send message — agent may be unreachable");
+      });
   };
 
   const isOnline = data.status === "online" || data.status === "degraded";
@@ -324,7 +373,7 @@ function MyChatPanel({ workspaceId, data }: Props) {
               </div>
               {activityLog.length > 0 && (
                 <div className="mt-1.5 text-[9px] text-zinc-500 space-y-0.5">
-                  <div className="text-zinc-400">Processing with Claude...</div>
+                  <div className="text-zinc-400">Processing with {runtimeDisplayName(data.runtime)}...</div>
                   {activityLog.map((line, i) => (
                     <div key={i} className="pl-2 border-l border-zinc-700">◇ {line}</div>
                   ))}
