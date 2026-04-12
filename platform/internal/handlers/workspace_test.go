@@ -426,17 +426,20 @@ func TestWorkspaceDelete_CascadeWithChildren(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).
 			AddRow("ws-child-del", "Child Agent"))
 
+	// Descendant CTE query returns the recursive set (1 descendant: ws-child-del)
+	mock.ExpectQuery("WITH RECURSIVE descendants").
+		WithArgs("ws-parent-del").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("ws-child-del"))
+
 	// Expect broadcast for child WORKSPACE_REMOVED
 	mock.ExpectExec("INSERT INTO structure_events").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	// Expect batch cascade: recursive CTE marks all descendants as removed
-	mock.ExpectExec("UPDATE workspaces SET status").
-		WithArgs("ws-parent-del").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	// Expect batch cascade: delete canvas layouts for children
-	mock.ExpectExec("DELETE FROM canvas_layouts").
-		WithArgs("ws-parent-del").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	// Expect batch cascade: mark all descendants removed via ANY($1::uuid[])
+	mock.ExpectExec("UPDATE workspaces SET status = 'removed'").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	// Expect batch cascade: delete canvas layouts via ANY($1::uuid[])
+	mock.ExpectExec("DELETE FROM canvas_layouts WHERE workspace_id = ANY").
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect parent status update
 	mock.ExpectExec("UPDATE workspaces SET status = 'removed'").

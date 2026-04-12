@@ -537,7 +537,7 @@ check "Delete PM cascades" '"cascade_deleted"' "$R"
 # Delete outsider
 curl -s -X DELETE "$BASE/workspaces/$OUTSIDER_ID?confirm=true" > /dev/null
 
-# Clean up imported bundle workspaces
+# Clean up remaining workspaces (bundle imports, runtime test workspaces, etc.)
 sleep 2
 curl -s "$BASE/workspaces" | python3 -c "
 import json, sys, subprocess, time
@@ -547,9 +547,12 @@ for w in ws:
     subprocess.run(['curl', '-s', '-X', 'DELETE', '$BASE/workspaces/' + w['id'] + '?confirm=true'], capture_output=True)
 " 2>/dev/null
 
-sleep 2
-# Verify clean
-R=$(curl -s "$BASE/workspaces")
+# Poll for clean state up to 30s — DB cascade + container stop is async on busy systems
+for i in 1 2 3 4 5 6; do
+  sleep 5
+  R=$(curl -s "$BASE/workspaces")
+  if [ "$R" = "[]" ]; then break; fi
+done
 check "All workspaces cleaned" '[]' "$R"
 
 # ============================================================
