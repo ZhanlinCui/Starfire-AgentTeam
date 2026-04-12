@@ -124,16 +124,24 @@ R=$(curl -s -X POST "$BASE/workspaces" -H "Content-Type: application/json" \
 check "Create crewai workspace" '"status":"provisioning"' "$R"
 RT_CR_ID=$(echo "$R" | jq_extract "['id']")
 
-# Wait for containers to start
-sleep 10
-
-# Verify correct Docker images used
+# Wait for containers to start (poll up to 30s for first one to appear)
 if command -v docker &>/dev/null; then
+  short_cc="${RT_CC_ID:0:12}"
+  for i in 1 2 3 4 5 6; do
+    sleep 5
+    if docker inspect "ws-${short_cc}" >/dev/null 2>&1; then break; fi
+  done
+
   _check_image() {
     local ws_id="$1" expected_tag="$2" label="$3"
     local short_id="${ws_id:0:12}"
-    local actual_image
-    actual_image=$(docker inspect "ws-${short_id}" --format '{{.Config.Image}}' 2>/dev/null || echo "NOT_FOUND")
+    # Poll up to 30s for image to appear
+    local actual_image="NOT_FOUND"
+    for j in 1 2 3 4 5 6; do
+      actual_image=$(docker inspect "ws-${short_id}" --format '{{.Config.Image}}' 2>/dev/null || echo "NOT_FOUND")
+      if echo "$actual_image" | grep -qF "$expected_tag"; then break; fi
+      sleep 5
+    done
     if echo "$actual_image" | grep -qF "$expected_tag"; then
       echo "  PASS: $label → $actual_image"
       PASS=$((PASS + 1))
