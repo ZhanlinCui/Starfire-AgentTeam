@@ -733,7 +733,7 @@ func TestPluginInstall_NotFoundUsesTypedSentinel(t *testing.T) {
 func TestPluginInstall_NonSentinelResolverErrorIs502(t *testing.T) {
 	// Register a stub resolver whose Fetch returns a plain (non-ErrPluginNotFound) error.
 	h := NewPluginsHandler(t.TempDir(), nil, nil).
-		WithSourceResolver(&erroringResolver{scheme: "broken", err: errors.New("connection refused")})
+		WithSourceResolver(alwaysErrs("broken", errors.New("connection refused")))
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws"}}
@@ -749,7 +749,7 @@ func TestPluginInstall_NonSentinelResolverErrorIs502(t *testing.T) {
 // Install returns 504 when fetch honours ctx.DeadlineExceeded.
 func TestPluginInstall_DeadlineExceededIs504(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil).
-		WithSourceResolver(&erroringResolver{scheme: "slow", err: context.DeadlineExceeded})
+		WithSourceResolver(alwaysErrs("slow", context.DeadlineExceeded))
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws"}}
@@ -766,7 +766,7 @@ func TestPluginInstall_DeadlineExceededIs504(t *testing.T) {
 func TestPluginInstall_OversizedStagedTreeIs413(t *testing.T) {
 	t.Setenv("PLUGIN_INSTALL_MAX_DIR_BYTES", "1024") // 1 KiB cap
 	h := NewPluginsHandler(t.TempDir(), nil, nil).
-		WithSourceResolver(&bigBlobResolver{bytes: 2048}) // 2 KiB blob
+		WithSourceResolver(writesBlob("big", 2048)) // 2 KiB blob
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws"}}
@@ -797,28 +797,54 @@ func TestDirSize_ShortCircuitsOnCap(t *testing.T) {
 	}
 }
 
-// ---- test-only resolver stubs ----
+// ---- test-only resolver stub ----
 
-type erroringResolver struct {
-	scheme string
-	err    error
+// fakeResolver is a single hook-based SourceResolver replacing the
+// previously-separate erroringResolver / bigBlobResolver /
+// hostileResolver types. Tests pick the scheme and supply a fetchFn.
+type fakeResolver struct {
+	scheme  string
+	fetchFn func(ctx context.Context, spec, dst string) (string, error)
 }
 
-func (e *erroringResolver) Scheme() string { return e.scheme }
-func (e *erroringResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
-	return "", e.err
+func (f *fakeResolver) Scheme() string { return f.scheme }
+func (f *fakeResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
+	return f.fetchFn(ctx, spec, dst)
 }
 
-type bigBlobResolver struct {
-	bytes int
-}
-
-func (b *bigBlobResolver) Scheme() string { return "big" }
-func (b *bigBlobResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
-	if err := os.WriteFile(filepath.Join(dst, "blob"), bytes.Repeat([]byte("a"), b.bytes), 0o644); err != nil {
-		return "", err
+// alwaysErrs returns a fakeResolver that fails every fetch with err.
+func alwaysErrs(scheme string, err error) *fakeResolver {
+	return &fakeResolver{
+		scheme:  scheme,
+		fetchFn: func(context.Context, string, string) (string, error) { return "", err },
 	}
-	return "big", nil
+}
+
+// writesBlob returns a fakeResolver that writes N bytes into dst
+// before returning `scheme` as the plugin name.
+func writesBlob(scheme string, size int) *fakeResolver {
+	return &fakeResolver{
+		scheme: scheme,
+		fetchFn: func(_ context.Context, _, dst string) (string, error) {
+			if err := os.WriteFile(filepath.Join(dst, "blob"), bytes.Repeat([]byte("a"), size), 0o644); err != nil {
+				return "", err
+			}
+			return scheme, nil
+		},
+	}
+}
+
+// emitsName returns a fakeResolver that writes a valid plugin.yaml
+// but returns `returnedName` — used to probe post-fetch name
+// validation (e.g. hostile traversal names).
+func emitsName(scheme, returnedName string) *fakeResolver {
+	return &fakeResolver{
+		scheme: scheme,
+		fetchFn: func(_ context.Context, _, dst string) (string, error) {
+			_ = os.WriteFile(filepath.Join(dst, "plugin.yaml"), []byte("name: x\n"), 0o644)
+			return returnedName, nil
+		},
+	}
 }
 
 
@@ -826,7 +852,7 @@ func TestPluginInstall_RejectsHostileResolverPluginName(t *testing.T) {
 	// Prove the post-fetch validatePluginName call catches a resolver
 	// that tries to smuggle a traversal name into /configs/plugins/.
 	h := NewPluginsHandler(t.TempDir(), nil, nil).
-		WithSourceResolver(&hostileResolver{})
+		WithSourceResolver(emitsName("hostile", "../../../etc/passwd"))
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Params = gin.Params{{Key: "id", Value: "ws"}}
@@ -838,16 +864,6 @@ func TestPluginInstall_RejectsHostileResolverPluginName(t *testing.T) {
 		t.Errorf("hostile plugin name must be 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
-
-type hostileResolver struct{}
-
-func (h *hostileResolver) Scheme() string { return "hostile" }
-func (h *hostileResolver) Fetch(ctx context.Context, spec, dst string) (string, error) {
-	// Emit files into dst (so dirSize passes) but return a traversal name.
-	_ = os.WriteFile(filepath.Join(dst, "plugin.yaml"), []byte("name: x\n"), 0o644)
-	return "../../../etc/passwd", nil
-}
-
 
 func TestPluginInstall_EmptySpecAfterSchemeRejected(t *testing.T) {
 	h := NewPluginsHandler(t.TempDir(), nil, nil)
@@ -864,4 +880,100 @@ func TestPluginInstall_EmptySpecAfterSchemeRejected(t *testing.T) {
 	if !bytes.Contains(w.Body.Bytes(), []byte("empty spec")) {
 		t.Errorf("error should mention 'empty spec': %s", w.Body.String())
 	}
+}
+
+
+// ---- resolveAndStage in isolation (now testable sans gin.Context) ----
+
+func TestResolveAndStage_HappyPath_Local(t *testing.T) {
+	base := t.TempDir()
+	pluginDir := filepath.Join(base, "demo")
+	_ = os.MkdirAll(pluginDir, 0o755)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: demo\n"), 0o644)
+	h := NewPluginsHandler(base, nil, nil)
+
+	res, err := h.resolveAndStage(context.Background(), installRequest{Name: "demo"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	defer os.RemoveAll(res.StagedDir)
+
+	if res.PluginName != "demo" {
+		t.Errorf("got plugin %q", res.PluginName)
+	}
+	if _, err := os.Stat(filepath.Join(res.StagedDir, "plugin.yaml")); err != nil {
+		t.Errorf("plugin.yaml not staged: %v", err)
+	}
+}
+
+func TestResolveAndStage_BothFieldsRejected(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	_, err := h.resolveAndStage(context.Background(), installRequest{Name: "a", Source: "local://b"})
+	var he *httpErr
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		t.Errorf("want typed httpErr with 400, got %v", err)
+	}
+}
+
+func TestResolveAndStage_EmptyRequest(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	_, err := h.resolveAndStage(context.Background(), installRequest{})
+	var he *httpErr
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		t.Errorf("want typed httpErr with 400, got %v", err)
+	}
+}
+
+func TestResolveAndStage_NotFoundFromResolver(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil) // local resolver pointed at empty dir
+	_, err := h.resolveAndStage(context.Background(), installRequest{Name: "absent"})
+	var he *httpErr
+	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
+		t.Errorf("want 404 via ErrPluginNotFound, got %v", err)
+	}
+}
+
+func TestResolveAndStage_CleansUpStagedDirOnError(t *testing.T) {
+	// Hostile resolver emits a file then returns a traversal name → 400.
+	// Verify the staged dir it used is NOT left behind.
+	h := NewPluginsHandler(t.TempDir(), nil, nil).
+		WithSourceResolver(emitsName("hostile", "../../../etc/passwd"))
+	_, err := h.resolveAndStage(context.Background(), installRequest{Source: "hostile://x"})
+	var he *httpErr
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %v", err)
+	}
+	// Walk /tmp for leftover "starfire-plugin-fetch-*" dirs with the
+	// hostile resolver's marker. Probabilistic (can't pinpoint the exact
+	// dir), but a clean cleanup means none contain the plugin.yaml blob
+	// the resolver writes.
+	entries, _ := filepath.Glob(filepath.Join(os.TempDir(), "starfire-plugin-fetch-*"))
+	for _, e := range entries {
+		if _, err := os.Stat(filepath.Join(e, "plugin.yaml")); err == nil {
+			t.Errorf("leaked staging dir with plugin.yaml still present: %s", e)
+		}
+	}
+}
+
+func TestHTTPErr_WrapsCleanly(t *testing.T) {
+	e := newHTTPErr(http.StatusTeapot, gin.H{"error": "I'm a teapot"})
+	if !strings.Contains(e.Error(), "418") {
+		t.Errorf("Error() should include status: %q", e.Error())
+	}
+	var he *httpErr
+	if !errors.As(e, &he) || he.Status != http.StatusTeapot {
+		t.Errorf("errors.As should extract typed error")
+	}
+}
+
+func TestLogInstallLimitsOnce(t *testing.T) {
+	// Reset the guard for this test so we can observe a log emission
+	// even though other tests may have tripped it. Also prove the guard
+	// prevents a second emission.
+	installLimitsLogged = false
+	logInstallLimitsOnce()
+	if !installLimitsLogged {
+		t.Error("flag should be set after first call")
+	}
+	logInstallLimitsOnce() // must be a no-op; just assert no panic
 }

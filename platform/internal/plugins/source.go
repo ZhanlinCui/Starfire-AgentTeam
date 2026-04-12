@@ -96,10 +96,11 @@ func ParseSource(input string) (Source, error) {
 		// Bare name → local.
 		return Source{Scheme: "local", Spec: input}, nil
 	}
-	if strings.TrimSpace(m[2]) == "" {
-		return Source{}, fmt.Errorf("source %q has empty spec after %q scheme", input, m[1])
+	scheme, spec := m[1], strings.TrimSpace(m[2])
+	if spec == "" {
+		return Source{}, fmt.Errorf("source %q has empty spec after %q scheme", input, scheme)
 	}
-	return Source{Scheme: m[1], Spec: m[2]}, nil
+	return Source{Scheme: scheme, Spec: spec}, nil
 }
 
 // Registry holds the set of registered SourceResolvers keyed by scheme.

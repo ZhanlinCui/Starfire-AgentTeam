@@ -32,6 +32,41 @@ const (
 	defaultInstallMaxDirBytes  = 100 * 1024 * 1024 // 100 MiB staged tree
 )
 
+// httpErr is the typed error returned by Install helpers. The handler
+// matches it with errors.As and emits the attached status + body. Using
+// a typed error instead of a 5-value tuple keeps helper signatures Go-
+// idiomatic and makes them testable without a gin.Context.
+type httpErr struct {
+	Status int
+	Body   gin.H
+}
+
+func (e *httpErr) Error() string {
+	return fmt.Sprintf("%d: %v", e.Status, e.Body)
+}
+
+// newHTTPErr constructs an *httpErr without the caller worrying about
+// pointer receivers. Keeps call sites terse.
+func newHTTPErr(status int, body gin.H) *httpErr { return &httpErr{Status: status, Body: body} }
+
+// logInstallLimitsOnce emits a single operator-facing line describing
+// the effective install caps + timeout. Called once at router wiring.
+// Helps self-hosters confirm their env overrides took effect.
+var installLimitsLogged = false
+
+func logInstallLimitsOnce() {
+	if installLimitsLogged {
+		return
+	}
+	installLimitsLogged = true
+	log.Printf(
+		"Plugin install limits: body=%d bytes  timeout=%s  staged=%d bytes",
+		envx.Int64("PLUGIN_INSTALL_BODY_MAX_BYTES", defaultInstallBodyMaxBytes),
+		envx.Duration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout),
+		envx.Int64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes),
+	)
+}
+
 // dirSize returns the total bytes of files under dir. Short-circuits
 // as soon as the byte limit is exceeded so pathological inputs don't
 // run the full walk.
@@ -89,6 +124,7 @@ func NewPluginsHandler(pluginsDir string, docker *client.Client, restartFunc fun
 	sources := plugins.NewRegistry()
 	sources.Register(plugins.NewLocalResolver(pluginsDir))
 	sources.Register(plugins.NewGithubResolver())
+	logInstallLimitsOnce()
 	return &PluginsHandler{
 		pluginsDir:  pluginsDir,
 		docker:      docker,
@@ -332,6 +368,22 @@ func (h *PluginsHandler) CheckRuntimeCompatibility(c *gin.Context) {
 // The shape of the plugin (agentskills.io format, MCP server, DeepAgents
 // sub-agent, …) is orthogonal and handled by the per-runtime adapter
 // inside the workspace at startup.
+// installRequest is the decoded, validated payload a caller submits.
+// Held out as its own type so resolveAndStage is testable without a
+// gin.Context; the handler just decodes into this shape.
+type installRequest struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+// stageResult bundles the outputs of resolveAndStage for the caller.
+// Avoids a 5-value tuple return.
+type stageResult struct {
+	StagedDir  string
+	PluginName string
+	Source     plugins.Source
+}
+
 func (h *PluginsHandler) Install(c *gin.Context) {
 	workspaceID := c.Param("id")
 	// Cap the JSON body so a pathological POST can't exhaust parser memory.
@@ -345,145 +397,146 @@ func (h *PluginsHandler) Install(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	defer cancel()
 
-	stagedDir, pluginName, source, status, errResp := h.resolveAndStage(ctx, c)
-	if errResp != nil {
-		c.JSON(status, errResp)
-		return
-	}
-	defer os.RemoveAll(stagedDir)
-
-	status, errResp = h.deliverToContainer(ctx, workspaceID, stagedDir, pluginName, source)
-	if errResp != nil {
-		c.JSON(status, errResp)
+	var req installRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	log.Printf("Plugin install: %s via %s → workspace %s (restarting)", pluginName, source.Scheme, workspaceID)
+	result, err := h.resolveAndStage(ctx, req)
+	if err != nil {
+		var he *httpErr
+		if errors.As(err, &he) {
+			c.JSON(he.Status, he.Body)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// On success, we own stagedDir cleanup. On error, resolveAndStage
+	// has already cleaned it up (and its returned result is nil).
+	defer os.RemoveAll(result.StagedDir)
+
+	if err := h.deliverToContainer(ctx, workspaceID, result); err != nil {
+		var he *httpErr
+		if errors.As(err, &he) {
+			c.JSON(he.Status, he.Body)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.Printf("Plugin install: %s via %s → workspace %s (restarting)", result.PluginName, result.Source.Scheme, workspaceID)
 	c.JSON(http.StatusOK, gin.H{
 		"status": "installed",
-		"plugin": pluginName,
-		"source": source.Raw(),
+		"plugin": result.PluginName,
+		"source": result.Source.Raw(),
 	})
 }
 
-// resolveAndStage parses the request body, dispatches to the right
-// SourceResolver, fetches the plugin into a temp dir, validates the
-// returned name + size, and returns the staging dir. On error, returns
-// the HTTP status + response body the handler should emit.
+// resolveAndStage parses a validated request, dispatches to the right
+// SourceResolver, fetches the plugin into a temp dir, and validates the
+// returned name + staged size.
 //
-// Caller is responsible for os.RemoveAll on the returned stagedDir.
-func (h *PluginsHandler) resolveAndStage(ctx context.Context, c *gin.Context) (
-	stagedDir, pluginName string, source plugins.Source, status int, errResp gin.H,
-) {
-	var body struct {
-		Name   string `json:"name"`
-		Source string `json:"source"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		return "", "", plugins.Source{}, http.StatusBadRequest, gin.H{"error": err.Error()}
-	}
-	if body.Name != "" && body.Source != "" {
-		return "", "", plugins.Source{}, http.StatusBadRequest, gin.H{
+// On any error the staging tempdir (if created) is removed before return,
+// and the returned *stageResult is nil. Callers own cleanup of
+// result.StagedDir on success via defer os.RemoveAll.
+func (h *PluginsHandler) resolveAndStage(ctx context.Context, req installRequest) (*stageResult, error) {
+	if req.Name != "" && req.Source != "" {
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
 			"error": "specify either 'name' (local shortcut) or 'source' (full scheme://spec), not both",
-		}
+		})
 	}
-	rawSource := body.Source
+	rawSource := req.Source
 	if rawSource == "" {
-		rawSource = body.Name
+		rawSource = req.Name
 	}
 	if rawSource == "" {
-		return "", "", plugins.Source{}, http.StatusBadRequest, gin.H{
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
 			"error": "either 'name' or 'source' is required",
-		}
+		})
 	}
 
-	var err error
-	source, err = plugins.ParseSource(rawSource)
+	source, err := plugins.ParseSource(rawSource)
 	if err != nil {
-		return "", "", source, http.StatusBadRequest, gin.H{"error": err.Error()}
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
 	resolver, err := h.sources.Resolve(source)
 	if err != nil {
-		return "", "", source, http.StatusBadRequest, gin.H{
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
 			"error":             err.Error(),
 			"available_schemes": h.sources.Schemes(),
-		}
+		})
 	}
 	// Front-run obvious input validation for local sources so path-
 	// traversal attempts yield 400 rather than a resolver-level 502.
 	if source.Scheme == "local" {
 		if err := validatePluginName(source.Spec); err != nil {
-			return "", "", source, http.StatusBadRequest, gin.H{"error": err.Error()}
+			return nil, newHTTPErr(http.StatusBadRequest, gin.H{"error": err.Error()})
 		}
 	}
 
-	stagedDir, err = os.MkdirTemp("", "starfire-plugin-fetch-*")
+	stagedDir, err := os.MkdirTemp("", "starfire-plugin-fetch-*")
 	if err != nil {
-		return "", "", source, http.StatusInternalServerError, gin.H{"error": "failed to create staging dir"}
+		return nil, newHTTPErr(http.StatusInternalServerError, gin.H{"error": "failed to create staging dir"})
 	}
-	// NOTE: caller cleans up stagedDir. Don't RemoveAll on errors below —
-	// pass the path back so caller's defer handles both success and error.
-	cleanup := func() {
-		_ = os.RemoveAll(stagedDir)
-	}
+	// From here, we own stagedDir. Every error path below removes it
+	// before returning; the caller's defer takes over on success.
+	cleanup := func() { _ = os.RemoveAll(stagedDir) }
 
-	pluginName, err = resolver.Fetch(ctx, source.Spec, stagedDir)
+	pluginName, err := resolver.Fetch(ctx, source.Spec, stagedDir)
 	if err != nil {
 		cleanup()
 		log.Printf("Plugin install: resolver %s failed for %s: %v", source.Scheme, source.Spec, err)
-		fetchStatus := http.StatusBadGateway
+		status := http.StatusBadGateway
 		if errors.Is(err, plugins.ErrPluginNotFound) {
-			fetchStatus = http.StatusNotFound
+			status = http.StatusNotFound
 		} else if errors.Is(err, context.DeadlineExceeded) {
-			fetchStatus = http.StatusGatewayTimeout
+			status = http.StatusGatewayTimeout
 		}
-		return "", "", source, fetchStatus, gin.H{
+		return nil, newHTTPErr(status, gin.H{
 			"error":  fmt.Sprintf("failed to fetch plugin from %s: %v", source.Scheme, err),
 			"source": source.Raw(),
-		}
+		})
 	}
 	if err := validatePluginName(pluginName); err != nil {
 		cleanup()
-		return "", "", source, http.StatusBadRequest, gin.H{
+		return nil, newHTTPErr(http.StatusBadRequest, gin.H{
 			"error":  fmt.Sprintf("resolver returned invalid plugin name %q: %v", pluginName, err),
 			"source": source.Raw(),
-		}
+		})
 	}
-	maxBytes := envx.Int64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes)
-	if _, err := dirSize(stagedDir, maxBytes); err != nil {
+	limit := envx.Int64("PLUGIN_INSTALL_MAX_DIR_BYTES", defaultInstallMaxDirBytes)
+	if _, err := dirSize(stagedDir, limit); err != nil {
 		cleanup()
-		return "", "", source, http.StatusRequestEntityTooLarge, gin.H{
+		return nil, newHTTPErr(http.StatusRequestEntityTooLarge, gin.H{
 			"error":  err.Error(),
 			"source": source.Raw(),
-		}
+		})
 	}
-	return stagedDir, pluginName, source, 0, nil
+	return &stageResult{StagedDir: stagedDir, PluginName: pluginName, Source: source}, nil
 }
 
 // deliverToContainer copies the staged plugin dir into the workspace
 // container, chowns it for the agent user, and triggers a restart.
-// Returns (status, response) on error; status=0, response=nil on success.
-func (h *PluginsHandler) deliverToContainer(
-	ctx context.Context,
-	workspaceID, stagedDir, pluginName string,
-	source plugins.Source,
-) (int, gin.H) {
+// Returns a typed *httpErr on failure; nil on success.
+func (h *PluginsHandler) deliverToContainer(ctx context.Context, workspaceID string, r *stageResult) error {
 	containerName := h.findRunningContainer(ctx, workspaceID)
 	if containerName == "" {
-		return http.StatusServiceUnavailable, gin.H{"error": "workspace container not running"}
+		return newHTTPErr(http.StatusServiceUnavailable, gin.H{"error": "workspace container not running"})
 	}
-	if err := h.copyPluginToContainer(ctx, containerName, stagedDir, pluginName); err != nil {
-		log.Printf("Plugin install: failed to copy %s to %s: %v", pluginName, workspaceID, err)
-		return http.StatusInternalServerError, gin.H{"error": "failed to copy plugin to container"}
+	if err := h.copyPluginToContainer(ctx, containerName, r.StagedDir, r.PluginName); err != nil {
+		log.Printf("Plugin install: failed to copy %s to %s: %v", r.PluginName, workspaceID, err)
+		return newHTTPErr(http.StatusInternalServerError, gin.H{"error": "failed to copy plugin to container"})
 	}
 	h.execAsRoot(ctx, containerName, []string{
-		"chown", "-R", "1000:1000", "/configs/plugins/" + pluginName,
+		"chown", "-R", "1000:1000", "/configs/plugins/" + r.PluginName,
 	})
 	if h.restartFunc != nil {
 		go h.restartFunc(workspaceID)
 	}
-	_ = source // reserved for future per-source restart policies
-	return 0, nil
+	return nil
 }
 
 // Uninstall handles DELETE /workspaces/:id/plugins/:name — removes a plugin.
