@@ -453,16 +453,25 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 	channelEnv := loadWorkspaceEnv(orgBaseDir, ws.FilesDir)
 	wsChannelsCreated := []string{}
 	wsChannelsSkipped := []map[string]string{}
+	// skipChannel records a skipped channel with consistent shape across all reasons.
+	skipChannel := func(channelType, reason string) {
+		wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{
+			"workspace": ws.Name,
+			"type":      channelType, // empty string when type field was missing
+			"reason":    reason,
+		})
+	}
+
 	for _, ch := range ws.Channels {
 		if ch.Type == "" {
-			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "reason": "empty type"})
+			skipChannel("", "empty type")
 			log.Printf("Org import: skipping channel with empty type for %s", ws.Name)
 			continue
 		}
 		// Validate adapter exists upfront — fail fast instead of inserting orphan rows
 		adapter, ok := channels.GetAdapter(ch.Type)
 		if !ok {
-			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "type": ch.Type, "reason": "unknown adapter"})
+			skipChannel(ch.Type, "unknown adapter")
 			log.Printf("Org import: skipping %s channel for %s — no adapter registered", ch.Type, ws.Name)
 			continue
 		}
@@ -477,14 +486,14 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 			expandedConfig[k] = expanded
 		}
 		if len(missing) > 0 {
-			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "type": ch.Type, "reason": fmt.Sprintf("missing env: %v", missing)})
+			skipChannel(ch.Type, fmt.Sprintf("missing env: %v", missing))
 			log.Printf("Org import: skipping %s channel for %s — env vars not set: %v", ch.Type, ws.Name, missing)
 			continue
 		}
 
 		// Adapter-level config validation
 		if err := adapter.ValidateConfig(expandedConfig); err != nil {
-			wsChannelsSkipped = append(wsChannelsSkipped, map[string]string{"workspace": ws.Name, "type": ch.Type, "reason": err.Error()})
+			skipChannel(ch.Type, err.Error())
 			log.Printf("Org import: skipping %s channel for %s — invalid config: %v", ch.Type, ws.Name, err)
 			continue
 		}

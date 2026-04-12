@@ -93,7 +93,7 @@ OPENAI_API_KEY=... bash scripts/test-team-e2e.sh           # E2E: Multi-template
 
 ### Unit Tests
 ```bash
-cd platform && go test -race ./...               # 448 Go tests (handlers, registry, provisioner, CLI, delegation, org, channels — sqlmock + miniredis)
+cd platform && go test -race ./...               # 476 Go tests (handlers, registry, provisioner, CLI, delegation, org, channels — sqlmock + miniredis)
 cd canvas && npm test                            # 325 Vitest tests (store, components, hydration, buildTree, secrets API)
 cd workspace-template && python -m pytest -v     # 990 pytest tests (config, heartbeat, prompt, skills, a2a, executor, sdk-executor, memory, mcp, plugins, cli, delegation, preflight)
 ```

@@ -108,6 +108,27 @@ Currently, channels run in long-polling mode by default. Webhook mode is impleme
 
 The platform verifies the `X-Telegram-Bot-Api-Secret-Token` header on every webhook request.
 
+## Org Template Auto-Link
+
+Channels can be defined in `org.yaml` so they're auto-created when the org is deployed. Config values support `${VAR}` expansion from `.env` files.
+
+```yaml
+workspaces:
+  - name: PM
+    files_dir: pm
+    channels:
+      - type: telegram
+        config:
+          bot_token: ${TELEGRAM_BOT_TOKEN}
+          chat_id: ${TELEGRAM_CHAT_ID}
+        allowed_users: []
+        enabled: true
+```
+
+The vars are resolved from (in order): `pm/.env` → org root `.env` → platform process env. If any required var is unresolved, the channel is skipped with a clear log message and the skip reason is surfaced in the import response (`channels_skipped` field).
+
+The platform calls `adapter.ValidateConfig()` upfront so unknown channel types or invalid configs fail fast. Insert is idempotent (`ON CONFLICT DO UPDATE`) so re-importing the same org refreshes the channel config.
+
 ## Hot Reload
 
 CRUD operations on `/workspaces/:id/channels` (POST, PATCH, DELETE) trigger `manager.Reload()`. Active polling goroutines are diffed against the desired DB state — new channels start, removed/disabled ones stop. No platform restart required.
