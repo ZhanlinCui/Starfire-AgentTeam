@@ -241,6 +241,7 @@ Agents can auto-execute a prompt on startup before any user interaction. Configu
 | POST | /workspaces/:id/channels/:channelId/send | channels.go (outbound message) |
 | POST | /workspaces/:id/channels/:channelId/test | channels.go (test connection) |
 | GET | /channels/adapters | channels.go (list available platforms) |
+| POST | /channels/discover | channels.go (auto-detect chats for a bot token) |
 | POST | /webhooks/:type | channels.go (incoming social webhook) |
 | GET | /workspaces/:id/shared-context | templates.go |
 | GET/PUT/DELETE | /workspaces/:id/files[/*path] | templates.go |
