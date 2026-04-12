@@ -35,15 +35,29 @@ func validatePluginName(name string) error {
 	return nil
 }
 
+// RuntimeLookup resolves a workspace's runtime identifier by ID. The
+// handler uses this to filter the plugin registry to compatible plugins
+// without needing a direct DB dependency. A nil lookup disables
+// workspace-scoped filtering (handler falls back to unfiltered list).
+type RuntimeLookup func(workspaceID string) (string, error)
+
 // PluginsHandler manages the plugin registry and per-workspace plugin installation.
 type PluginsHandler struct {
-	pluginsDir  string         // host path to plugins/ registry
-	docker      *client.Client // Docker client for container operations
-	restartFunc func(string)   // auto-restart workspace after install/uninstall
+	pluginsDir    string         // host path to plugins/ registry
+	docker        *client.Client // Docker client for container operations
+	restartFunc   func(string)   // auto-restart workspace after install/uninstall
+	runtimeLookup RuntimeLookup  // workspace_id → runtime (optional)
 }
 
 func NewPluginsHandler(pluginsDir string, docker *client.Client, restartFunc func(string)) *PluginsHandler {
 	return &PluginsHandler{pluginsDir: pluginsDir, docker: docker, restartFunc: restartFunc}
+}
+
+// WithRuntimeLookup installs a workspace-runtime resolver. Used by the
+// router during wiring so tests don't need a real DB.
+func (h *PluginsHandler) WithRuntimeLookup(lookup RuntimeLookup) *PluginsHandler {
+	h.runtimeLookup = lookup
+	return h
 }
 
 // pluginInfo is the API response for a plugin.
@@ -54,27 +68,72 @@ type pluginInfo struct {
 	Author      string   `json:"author"`
 	Tags        []string `json:"tags"`
 	Skills      []string `json:"skills"`
+	// Runtimes declares which workspace runtimes this plugin ships an adaptor
+	// for. Empty means "unknown / legacy plugin" — the canvas should still
+	// allow install (the raw-drop fallback will surface a warning at install
+	// time). Runtime names use underscore form (e.g. "claude_code").
+	Runtimes []string `json:"runtimes"`
+}
+
+// supportsRuntime returns true if the plugin declares support for the given
+// runtime OR if it declares no runtimes at all (legacy). Comparison is
+// normalized — "claude-code" and "claude_code" are treated as equal.
+func (p pluginInfo) supportsRuntime(runtime string) bool {
+	if len(p.Runtimes) == 0 {
+		return true
+	}
+	want := strings.ReplaceAll(runtime, "-", "_")
+	for _, r := range p.Runtimes {
+		if strings.ReplaceAll(r, "-", "_") == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ListRegistry handles GET /plugins — lists all available plugins from the registry.
+// Supports optional ?runtime=<name> query param to filter to plugins that
+// declare support for the given runtime (plus legacy plugins with no
+// `runtimes` field, which are assumed compatible).
 func (h *PluginsHandler) ListRegistry(c *gin.Context) {
-	plugins := []pluginInfo{}
+	runtime := c.Query("runtime")
+	c.JSON(http.StatusOK, h.listRegistryFiltered(runtime))
+}
 
+// listRegistryFiltered is the shared read-plus-filter path used by both
+// /plugins and /workspaces/:id/plugins/available.
+func (h *PluginsHandler) listRegistryFiltered(runtime string) []pluginInfo {
+	plugins := []pluginInfo{}
 	entries, err := os.ReadDir(h.pluginsDir)
 	if err != nil {
-		c.JSON(http.StatusOK, plugins)
-		return
+		return plugins
 	}
-
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		info := h.readPluginManifest(filepath.Join(h.pluginsDir, e.Name()), e.Name())
+		if runtime != "" && !info.supportsRuntime(runtime) {
+			continue
+		}
 		plugins = append(plugins, info)
 	}
+	return plugins
+}
 
-	c.JSON(http.StatusOK, plugins)
+// ListAvailableForWorkspace handles GET /workspaces/:id/plugins/available —
+// returns plugins from the registry filtered to those supported by the
+// workspace's runtime. If no runtime lookup is wired, falls back to the
+// full registry.
+func (h *PluginsHandler) ListAvailableForWorkspace(c *gin.Context) {
+	workspaceID := c.Param("id")
+	runtime := ""
+	if h.runtimeLookup != nil {
+		if r, err := h.runtimeLookup(workspaceID); err == nil {
+			runtime = r
+		}
+	}
+	c.JSON(http.StatusOK, h.listRegistryFiltered(runtime))
 }
 
 // ListInstalled handles GET /workspaces/:id/plugins — lists plugins installed in the workspace.
@@ -254,6 +313,13 @@ func parseManifestYAML(fallbackName string, data []byte) pluginInfo {
 		for _, s := range skills {
 			if str, ok := s.(string); ok {
 				info.Skills = append(info.Skills, str)
+			}
+		}
+	}
+	if runtimes, ok := raw["runtimes"].([]interface{}); ok {
+		for _, r := range runtimes {
+			if str, ok := r.(string); ok {
+				info.Runtimes = append(info.Runtimes, str)
 			}
 		}
 	}

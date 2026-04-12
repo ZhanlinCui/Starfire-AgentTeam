@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agent-molecule/platform/internal/channels"
+	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/handlers"
 	"github.com/agent-molecule/platform/internal/metrics"
@@ -199,9 +200,23 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 
 	// Plugins
 	pluginsDir := findPluginsDir(configsDir)
-	plgh := handlers.NewPluginsHandler(pluginsDir, dockerCli, wh.RestartByID)
+	// Runtime lookup lets the plugins handler filter the registry to plugins
+	// that declare support for the workspace's runtime, without taking a
+	// direct DB dependency in the handler package.
+	runtimeLookup := func(workspaceID string) (string, error) {
+		var runtime string
+		err := db.DB.QueryRowContext(
+			context.Background(),
+			`SELECT COALESCE(runtime, 'langgraph') FROM workspaces WHERE id = $1`,
+			workspaceID,
+		).Scan(&runtime)
+		return runtime, err
+	}
+	plgh := handlers.NewPluginsHandler(pluginsDir, dockerCli, wh.RestartByID).
+		WithRuntimeLookup(runtimeLookup)
 	r.GET("/plugins", plgh.ListRegistry)
 	r.GET("/workspaces/:id/plugins", plgh.ListInstalled)
+	r.GET("/workspaces/:id/plugins/available", plgh.ListAvailableForWorkspace)
 	r.POST("/workspaces/:id/plugins", plgh.Install)
 	r.DELETE("/workspaces/:id/plugins/:name", plgh.Uninstall)
 
