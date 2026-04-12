@@ -212,7 +212,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 
 	// Org Templates
 	orgDir := findOrgDir(configsDir)
-	orgh := handlers.NewOrgHandler(wh, broadcaster, prov, configsDir, orgDir)
+	orgh := handlers.NewOrgHandler(wh, broadcaster, prov, channelMgr, configsDir, orgDir)
 	r.GET("/org/templates", orgh.ListTemplates)
 	r.POST("/org/import", orgh.Import)
 

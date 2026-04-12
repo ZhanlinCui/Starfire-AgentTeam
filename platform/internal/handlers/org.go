@@ -2,15 +2,16 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	"strings"
-
+	"github.com/agent-molecule/platform/internal/channels"
 	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
@@ -31,15 +32,17 @@ type OrgHandler struct {
 	workspace   *WorkspaceHandler
 	broadcaster *events.Broadcaster
 	provisioner *provisioner.Provisioner
+	channelMgr  *channels.Manager
 	configsDir  string
 	orgDir      string // path to org-templates/
 }
 
-func NewOrgHandler(wh *WorkspaceHandler, b *events.Broadcaster, p *provisioner.Provisioner, configsDir, orgDir string) *OrgHandler {
+func NewOrgHandler(wh *WorkspaceHandler, b *events.Broadcaster, p *provisioner.Provisioner, channelMgr *channels.Manager, configsDir, orgDir string) *OrgHandler {
 	return &OrgHandler{
 		workspace:   wh,
 		broadcaster: b,
 		provisioner: p,
+		channelMgr:  channelMgr,
 		configsDir:  configsDir,
 		orgDir:      orgDir,
 	}
@@ -69,6 +72,16 @@ type OrgSchedule struct {
 	Enabled  *bool  `yaml:"enabled" json:"enabled"`
 }
 
+// OrgChannel defines a social channel (Telegram, Slack, etc.) to auto-link
+// when the workspace is created. Config values may reference env vars
+// using ${VAR_NAME} syntax — useful for keeping bot tokens out of YAML.
+type OrgChannel struct {
+	Type         string            `yaml:"type" json:"type"`
+	Config       map[string]string `yaml:"config" json:"config"`
+	AllowedUsers []string          `yaml:"allowed_users" json:"allowed_users"`
+	Enabled      *bool             `yaml:"enabled" json:"enabled"`
+}
+
 type OrgWorkspace struct {
 	Name          string         `yaml:"name" json:"name"`
 	Role          string         `yaml:"role" json:"role"`
@@ -82,6 +95,7 @@ type OrgWorkspace struct {
 	Plugins       []string       `yaml:"plugins" json:"plugins"`
 	InitialPrompt string         `yaml:"initial_prompt" json:"initial_prompt"`
 	Schedules     []OrgSchedule  `yaml:"schedules" json:"schedules"`
+	Channels      []OrgChannel   `yaml:"channels" json:"channels"`
 	External      bool           `yaml:"external" json:"external"`
 	URL           string         `yaml:"url" json:"url"`
 	Canvas        struct {
@@ -417,6 +431,54 @@ func (h *OrgHandler) createWorkspaceTree(ws OrgWorkspace, parentID *string, defa
 		}
 	}
 
+	// Insert channels if defined (Telegram, Slack, etc.).
+	// Config values support ${VAR} expansion from the workspace's .env files
+	// (workspace-specific .env > org root .env > platform process env).
+	channelEnv := map[string]string{}
+	if orgBaseDir != "" {
+		parseEnvFile(filepath.Join(orgBaseDir, ".env"), channelEnv)
+		if ws.FilesDir != "" {
+			parseEnvFile(filepath.Join(orgBaseDir, ws.FilesDir, ".env"), channelEnv)
+		}
+	}
+	for _, ch := range ws.Channels {
+		if ch.Type == "" {
+			log.Printf("Org import: skipping channel with empty type for %s", ws.Name)
+			continue
+		}
+		expandedConfig := make(map[string]interface{}, len(ch.Config))
+		missing := []string{}
+		for k, v := range ch.Config {
+			expanded := expandWithEnv(v, channelEnv)
+			if strings.Contains(v, "$") && expanded == "" {
+				missing = append(missing, v)
+			}
+			expandedConfig[k] = expanded
+		}
+		if len(missing) > 0 {
+			log.Printf("Org import: skipping %s channel for %s — env vars not set: %v", ch.Type, ws.Name, missing)
+			continue
+		}
+		configJSON, _ := json.Marshal(expandedConfig)
+		allowedJSON, _ := json.Marshal(ch.AllowedUsers)
+		enabled := true
+		if ch.Enabled != nil {
+			enabled = *ch.Enabled
+		}
+		if _, err := db.DB.ExecContext(context.Background(), `
+			INSERT INTO workspace_channels (workspace_id, channel_type, channel_config, enabled, allowed_users)
+			VALUES ($1, $2, $3::jsonb, $4, $5::jsonb)
+		`, id, ch.Type, string(configJSON), enabled, string(allowedJSON)); err != nil {
+			log.Printf("Org import: failed to create %s channel for %s: %v", ch.Type, ws.Name, err)
+		} else {
+			log.Printf("Org import: %s channel created for %s", ch.Type, ws.Name)
+		}
+	}
+	// If any channels were created, hot-reload the manager so pollers start.
+	if len(ws.Channels) > 0 && h.channelMgr != nil {
+		h.channelMgr.Reload(context.Background())
+	}
+
 	*results = append(*results, map[string]interface{}{
 		"id":   id,
 		"name": ws.Name,
@@ -442,6 +504,17 @@ func countWorkspaces(workspaces []OrgWorkspace) int {
 		count += countWorkspaces(ws.Children)
 	}
 	return count
+}
+
+// expandWithEnv expands ${VAR} and $VAR references in s using the env map.
+// Falls back to the platform process env if a var isn't in the map.
+func expandWithEnv(s string, env map[string]string) string {
+	return os.Expand(s, func(key string) string {
+		if v, ok := env[key]; ok {
+			return v
+		}
+		return os.Getenv(key)
+	})
 }
 
 // parseEnvFile reads a .env file and adds KEY=VALUE pairs to the map.
