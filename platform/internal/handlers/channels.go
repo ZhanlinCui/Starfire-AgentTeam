@@ -264,6 +264,44 @@ func (h *ChannelHandler) Test(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "test message sent"})
 }
 
+// Discover auto-detects chats/groups a bot has been added to by calling the platform API.
+// User flow: enter bot token → add bot to groups → send a message → click Detect → select groups.
+func (h *ChannelHandler) Discover(c *gin.Context) {
+	var body struct {
+		ChannelType string `json:"channel_type"`
+		BotToken    string `json:"bot_token"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.BotToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bot_token is required"})
+		return
+	}
+
+	adapter, ok := channels.GetAdapter(body.ChannelType)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported channel_type"})
+		return
+	}
+
+	// Only Telegram supports discovery currently
+	tg, ok := adapter.(*channels.TelegramAdapter)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "discovery not supported for " + body.ChannelType})
+		return
+	}
+
+	chats, err := tg.DiscoverChats(c.Request.Context(), body.BotToken)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"bot_username": "",
+		"chats":        chats,
+		"hint":         "Add the bot to your groups and send a message, then retry if no chats appear.",
+	})
+}
+
 // Webhook handles incoming webhooks from any social platform.
 func (h *ChannelHandler) Webhook(c *gin.Context) {
 	channelType := c.Param("type")

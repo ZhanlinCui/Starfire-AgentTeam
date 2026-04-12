@@ -225,6 +225,7 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.DELETE("/workspaces/:id/channels/:channelId", chh.Delete)
 	r.POST("/workspaces/:id/channels/:channelId/send", chh.Send)
 	r.POST("/workspaces/:id/channels/:channelId/test", chh.Test)
+	r.POST("/channels/discover", chh.Discover)
 	r.POST("/webhooks/:type", chh.Webhook)
 
 	// WebSocket

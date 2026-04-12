@@ -32,6 +32,57 @@ func (t *TelegramAdapter) ValidateConfig(config map[string]interface{}) error {
 	return nil
 }
 
+// DiscoverChats calls Telegram getUpdates to find groups/chats the bot has been added to.
+// The user adds the bot to their group(s), sends a message, then calls this to auto-detect.
+func (t *TelegramAdapter) DiscoverChats(ctx context.Context, botToken string) ([]map[string]interface{}, error) {
+	bot, err := tgbotapi.NewBotAPI(botToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bot token: %w", err)
+	}
+
+	// Remove webhook so getUpdates works
+	bot.Request(tgbotapi.DeleteWebhookConfig{})
+
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 5 // Short timeout — just grab what's available
+	u.Limit = 100
+
+	updates, err := bot.GetUpdates(u)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get updates: %w", err)
+	}
+
+	// Deduplicate by chat ID
+	seen := map[int64]bool{}
+	var chats []map[string]interface{}
+	for _, update := range updates {
+		if update.Message == nil {
+			continue
+		}
+		chat := update.Message.Chat
+		if seen[chat.ID] {
+			continue
+		}
+		seen[chat.ID] = true
+
+		name := chat.Title
+		if name == "" {
+			name = chat.FirstName
+			if chat.LastName != "" {
+				name += " " + chat.LastName
+			}
+		}
+
+		chats = append(chats, map[string]interface{}{
+			"chat_id": strconv.FormatInt(chat.ID, 10),
+			"name":    name,
+			"type":    chat.Type,
+		})
+	}
+
+	return chats, nil
+}
+
 // parseChatIDs splits a comma-separated chat_id string into individual IDs.
 func parseChatIDs(config map[string]interface{}) []string {
 	raw, _ := config["chat_id"].(string)

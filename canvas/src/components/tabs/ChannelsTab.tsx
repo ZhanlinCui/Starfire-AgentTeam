@@ -46,6 +46,9 @@ export function ChannelsTab({ workspaceId }: Props) {
   const [formChatId, setFormChatId] = useState("");
   const [formAllowedUsers, setFormAllowedUsers] = useState("");
   const [formError, setFormError] = useState("");
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveredChats, setDiscoveredChats] = useState<{ chat_id: string; name: string; type: string }[]>([]);
+  const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -69,6 +72,45 @@ export function ChannelsTab({ workspaceId }: Props) {
     const interval = setInterval(load, 15000);
     return () => clearInterval(interval);
   }, [load]);
+
+  const handleDiscover = async () => {
+    if (!formBotToken) {
+      setFormError("Enter a bot token first");
+      return;
+    }
+    setDiscovering(true);
+    setFormError("");
+    setDiscoveredChats([]);
+    try {
+      const res = await api.post<{ chats: { chat_id: string; name: string; type: string }[]; hint: string }>(
+        `/channels/discover`,
+        { channel_type: formType, bot_token: formBotToken }
+      );
+      const chats = res.chats || [];
+      setDiscoveredChats(chats);
+      if (chats.length === 0) {
+        setFormError("No groups found. Add the bot to your group(s), send a message, then try again.");
+      } else {
+        // Auto-select all discovered chats
+        setSelectedChats(new Set(chats.map((c) => c.chat_id)));
+        setFormChatId(chats.map((c) => c.chat_id).join(", "));
+      }
+    } catch (e) {
+      setFormError(String(e));
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const toggleChat = (chatId: string) => {
+    setSelectedChats((prev) => {
+      const next = new Set(prev);
+      if (next.has(chatId)) next.delete(chatId);
+      else next.add(chatId);
+      setFormChatId(Array.from(next).join(", "));
+      return next;
+    });
+  };
 
   const handleCreate = async () => {
     setFormError("");
@@ -167,7 +209,35 @@ export function ChannelsTab({ workspaceId }: Props) {
             />
           </div>
           <div>
-            <label className="text-[10px] text-zinc-500 block mb-1">Chat IDs</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] text-zinc-500">Chat IDs</label>
+              <button
+                onClick={handleDiscover}
+                disabled={discovering || !formBotToken}
+                className="text-[10px] px-2 py-0.5 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition disabled:opacity-40"
+              >
+                {discovering ? "Detecting..." : "Detect Groups"}
+              </button>
+            </div>
+            {discoveredChats.length > 0 && (
+              <div className="space-y-1 mb-2">
+                {discoveredChats.map((chat) => (
+                  <label
+                    key={chat.chat_id}
+                    className="flex items-center gap-2 px-2 py-1.5 bg-zinc-900/50 rounded border border-zinc-700/50 cursor-pointer hover:bg-zinc-800/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedChats.has(chat.chat_id)}
+                      onChange={() => toggleChat(chat.chat_id)}
+                      className="rounded border-zinc-600"
+                    />
+                    <span className="text-xs text-zinc-300">{chat.name || "Unknown"}</span>
+                    <span className="text-[10px] text-zinc-500 ml-auto">{chat.type} {chat.chat_id}</span>
+                  </label>
+                ))}
+              </div>
+            )}
             <input
               value={formChatId}
               onChange={(e) => setFormChatId(e.target.value)}
@@ -175,7 +245,9 @@ export function ChannelsTab({ workspaceId }: Props) {
               className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-300 placeholder-zinc-600"
             />
             <p className="text-[9px] text-zinc-600 mt-0.5">
-              Comma-separated group/channel IDs. Use @userinfobot on Telegram to find them.
+              {discoveredChats.length > 0
+                ? "Select groups above or enter IDs manually."
+                : "Enter IDs manually, or click Detect Groups after adding the bot to your group(s)."}
             </p>
           </div>
           <div>
