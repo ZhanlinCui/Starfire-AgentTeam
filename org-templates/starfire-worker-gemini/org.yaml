@@ -15,9 +15,11 @@ defaults:
   tier: 2
   required_env:
     - GOOGLE_API_KEY
-  # Latest Gemini model — preview-tier. Falls back to gemini-2.5-pro (stable)
-  # if rate limits become an issue.
-  model: google_genai:gemini-3.1-pro-preview
+  # Gemini 2.5 Pro (stable). We tried gemini-3.1-pro-preview but its
+  # 25 req/min quota is too tight for a 11-workspace org that fans out
+  # delegations (PM → Dev Lead → 6 engineers in parallel ≈ 30+ calls
+  # in a wave). Stable tier has a much higher ceiling.
+  model: google_genai:gemini-2.5-pro
 
   # IMPORTANT: initial_prompt must NOT send A2A messages — other agents may
   # not be up yet. Keep local: clone, read, memorize. Wait for tasks.

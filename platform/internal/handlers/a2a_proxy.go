@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,29 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// platformInDocker caches whether THIS process is running inside a
+// Docker container. The a2a proxy uses this to decide whether stored
+// agent URLs like "http://127.0.0.1:<ephemeral>" need to be rewritten
+// to the Docker-DNS form "http://ws-<id>:8000". When the platform is
+// on the host, 127.0.0.1 IS the host and the ephemeral-port URL works
+// as-is; rewriting to container DNS would then break (host can't
+// resolve Docker bridge hostnames).
+//
+// Detection: /.dockerenv is the canonical marker inside the default
+// Docker runtime. STARFIRE_IN_DOCKER=1 is an explicit override for
+// environments where /.dockerenv is absent (Podman, custom runtimes).
+var platformInDocker = detectPlatformInDocker()
+
+func detectPlatformInDocker() bool {
+	if os.Getenv("STARFIRE_IN_DOCKER") == "1" {
+		return true
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	return false
+}
 
 // maxProxyRequestBody is the maximum size of an A2A proxy request body (1MB).
 const maxProxyRequestBody = 1 << 20
@@ -137,11 +161,15 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 		_ = db.CacheURL(ctx, workspaceID, agentURL)
 	}
 
-	// When the platform runs inside Docker, 127.0.0.1:{host_port} is unreachable
-	// (it's the platform container's own localhost, not the Docker host).
-	// Rewrite to the Docker container hostname which is routable on the bridge network.
-	// Only rewrite when we're inside Docker (detected by h.provisioner being set).
-	if strings.HasPrefix(agentURL, "http://127.0.0.1:") && h.provisioner != nil {
+	// When the platform runs inside Docker, 127.0.0.1:{host_port} is
+	// unreachable (it's the platform container's own localhost, not the
+	// Docker host). Rewrite to the container's Docker-bridge hostname.
+	//
+	// But ONLY when we're actually inside Docker. If the platform runs
+	// on the host (the default dev setup via infra/scripts/setup.sh),
+	// 127.0.0.1:<ephemeral> IS the reachable URL and the container
+	// hostname wouldn't resolve.
+	if strings.HasPrefix(agentURL, "http://127.0.0.1:") && h.provisioner != nil && platformInDocker {
 		agentURL = provisioner.InternalURL(workspaceID)
 	}
 
