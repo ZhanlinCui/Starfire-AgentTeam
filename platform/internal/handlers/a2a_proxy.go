@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/agent-molecule/platform/internal/db"
+	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/registry"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -134,6 +135,14 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 		}
 		agentURL = urlNullable.String
 		_ = db.CacheURL(ctx, workspaceID, agentURL)
+	}
+
+	// When the platform runs inside Docker, 127.0.0.1:{host_port} is unreachable
+	// (it's the platform container's own localhost, not the Docker host).
+	// Rewrite to the Docker container hostname which is routable on the bridge network.
+	// Only rewrite when we're inside Docker (detected by h.provisioner being set).
+	if strings.HasPrefix(agentURL, "http://127.0.0.1:") && h.provisioner != nil {
+		agentURL = provisioner.InternalURL(workspaceID)
 	}
 
 	// Normalize the request into a valid A2A JSON-RPC 2.0 message
