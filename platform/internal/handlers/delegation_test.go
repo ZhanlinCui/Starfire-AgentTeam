@@ -99,8 +99,9 @@ func TestDelegate_Success(t *testing.T) {
 	targetID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 	// Expect INSERT into activity_logs for delegation tracking
+	// (6th arg is idempotency_key — nil here since the request omits it)
 	mock.ExpectExec("INSERT INTO activity_logs").
-		WithArgs("ws-source", "ws-source", targetID, "Delegating to "+targetID, sqlmock.AnyArg(), ).
+		WithArgs("ws-source", "ws-source", targetID, "Delegating to "+targetID, sqlmock.AnyArg(), nil).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect RecordAndBroadcast INSERT into structure_events
@@ -154,9 +155,9 @@ func TestDelegate_DBInsertFails_Still202WithWarning(t *testing.T) {
 
 	targetID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
-	// DB insert fails
+	// DB insert fails (6th arg = idempotency_key, nil for this test)
 	mock.ExpectExec("INSERT INTO activity_logs").
-		WithArgs("ws-source", "ws-source", targetID, "Delegating to "+targetID, sqlmock.AnyArg()).
+		WithArgs("ws-source", "ws-source", targetID, "Delegating to "+targetID, sqlmock.AnyArg(), nil).
 		WillReturnError(fmt.Errorf("database connection lost"))
 
 	// RecordAndBroadcast still fires
@@ -502,5 +503,146 @@ func TestDelegationUpdateStatus_FailedBroadcastsFailureEvent(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// ---------- #124 — idempotency: replay returns existing delegation ----------
+
+func TestDelegate_IdempotentReplayReturnsExistingDelegation(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	dh := NewDelegationHandler(wh, broadcaster)
+
+	targetID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	existingID := "11111111-2222-3333-4444-555555555555"
+
+	// Lookup by (workspace_id, idempotency_key) — finds an in-flight row.
+	mock.ExpectQuery("SELECT request_body->>'delegation_id', status, target_id").
+		WithArgs("ws-source", "key-abc").
+		WillReturnRows(sqlmock.NewRows([]string{"delegation_id", "status", "target_id"}).
+			AddRow(existingID, "dispatched", targetID))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-source"}}
+	body := fmt.Sprintf(`{"target_id":"%s","task":"work","idempotency_key":"key-abc"}`, targetID)
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-source/delegate", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	dh.Delegate(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (idempotent hit), got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["delegation_id"] != existingID {
+		t.Errorf("expected existing delegation_id %s, got %v", existingID, resp["delegation_id"])
+	}
+	if resp["idempotent_hit"] != true {
+		t.Errorf("expected idempotent_hit=true, got %v", resp["idempotent_hit"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// ---------- #124 — idempotency: failed prior row is released, new insert wins ----------
+
+func TestDelegate_IdempotentFailedRowIsReleasedAndReplaced(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	dh := NewDelegationHandler(wh, broadcaster)
+
+	targetID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	// Lookup finds a failed prior attempt.
+	mock.ExpectQuery("SELECT request_body->>'delegation_id', status, target_id").
+		WithArgs("ws-source", "retry-key").
+		WillReturnRows(sqlmock.NewRows([]string{"delegation_id", "status", "target_id"}).
+			AddRow("old-failed-id", "failed", targetID))
+	// Failed row is deleted to release the unique slot.
+	mock.ExpectExec("DELETE FROM activity_logs").
+		WithArgs("ws-source", "retry-key").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// Fresh insert with the same idempotency key.
+	mock.ExpectExec("INSERT INTO activity_logs").
+		WithArgs("ws-source", "ws-source", targetID, "Delegating to "+targetID, sqlmock.AnyArg(), "retry-key").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO structure_events").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-source"}}
+	body := fmt.Sprintf(`{"target_id":"%s","task":"retry","idempotency_key":"retry-key"}`, targetID)
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-source/delegate", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	dh.Delegate(c)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (fresh delegation after failed retry), got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["idempotent_hit"] == true {
+		t.Error("expected fresh delegation, not idempotent_hit")
+	}
+	if resp["delegation_id"] == "" || resp["delegation_id"] == nil {
+		t.Error("expected non-empty delegation_id on retry")
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
+// ---------- #124 — idempotency: concurrent insert race resolves to existing ----------
+
+func TestDelegate_IdempotentRaceUniqueViolationReturnsExisting(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	dh := NewDelegationHandler(wh, broadcaster)
+
+	targetID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	winnerID := "99999999-8888-7777-6666-555555555555"
+
+	// Lookup finds nothing first.
+	mock.ExpectQuery("SELECT request_body->>'delegation_id', status, target_id").
+		WithArgs("ws-source", "race-key").
+		WillReturnError(fmt.Errorf("sql: no rows in result set"))
+	// Insert loses the race against a concurrent caller.
+	mock.ExpectExec("INSERT INTO activity_logs").
+		WithArgs("ws-source", "ws-source", targetID, "Delegating to "+targetID, sqlmock.AnyArg(), "race-key").
+		WillReturnError(fmt.Errorf("pq: duplicate key value violates unique constraint \"activity_logs_idempotency_uniq\""))
+	// Re-query returns the winner.
+	mock.ExpectQuery("SELECT request_body->>'delegation_id', status").
+		WithArgs("ws-source", "race-key").
+		WillReturnRows(sqlmock.NewRows([]string{"delegation_id", "status"}).
+			AddRow(winnerID, "pending"))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-source"}}
+	body := fmt.Sprintf(`{"target_id":"%s","task":"race","idempotency_key":"race-key"}`, targetID)
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-source/delegate", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	dh.Delegate(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (race resolved to winner), got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["delegation_id"] != winnerID {
+		t.Errorf("expected winner delegation_id %s, got %v", winnerID, resp["delegation_id"])
+	}
+	if resp["idempotent_hit"] != true {
+		t.Errorf("expected idempotent_hit=true on race resolution, got %v", resp["idempotent_hit"])
 	}
 }

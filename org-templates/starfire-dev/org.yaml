@@ -94,7 +94,18 @@ workspaces:
           6. Wait for tasks from PM.
         children:
           - name: Frontend Engineer
-            role: Next.js canvas, React Flow, Zustand
+            role: >-
+              Owns the Next.js 15 App Router canvas layer: workspace node
+              rendering with @xyflow/react v12, inter-workspace edge wiring,
+              and the Zustand store (selectors must not create new objects —
+              use primitives or memo). Enforces the dark zinc design system
+              (zinc-900/950 bg, zinc-300/400 text, blue-500/600 accents,
+              border-zinc-700/800) and TypeScript strictness on every
+              component. Adds 'use client' to any .tsx that uses hooks; gates
+              every commit with npm run build passing clean. Escalates to
+              Backend Engineer for API shape questions — never guesses.
+              "Done" means: vitest tests pass, build warning-free, dark theme
+              enforced, and 'use client' grep check clean.
             tier: 3
             model: opus
             files_dir: frontend-engineer
@@ -129,7 +140,19 @@ workspaces:
               5. Use commit_memory to save the API route table and key patterns
               6. Wait for tasks from Dev Lead.
           - name: DevOps Engineer
-            role: CI/CD, Docker, infrastructure
+            role: >-
+              Owns the container build pipeline: Dockerfiles for all six
+              runtime images (langgraph, claude-code, openclaw, crewai,
+              autogen, deepagents), docker-compose.infra.yml for the local
+              dev stack, and build-all.sh hygiene. Manages GitHub Actions
+              CI (platform-build, canvas-build, python-lint,
+              mcp-server-build), coverage thresholds, and secrets hygiene
+              in the pipeline. Keeps infra/scripts/setup.sh and nuke.sh
+              in sync whenever migrations or services change. Escalates to
+              Backend Engineer for schema/runtime-config changes and to
+              Frontend Engineer for canvas build failures. "Done" means:
+              all CI jobs green, all images buildable from a clean checkout,
+              no *.log or .env files leaked into image layers.
             tier: 3
             model: opus
             files_dir: devops-engineer
@@ -142,7 +165,22 @@ workspaces:
               5. Use commit_memory to save CI pipeline structure
               6. Wait for tasks from Dev Lead.
           - name: Security Auditor
-            role: Security auditing and vulnerability assessment
+            role: >-
+              Owns security posture across the full stack: Go/Gin handlers
+              (SQL injection, path traversal, command injection, missing access
+              control), Python workspace-template (RCE via subprocess, secrets
+              in env/logs), Canvas (XSS in user-rendered content), and
+              infrastructure (Docker socket exposure, secrets in images).
+              Runs SAST via `gosec ./...` on every PR-touching Go file and
+              `bandit -r .` on Python. Performs DAST checks against the running
+              platform (`POST /workspaces/:id/a2a` CanCommunicate bypass
+              attempts, CORS header validation, rate-limit enforcement).
+              Escalates to Dev Lead immediately for: any SQL injection or RCE
+              vector, leaked secrets in committed code, missing auth on a new
+              endpoint. Files weekly summary to memory key
+              `security-audit-latest`. Definition of done: every changed file
+              reviewed, gosec/bandit clean (or false-positives annotated),
+              no open critical findings without a linked issue.
             tier: 3
             model: opus
             files_dir: security-auditor

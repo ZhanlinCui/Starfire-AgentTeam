@@ -81,14 +81,18 @@ class OpenClawAdapter(BaseAdapter):
             logger.info("OpenClaw CLI installed")
 
         # 2. Resolve API key and model
-        api_key = os.environ.get("OPENAI_API_KEY", os.environ.get("GROQ_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")))
+        prefix = config.model.split(":")[0] if ":" in config.model else "openai"
+        if prefix == "qianfan":
+            api_key = os.environ.get("QIANFAN_API_KEY", os.environ.get("AISTUDIO_API_KEY", ""))
+        else:
+            api_key = os.environ.get("OPENAI_API_KEY", os.environ.get("GROQ_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")))
         # Determine provider URL from model prefix
         provider_urls = {
             "openai": "https://api.openai.com/v1",
             "groq": "https://api.groq.com/openai/v1",
             "openrouter": "https://openrouter.ai/api/v1",
+            "qianfan": "https://qianfan.baidubce.com/v2",
         }
-        prefix = config.model.split(":")[0] if ":" in config.model else "openai"
         provider_url = config.runtime_config.get("provider_url", provider_urls.get(prefix, "https://api.openai.com/v1"))
         model = config.model
         if ":" in model:
