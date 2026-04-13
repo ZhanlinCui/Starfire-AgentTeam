@@ -50,18 +50,55 @@ else
   done
 fi
 
-# Step 3: Build each runtime image
+# Step 3: Build each runtime image — in parallel (Top-5 #3 from outcomes doc).
+#
+# All adapter Dockerfiles `FROM workspace-template:base` with no inter-adapter
+# dependency, so they're safe to run concurrently. Single-runtime builds
+# (`bash build-all.sh claude-code`) still run serially — no benefit to fork.
+# Per-adapter stderr/stdout goes to /tmp/build_<tag>.log so failures are
+# debuggable without interleaved output.
 FAILED=()
-for dir_name in "${RUNTIMES[@]}"; do
-  tag="$(dir_to_tag "$dir_name")"
-  log "Building workspace-template:$tag ..."
-  if docker build -t "workspace-template:$tag" -f "adapters/$dir_name/Dockerfile" . ; then
-    log "workspace-template:$tag built"
-  else
-    err "workspace-template:$tag FAILED"
-    FAILED+=("$tag")
-  fi
-done
+
+if [ "${#RUNTIMES[@]}" -le 1 ] || [ "${SERIAL_BUILD:-}" = "1" ]; then
+  # Serial path — preserves the old behaviour for single-runtime rebuilds and
+  # for CI environments that prefer bounded concurrency (set SERIAL_BUILD=1).
+  for dir_name in "${RUNTIMES[@]}"; do
+    tag="$(dir_to_tag "$dir_name")"
+    log "Building workspace-template:$tag (serial) ..."
+    if docker build -t "workspace-template:$tag" -f "adapters/$dir_name/Dockerfile" . ; then
+      log "workspace-template:$tag built"
+    else
+      err "workspace-template:$tag FAILED"
+      FAILED+=("$tag")
+    fi
+  done
+else
+  # Parallel path — fan out one `docker build` per adapter, capture each
+  # output to /tmp/build_<tag>.log, wait for all, then tally.
+  declare -a PIDS=()
+  declare -a TAGS=()
+  for dir_name in "${RUNTIMES[@]}"; do
+    tag="$(dir_to_tag "$dir_name")"
+    log "Building workspace-template:$tag (parallel, log=/tmp/build_${tag}.log) ..."
+    docker build -t "workspace-template:$tag" \
+      -f "adapters/$dir_name/Dockerfile" . \
+      > "/tmp/build_${tag}.log" 2>&1 &
+    PIDS+=("$!")
+    TAGS+=("$tag")
+  done
+
+  # Wait for each, report per-tag outcome.
+  for i in "${!PIDS[@]}"; do
+    pid="${PIDS[$i]}"
+    tag="${TAGS[$i]}"
+    if wait "$pid"; then
+      log "workspace-template:$tag built"
+    else
+      err "workspace-template:$tag FAILED — see /tmp/build_${tag}.log"
+      FAILED+=("$tag")
+    fi
+  done
+fi
 
 echo ""
 if [ ${#FAILED[@]} -eq 0 ]; then
