@@ -154,6 +154,11 @@ async def commit_memory(content: str, scope: str = "LOCAL") -> dict:
                 memory_scope=scope,
                 memory_id=result.get("id"),
             )
+            # #125: surface memory writes in /activity so the Canvas
+            # "Agent Comms" tab shows what an agent chose to remember.
+            # Fire-and-forget — failure here must not poison the tool
+            # response since the memory write itself already succeeded.
+            await _record_memory_activity(scope, content, result.get("id"))
             await _maybe_log_skill_promotion(content, scope, result)
         else:
             mem_span.set_attribute("memory.success", False)
@@ -328,6 +333,57 @@ def _parse_promotion_packet(content: str) -> dict[str, Any] | None:
         return None
 
     return payload
+
+
+async def _record_memory_activity(scope: str, content: str, memory_id: str | None) -> None:
+    """Surface a successful memory write as an activity row so the Canvas
+    "Agent Comms" tab can display what an agent chose to remember.
+    Fire-and-forget — never raises. #125.
+
+    The summary is intentionally short (scope tag + first 80 chars of
+    content with a ``…`` ellipsis when truncated) so the activity table
+    stays readable; full content lives in ``agent_memories``.
+    """
+    workspace_id = WORKSPACE_ID.strip()
+    platform_url = PLATFORM_URL.strip().rstrip("/")
+    if not workspace_id or not platform_url:
+        return
+
+    preview = content.strip().replace("\n", " ")
+    if len(preview) > 80:
+        preview = preview[:80] + "…"
+    summary = f"[{scope}] {preview}"
+
+    # NOTE: target_id is a UUID column scoped to workspace_id references —
+    # cannot hold awareness/memory IDs (which are arbitrary strings).
+    # We embed the memory_id in the summary instead so it's still searchable.
+    if memory_id:
+        summary = f"{summary} (id={memory_id[:24]})"
+    payload: dict[str, Any] = {
+        "workspace_id": workspace_id,
+        "activity_type": "memory_write",
+        "summary": summary,
+        "status": "ok",
+    }
+
+    try:
+        try:
+            from platform_auth import auth_headers as _auth
+            _headers = _auth()
+        except Exception:
+            _headers = {}
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{platform_url}/workspaces/{workspace_id}/activity",
+                json=payload,
+                headers=_headers,
+            )
+    except Exception:
+        # Activity logging is purely observability — never poison the
+        # tool response on a failure here. We don't even log_event the
+        # failure since the memory write itself succeeded and that's
+        # what matters to the caller.
+        pass
 
 
 async def _maybe_log_skill_promotion(content: str, scope: str, memory_result: dict) -> None:
