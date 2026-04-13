@@ -779,7 +779,10 @@ export async function handleGetRemoteAgentState(params: { workspace_id: string }
   return { content: [{ type: "text" as const, text: JSON.stringify(projected, null, 2) }] };
 }
 
-export async function handleGetRemoteAgentSetupCommand(params: { workspace_id: string }) {
+export async function handleGetRemoteAgentSetupCommand(params: {
+  workspace_id: string;
+  platform_url_override?: string;
+}) {
   // Verify the workspace exists and is runtime='external' before generating
   // the command — saves the operator from pasting a bash line that will
   // fail because the workspace was a Docker workspace they typed by mistake.
@@ -800,12 +803,30 @@ export async function handleGetRemoteAgentSetupCommand(params: { workspace_id: s
       }],
     };
   }
+
+  // The MCP server's PLATFORM_URL is whatever Claude Desktop / the host
+  // injected — usually localhost when an operator runs us locally. That
+  // URL is useless inside a remote-agent shell on a different machine.
+  // If the caller passes platform_url_override we use it; otherwise we
+  // detect localhost and surface a warning so the operator knows to
+  // substitute the real public URL before pasting the command.
+  const targetUrl = params.platform_url_override?.trim() || PLATFORM_URL;
+  const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/.test(targetUrl);
+  const warnings: string[] = [];
+  if (isLocalhost && !params.platform_url_override) {
+    warnings.push(
+      `PLATFORM_URL is ${targetUrl} — this only works if the remote agent is on the same machine as the platform. ` +
+      `Pass platform_url_override with the agent-reachable URL (e.g. https://your-platform.example.com) before pasting on a different host.`
+    );
+  }
+
   const setupCmd = [
-    `# Run on the remote machine where the agent will live:`,
-    `pip install starfire-agent  # (or: pip install -e <starfire-checkout>/sdk/python)`,
+    `# Run on the remote machine where the agent will live.`,
+    `# Requires Python 3.11+ and bash (the SDK invokes setup.sh via bash).`,
+    `pip install starfire-sdk  # (or: pip install -e <starfire-checkout>/sdk/python)`,
     ``,
     `WORKSPACE_ID=${w.id} \\`,
-    `PLATFORM_URL=${PLATFORM_URL} \\`,
+    `PLATFORM_URL=${targetUrl} \\`,
     `python3 -m examples.remote-agent.run`,
     ``,
     `# The agent will register, mint its bearer token (cached at`,
@@ -817,8 +838,9 @@ export async function handleGetRemoteAgentSetupCommand(params: { workspace_id: s
       text: JSON.stringify({
         workspace_id: w.id,
         workspace_name: w.name,
-        platform_url: PLATFORM_URL,
+        platform_url: targetUrl,
         setup_command: setupCmd,
+        ...(warnings.length > 0 ? { warnings } : {}),
       }, null, 2),
     }],
   };
@@ -1627,8 +1649,11 @@ export function createServer() {
 
   srv.tool(
     "get_remote_agent_setup_command",
-    "Build a one-shot bash command an operator can paste into a remote machine to register an agent against this Starfire platform. Returns a string like `WORKSPACE_ID=... PLATFORM_URL=... python3 -m starfire_agent.bootstrap`. The workspace must exist and be runtime='external'.",
-    { workspace_id: z.string() },
+    "Build a one-shot bash command an operator can paste into a remote machine to register an agent against this Starfire platform. Returns a string like `WORKSPACE_ID=... PLATFORM_URL=... python3 -m starfire_agent.bootstrap`. Pass platform_url_override when the MCP server's PLATFORM_URL is localhost (the agent will live on a different host and needs the platform's public URL). The workspace must exist and be runtime='external'.",
+    {
+      workspace_id: z.string(),
+      platform_url_override: z.string().optional(),
+    },
     handleGetRemoteAgentSetupCommand,
   );
 

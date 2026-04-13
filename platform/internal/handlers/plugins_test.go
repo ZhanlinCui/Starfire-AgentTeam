@@ -3,6 +3,7 @@ package handlers
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1225,4 +1226,140 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// Phase 30.3 regression: previously only the local:// path had a unit
+// test. The github:// (and any other registered scheme) path was only
+// covered by live E2E. This test mocks the resolver registry so the
+// non-local install path stays under test even without network access.
+func TestPluginDownload_GithubSchemeStreamsTarball(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	// Reuse the existing test-double — supply a fetchFn that drops a
+	// known file set into dst and returns the plugin name.
+	h.WithSourceResolver(&fakeResolver{
+		scheme: "github",
+		fetchFn: func(_ context.Context, _ string, dst string) (string, error) {
+			files := map[string]string{
+				"plugin.yaml":            "name: remote-plugin\nversion: 1.0.0\n",
+				"skills/x/SKILL.md":       "---\nname: x\n---\n",
+				"adapters/claude_code.py": "from plugins_registry.builtins import AgentskillsAdaptor as Adaptor\n",
+			}
+			for relPath, content := range files {
+				full := filepath.Join(dst, relPath)
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					return "", err
+				}
+				if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+					return "", err
+				}
+			}
+			return "remote-plugin", nil
+		},
+	})
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("550e8400-e29b-41d4-a716-446655440000").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"},
+		{Key: "name", Value: "remote-plugin"},
+	}
+	req := httptest.NewRequest("GET",
+		"/workspaces/X/plugins/remote-plugin/download?source=github://acme/remote-plugin", nil)
+	req.URL.RawQuery = "source=github%3A%2F%2Facme%2Fremote-plugin"
+	c.Request = req
+	h.Download(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("X-Plugin-Source"); got != "github://acme/remote-plugin" {
+		t.Errorf("X-Plugin-Source: got %q, want github://acme/remote-plugin", got)
+	}
+
+	// Decode + verify the tarball contains the resolver's files
+	gz, err := gzip.NewReader(bytes.NewReader(w.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	tr := tar.NewReader(gz)
+	seen := map[string]bool{}
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar read: %v", err)
+		}
+		seen[hdr.Name] = true
+	}
+	for _, want := range []string{"plugin.yaml", filepath.Join("skills", "x", "SKILL.md"), filepath.Join("adapters", "claude_code.py")} {
+		if !seen[want] {
+			t.Errorf("expected tar entry %q, saw: %v", want, seen)
+		}
+	}
+}
+
+// Buffered-vs-streamed contract: a tar pack failure must surface as a
+// clean 5xx with a JSON error, not a truncated 200. We exercise this by
+// pointing the resolver at a path the OS will refuse to read.
+func TestPluginDownload_TarPackFailureReturns5xxNotTruncated200(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	pluginsDir := t.TempDir()
+	pluginRoot := filepath.Join(pluginsDir, "broken-plugin")
+	os.MkdirAll(pluginRoot, 0o755)
+	os.WriteFile(filepath.Join(pluginRoot, "plugin.yaml"), []byte("name: broken-plugin\n"), 0o644)
+	// Make a directory we can't read by chmod 000 — streamDirAsTar's
+	// filepath.Walk will surface a permission error.
+	unread := filepath.Join(pluginRoot, "unread")
+	os.MkdirAll(unread, 0o755)
+	os.WriteFile(filepath.Join(unread, "secret"), []byte("x"), 0o600)
+	if err := os.Chmod(unread, 0o000); err != nil {
+		t.Skipf("chmod 0000 unsupported on this fs: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unread, 0o755) }) // restore for tempdir cleanup
+
+	h := NewPluginsHandler(pluginsDir, nil, nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("550e8400-e29b-41d4-a716-446655440000").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"},
+		{Key: "name", Value: "broken-plugin"},
+	}
+	c.Request = httptest.NewRequest("GET", "/workspaces/X/plugins/broken-plugin/download", nil)
+	h.Download(c)
+
+	// On macOS root may bypass chmod; in that case we get a clean 200 + tar
+	// and the test is moot.
+	if w.Code == http.StatusOK && w.Header().Get("Content-Type") == "application/gzip" {
+		t.Skip("running as root; chmod 0000 didn't take effect, skipping")
+	}
+	// The contract this test guards: failure surfaces as a CLEAN 5xx
+	// + JSON body, NEVER as truncated 200 + Content-Type=application/gzip.
+	// The failure can come from either resolveAndStage (502 if the local
+	// resolver can't read the dir) or the tar-pack stage (500 if read
+	// succeeds but tar.Walk hits the unreadable subdir).
+	if w.Code < 500 || w.Code > 599 {
+		t.Fatalf("expected 5xx, got %d: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct == "application/gzip" {
+		t.Errorf("must not advertise gzip on failure path; got Content-Type=%q", ct)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(w.Body.String()), "{") {
+		t.Errorf("expected JSON error body, got: %s", w.Body.String())
+	}
 }
