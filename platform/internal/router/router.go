@@ -171,6 +171,9 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	// Secrets (auto-restart workspace after secret change)
 	sech := handlers.NewSecretsHandler(wh.RestartByID)
 	r.GET("/workspaces/:id/secrets", sech.List)
+	// Phase 30.2 — decrypted values pull, token-gated. Canvas uses List
+	// (keys + metadata only); remote agents use Values to bootstrap env.
+	r.GET("/workspaces/:id/secrets/values", sech.Values)
 	r.POST("/workspaces/:id/secrets", sech.Set)
 	r.PUT("/workspaces/:id/secrets", sech.Set)
 	r.DELETE("/workspaces/:id/secrets/:key", sech.Delete)
