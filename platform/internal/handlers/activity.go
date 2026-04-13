@@ -279,12 +279,15 @@ func (h *ActivityHandler) Report(c *gin.Context) {
 		return
 	}
 
-	// Validate activity type
+	// Validate activity type. memory_write was added per #125 so the
+	// commit_memory tool can surface in the Canvas Agent Comms tab —
+	// previously its writes were invisible outside the agent_memories
+	// table.
 	switch body.ActivityType {
-	case "a2a_send", "a2a_receive", "task_update", "agent_log", "skill_promotion", "error":
+	case "a2a_send", "a2a_receive", "task_update", "agent_log", "skill_promotion", "memory_write", "error":
 		// valid
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid activity_type, must be one of: a2a_send, a2a_receive, task_update, agent_log, skill_promotion, error"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid activity_type, must be one of: a2a_send, a2a_receive, task_update, agent_log, skill_promotion, memory_write, error"})
 		return
 	}
 

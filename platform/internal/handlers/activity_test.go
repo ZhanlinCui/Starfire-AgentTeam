@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/agent-molecule/platform/internal/db"
 	"github.com/gin-gonic/gin"
 )
 
@@ -159,5 +161,57 @@ func TestActivityList_SourceWithType(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+// ---------- Activity type allowlist (#125: memory_write added) ----------
+
+func TestActivityReport_AcceptsMemoryWriteType(t *testing.T) {
+	mockDB, mock, _ := sqlmock.New()
+	defer mockDB.Close()
+	db.DB = mockDB
+
+	mock.ExpectExec(`INSERT INTO activity_logs`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-mem"}}
+	body := `{"workspace_id":"ws-mem","activity_type":"memory_write","summary":"[LOCAL] x","status":"ok"}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-mem/activity", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	handler.Report(c)
+
+	if w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Errorf("memory_write should be accepted; got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestActivityReport_RejectsUnknownType(t *testing.T) {
+	mockDB, _, _ := sqlmock.New()
+	defer mockDB.Close()
+	db.DB = mockDB
+
+	broadcaster := newTestBroadcaster()
+	handler := NewActivityHandler(broadcaster)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "ws-x"}}
+	body := `{"workspace_id":"ws-x","activity_type":"made_up_type","summary":"x","status":"ok"}`
+	c.Request = httptest.NewRequest("POST", "/workspaces/ws-x/activity", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	handler.Report(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("unknown type should 400; got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "memory_write") {
+		t.Errorf("error message should list valid types including memory_write; got %s", w.Body.String())
 	}
 }

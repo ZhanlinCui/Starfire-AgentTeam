@@ -740,3 +740,156 @@ def test_maybe_log_skill_promotion_no_workspace_id(memory_modules_with_mocks):
     asyncio.run(memory._maybe_log_skill_promotion(packet, "TEAM", {"success": True, "id": "m2"}))
 
     assert http_called == []
+
+
+# ---------------------------------------------------------------------------
+# _record_memory_activity (#125)
+# ---------------------------------------------------------------------------
+
+def test_record_memory_activity_posts_to_activity_endpoint(memory_modules_with_mocks):
+    """Successful memory write surfaces as an activity row with scope tag."""
+    memory, _, _ = memory_modules_with_mocks
+    captured = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json=None, headers=None):
+            captured.append({"url": url, "json": json, "headers": headers})
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+    memory.WORKSPACE_ID = "ws-test"
+    memory.PLATFORM_URL = "http://platform.test"
+
+    asyncio.run(memory._record_memory_activity("LOCAL", "remember this fact", "mem-id-42"))
+
+    assert len(captured) == 1
+    call = captured[0]
+    assert call["url"] == "http://platform.test/workspaces/ws-test/activity"
+    assert call["json"]["activity_type"] == "memory_write"
+    assert call["json"]["status"] == "ok"
+    # target_id column is UUID-typed and reserved for workspace refs; the
+    # memory id is encoded in the summary instead so it stays searchable.
+    assert "target_id" not in call["json"]
+    assert "mem-id-42" in call["json"]["summary"]
+    assert call["json"]["summary"].startswith("[LOCAL]")
+    assert "remember this fact" in call["json"]["summary"]
+
+
+def test_record_memory_activity_truncates_long_content(memory_modules_with_mocks):
+    """Content longer than 80 chars is truncated with ellipsis to keep
+    activity_logs readable."""
+    memory, _, _ = memory_modules_with_mocks
+    captured = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json=None, headers=None):
+            captured.append(json)
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+    memory.WORKSPACE_ID = "ws-test"
+    memory.PLATFORM_URL = "http://platform.test"
+
+    long_content = "x" * 200
+    asyncio.run(memory._record_memory_activity("TEAM", long_content, "mid"))
+
+    summary = captured[0]["summary"]
+    assert summary.startswith("[TEAM]")
+    # Content is truncated with ellipsis; suffix has memory id appended.
+    assert "…" in summary
+    assert summary.endswith("(id=mid)")
+    # 80 char body of x's between the scope tag and the ellipsis.
+    body = summary[len("[TEAM] "):summary.index("…")]
+    assert len(body) == 80
+    assert body == "x" * 80
+
+
+def test_record_memory_activity_strips_newlines_in_summary(memory_modules_with_mocks):
+    """Multi-line content should appear single-line in activity summary."""
+    memory, _, _ = memory_modules_with_mocks
+    captured = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json=None, headers=None):
+            captured.append(json)
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+    memory.WORKSPACE_ID = "ws-test"
+    memory.PLATFORM_URL = "http://platform.test"
+
+    asyncio.run(memory._record_memory_activity("LOCAL", "line one\nline two", None))
+
+    assert "\n" not in captured[0]["summary"]
+    assert "line one line two" in captured[0]["summary"]
+
+
+def test_record_memory_activity_skips_when_workspace_or_url_missing(memory_modules_with_mocks):
+    """Defensive: empty WORKSPACE_ID or PLATFORM_URL → no HTTP call."""
+    memory, _, _ = memory_modules_with_mocks
+    captured = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json=None, headers=None):
+            captured.append(url)
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+
+    memory.WORKSPACE_ID = ""
+    memory.PLATFORM_URL = "http://platform.test"
+    asyncio.run(memory._record_memory_activity("LOCAL", "x", "id"))
+
+    memory.WORKSPACE_ID = "ws-test"
+    memory.PLATFORM_URL = ""
+    asyncio.run(memory._record_memory_activity("LOCAL", "x", "id"))
+
+    assert captured == []
+
+
+def test_record_memory_activity_swallows_post_failure(memory_modules_with_mocks):
+    """Activity log is observability — must never raise into the tool path."""
+    memory, _, _ = memory_modules_with_mocks
+
+    class ExplodingClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json=None, headers=None):
+            raise ConnectionError("platform down")
+
+    memory.httpx.AsyncClient = ExplodingClient
+    memory.WORKSPACE_ID = "ws-test"
+    memory.PLATFORM_URL = "http://platform.test"
+
+    # Must not raise
+    asyncio.run(memory._record_memory_activity("LOCAL", "x", "id"))
+
+
+def test_record_memory_activity_omits_target_id_when_none(memory_modules_with_mocks):
+    """Memory writes without an id (rare error paths) still log activity."""
+    memory, _, _ = memory_modules_with_mocks
+    captured = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, json=None, headers=None):
+            captured.append(json)
+
+    memory.httpx.AsyncClient = FakeAsyncClient
+    memory.WORKSPACE_ID = "ws-test"
+    memory.PLATFORM_URL = "http://platform.test"
+
+    asyncio.run(memory._record_memory_activity("GLOBAL", "fact", None))
+
+    assert "target_id" not in captured[0]
