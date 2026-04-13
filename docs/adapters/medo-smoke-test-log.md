@@ -1,120 +1,152 @@
-# MeDo Smoke Test Log — 2026-04-13
+# MeDo Smoke Test Log — 2026-04-13 (Run 2)
 
 **Tester:** PM (direct execution, no sub-delegation)  
 **Goal:** End-to-end: install Miaoda App Builder skill → build "Hello Starfire" landing page → publish → capture URL.  
-**Budget allocated:** ≤50 credits (3-4 queries).  
-**Credits spent:** 0 (workspace did not reach skill invocation — see §2).
+**Budget allocated:** ≤50 credits (3-4 queries). **Credits spent:** 0.
 
 ---
 
-## 1. Environment Verified
+## 1. Environment
 
 | Check | Result |
 |-------|--------|
 | Platform API (`http://platform:8080/health`) | ✅ `{"status":"ok"}` |
-| MIAODA_API_KEY set as global secret | ✅ confirmed in secret store |
-| Existing workspaces | 12 online (all `claude-code` runtime) |
-| `workspace-template:openclaw` Docker image | ❌ **NOT BUILT** — root cause below |
+| MIAODA_API_KEY global secret | ✅ set |
+| AISTUDIO_API_KEY global secret | ✅ set |
+| QIANFAN_API_KEY global secret | ✅ set |
+| `workspace-template:openclaw` Docker image | ✅ **BUILT** (operator resolved between runs) |
+| OPENAI_API_KEY / OPENROUTER_API_KEY | ❌ not set — **root cause of Run 2 failure** |
 
 ---
 
-## 2. Workspace Provisioning — BLOCKED
+## 2. Workspace Provisioning — ✅ SUCCEEDED (Run 2)
 
-**Attempt:** `POST http://platform:8080/org/import` with inline template:
+**Attempt:** `POST http://platform:8080/org/import` with inline template (same as Run 1).
 
-```json
-{
-  "name": "MeDo Smoke Test",
-  "defaults": { "runtime": "openclaw" },
-  "workspaces": [{ "name": "MeDo Builder", "role": "..." }]
-}
+**API response:** `{"count": 1, "org": "MeDo Smoke Test", "workspaces": [{"id": "e56f56d7-..."}]}`
+
+**Startup:** workspace reached `status: online`, `uptime: 61s`. Agent card URL: `http://ee069684c4e2:8000`. Reachable as A2A peer. Image blocker from Run 1 is resolved. ✅
+
+---
+
+## 3. Skill Install — ❌ AUTH FAILURE (stop per budget rule)
+
+**Message sent via A2A `delegate_task`:**
+```
+Install the Miaoda App Builder skill from ClawHub: seiriosPlus/miaoda-app-builder
 ```
 
-**API response:** `{"count": 1, "org": "MeDo Smoke Test", "workspaces": [{"id": "404c4e1a-..."}]}`  
-→ Record created successfully.
-
-**Startup result:** `status: failed`, `uptime_seconds: 0`, `last_sample_error: ""`  
-→ Workspace failed immediately on boot with no heartbeat.
-
-**Root cause (inferred):** The provisioner (see `platform/internal/provisioner/provisioner.go`) maps
-`runtime: openclaw` → Docker image `workspace-template:openclaw`. That image does not exist in the
-local Docker daemon — it must be built first via:
-
-```bash
-bash workspace-template/build-all.sh openclaw
-# or full rebuild:
-bash workspace-template/build-all.sh
+**Response received (verbatim):**
+```
+OpenClaw error: Gateway agent failed; falling back to embedded:
+GatewayClientRequestError: FailoverError: No API key found for provider
+"custom-api-openai-com". Auth store:
+/home/agent/.openclaw/agents/main/agent/auth-profiles.json
+(agentDir: /home/agent/.openclaw/agents/main/agent).
+Configure auth for this agent.
 ```
 
-The Dockerfile exists at `workspace-template/adapters/openclaw/Dockerfile` and extends
-`workspace-template:base`. Building takes ~5 min on first run (npm install -g openclaw).
+**Root cause — confirmed by reading `workspace-template/adapters/openclaw/adapter.py`:**
 
-**Action taken:** Deleted the failed workspace record (`DELETE /workspaces/404c4e1a-...` → `{"status":"removed"}`).
+The adapter's key lookup (line ~65) is:
+```python
+api_key = os.environ.get("OPENAI_API_KEY",
+            os.environ.get("GROQ_API_KEY",
+              os.environ.get("OPENROUTER_API_KEY", "")))
+```
 
----
+Available hackathon secrets (`MIAODA_API_KEY`, `AISTUDIO_API_KEY`, `QIANFAN_API_KEY`) are **not checked**. `api_key` is therefore empty → `auth-profiles.json` is never written → OpenClaw gateway boots with no credential → every request fails with `FailoverError`.
 
-## 3. Skill Interaction — NOT REACHED
-
-Because the workspace never came online, no A2A messages were sent. The following steps
-from the original plan were not executed:
-
-- ❌ Skill install prompt (`"Install the Miaoda App Builder skill..."`)
-- ❌ Build request (`"Build me a simple landing page..."`)
-- ❌ Publish request
-- ❌ URL capture
+**Action taken:** Deleted workspace (`DELETE /workspaces/e56f56d7-...` → `{"status":"removed"}`).  
+**Credits burned:** 0. Stopped per budget rule ("if skill install fails outright, stop and report").
 
 ---
 
-## 4. Answers to Open Questions
+## 4. Fix Required — openclaw adapter key lookup
+
+**File:** `workspace-template/adapters/openclaw/adapter.py` (lines ~65 and ~107)
+
+The adapter must check `AISTUDIO_API_KEY` (Google AI Studio, OpenAI-compat) and `QIANFAN_API_KEY` (Baidu Qianfan) in addition to the existing three. The provider URL must be inferred from which key was found.
+
+**Proposed change (lines ~63–75):**
+
+```python
+# Priority order: OPENAI → GROQ → OPENROUTER → AISTUDIO → QIANFAN
+_KEY_PROVIDERS = [
+    ("OPENAI_API_KEY",     "https://api.openai.com/v1"),
+    ("GROQ_API_KEY",       "https://api.groq.com/openai/v1"),
+    ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+    ("AISTUDIO_API_KEY",   "https://generativelanguage.googleapis.com/v1beta/openai"),
+    ("QIANFAN_API_KEY",    "https://qianfan.baidubce.com/v2"),
+]
+api_key, auto_provider_url = "", ""
+for env_var, url in _KEY_PROVIDERS:
+    val = os.environ.get(env_var, "")
+    if val:
+        api_key, auto_provider_url = val, url
+        break
+provider_url = config.runtime_config.get("provider_url", auto_provider_url)
+```
+
+**Also update org-templates/medo-smoke/org.yaml** to specify a model compatible with AISTUDIO_API_KEY:
+```yaml
+config:
+  model: "gemini-2.0-flash"   # works with AISTUDIO_API_KEY via Google AI Studio
+```
+
+**After code fix:** rebuild openclaw image with `bash workspace-template/build-all.sh openclaw`.
+
+---
+
+## 5. Skill Interaction — NOT REACHED (both runs)
+
+- ❌ Skill install (auth failure — stop per budget rule)
+- ❌ App build (not attempted)
+- ❌ Publish / URL (not attempted)
+
+---
+
+## 6. Open Questions Status
 
 ### 5-C — Rate limits
-**Status: UNKNOWN — not observed.**  
-Workspace did not reach skill invocation. Rate limits cannot be inferred.  
-*Recommendation:* Once the openclaw image is built, send two concurrent build requests and
-observe whether one returns a 429 or queues. The Miaoda API docs mention no explicit rate
-limit; test empirically.
+**UNKNOWN.** Workspace came online but auth blocked skill invocation.
 
 ### 5-D — Failure recovery
-**Status: UNKNOWN — not observed.**  
-Workspace container never started, so mid-generation crash recovery was not testable.  
-*Recommendation:* During Week 2 testing, intentionally kill the container after
-"Confirm & Generate" step (before Publish) and attempt `"Show me my apps"` to see if the
-partial build is recoverable by app ID.
+**UNKNOWN.** No app generation attempted.
 
 ---
 
-## 5. New Findings (not in PR #115 design doc)
+## 7. New Findings (additions vs. Run 1 log)
 
 | Finding | Impact | Action |
 |---------|--------|--------|
-| `workspace-template:openclaw` image must be pre-built | **Blocker** — no openclaw workspace can start without it | Operator: run `bash workspace-template/build-all.sh openclaw` before Week 2 |
-| Platform inline-template org import works correctly | Positive — no file on platform FS needed; can provision via API from PM directly | Document in design doc §2.3 |
-| Failed workspace leaves a `status: failed` record; DELETE endpoint exists at `/workspaces/:id` | Operational | Add cleanup step to smoke test runbook |
-| `last_sample_error` is empty even on failure | Debugging gap | Provisioner should surface Docker image-not-found error; file platform issue (§6) |
+| openclaw image now built ✅ | Run 1 blocker resolved | None |
+| Workspace provisions + boots successfully in ~60s | Positive | Document in PR #115 |
+| Inline-template org import works without platform FS access | Positive | Design doc update |
+| Adapter key lookup misses AISTUDIO_API_KEY / QIANFAN_API_KEY | **Blocker** | Fix adapter + rebuild image (§4) |
+| `auth-profiles.json` only written if api_key non-empty | Debugging note | Covered by §4 fix |
+| Failed workspace DELETE endpoint `/workspaces/:id` works | Operational | — |
 
 ---
 
-## 6. Issues to File
+## 8. Issues to File
 
-### Issue: Provisioner swallows Docker image-not-found error
+### Issue A: openclaw adapter ignores AISTUDIO_API_KEY and QIANFAN_API_KEY
+**Fix location:** `workspace-template/adapters/openclaw/adapter.py` lines ~65, ~107  
+**Fix:** Extend key lookup to check all five env vars with correct provider URLs (see §4).  
+**Required after fix:** `bash workspace-template/build-all.sh openclaw`
 
-**Observed:** When `workspace-template:openclaw` image is missing, workspace transitions to
-`status: failed` with `last_sample_error: ""` — no error message propagates. This makes
-triage opaque (could be image missing, network issue, or misconfigured env).
-
-**Expected:** `last_sample_error` should contain the Docker error (e.g.
-`"Error response from daemon: No such image: workspace-template:openclaw"`).
-
-**File as:** `fix(provisioner): surface Docker image-not-found error in last_sample_error`  
-**Location:** `platform/internal/provisioner/provisioner.go` — in the container-start error path.
+### Issue B: Provisioner swallows container-start errors in `last_sample_error`
+*(carried from Run 1)* When openclaw image was missing, workspace transitioned to `status: failed`
+with empty `last_sample_error`. Docker daemon error should propagate.  
+**Fix location:** `platform/internal/provisioner/provisioner.go` — container-start error path.
 
 ---
 
-## 7. Next Steps (Week 2 prerequisite checklist)
+## 9. Next Steps
 
-- [ ] **Operator:** `bash workspace-template/build-all.sh openclaw` on host machine
-- [ ] **Operator:** Verify: `docker images | grep workspace-template:openclaw`
-- [ ] **PM:** Re-run smoke test — send install query, build "Hello Starfire", publish, capture URL
-- [ ] **PM:** Test 5-C (concurrent builds) and 5-D (mid-gen crash recovery) during that run
-- [ ] **Dev Lead:** Fix provisioner to surface Docker error in `last_sample_error` (§6)
-- [ ] **Dev Lead:** Update `docs/adapters/medo-integration.md` §2 with image build prerequisite
+- [ ] **Dev Lead:** Fix openclaw adapter key lookup (§4) + rebuild image
+- [ ] **Operator:** Set either `OPENROUTER_API_KEY` **or** confirm AISTUDIO_API_KEY fix is in image
+- [ ] **PM:** Run smoke test again — expected to reach skill install and app build
+- [ ] **Dev Lead:** Fix provisioner `last_sample_error` propagation (Issue B)
+- [ ] **PM (post-fix):** Test 5-C (rate limits) and 5-D (failure recovery) during next run
