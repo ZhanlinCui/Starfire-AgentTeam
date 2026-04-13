@@ -5,12 +5,12 @@ type: user
 ---
 
 - **Name:** Hongming Wang
-- **Telegram:** @HongmingWang (ID: 6692204050)
+- **Telegram:** @HongmingWang (ID: ${OPERATOR_TELEGRAM_ID})
 - **GitHub:** airenostars (personal), Reno-Stars (org)
-- **Email:** airenostars@gmail.com
+- **Email:** ${OPERATOR_EMAIL}
 - **Business:** Reno Stars — Vancouver renovation company, bilingual EN/ZH
 - **Website:** www.reno-stars.com (Next.js 16, Vercel, Neon PostgreSQL)
-- **Phone:** 778-960-7999
+- **Phone:** ${OPERATOR_PHONE}
 - **Timezone:** America/Vancouver (PDT/PST)
 
 ## Working Style

@@ -19,7 +19,7 @@ Read `/Users/renostars/reno-star-business-intelligent/config/env.json` for DB co
 - **Xiaohongshu**: PAUSED — platform warning received 2026-04-09. Do NOT auto-post. Skip Xiaohongshu in all cron runs until user explicitly re-enables.
 - **TikTok**: https://www.tiktok.com/ (logged in) — use Photo Mode (slideshow) since no video yet
 - **YouTube**: https://www.youtube.com/ (logged in) — use Community Posts (image + text)
-- **Google Business Profile**: Post via Google Search panel (search "Reno Stars Local Renovation Company Richmond BC", click "Add update" in the business panel). Logged in as airenostars@gmail.com. Posts appear on Google Search + Maps knowledge panel.
+- **Google Business Profile**: Post via Google Search panel (search "Reno Stars Local Renovation Company Richmond BC", click "Add update" in the business panel). Logged in as ${OPERATOR_EMAIL}. Posts appear on Google Search + Maps knowledge panel.
 - **Reddit**: PAUSED until 2026-04-21 — account was deleted on 2026-04-07 after fresh-account shadow ban. Skip Reddit entirely until then. Do not draft Reddit content, do not include "reddit" in platforms array, do not navigate to reddit.com.
 
 ---
@@ -297,7 +297,7 @@ NO phone number. NO "link in bio". NO "DM for quote". The account name IS the br
 
 [2-3 sentences: the real story, not the marketing version. Be honest about challenges.]
 
-[CTA: Free consultation → 778-960-7999 | reno-stars.com]
+[CTA: Free consultation → ${OPERATOR_PHONE} | reno-stars.com]
 
 #Renovation #Vancouver #HomeImprovement #ContractorLife
 ```
@@ -311,7 +311,7 @@ Google Business Profile posts appear on Google Search + Maps. Write as a brief b
 
 [2-3 sentences about the project, location, scope, and result]
 
-📞 Free consultation: 778-960-7999
+📞 Free consultation: ${OPERATOR_PHONE}
 🌐 reno-stars.com
 ```
 Keep it short and professional — these posts show in the knowledge panel next to reviews. Include a CTA like "Call now" or "Learn more".
@@ -494,7 +494,7 @@ const localPath = `/tmp/social-post-image.${ext}`;
 7. **Tone**: drop emoji, write a brief case study (Challenge / Result framing) — LinkedIn audience is B2B.
 
 ### Google Business Profile (Google Posts)
-1. Search Google for "Reno Stars Local Renovation Company Richmond BC" (must be logged in as airenostars@gmail.com).
+1. Search Google for "Reno Stars Local Renovation Company Richmond BC" (must be logged in as ${OPERATOR_EMAIL}).
 2. In the "Your business on Google" panel, click **"Add update"** (or "Posts" → "Add update").
 3. An iframe opens at `/local/business/<id>/posts/create`. Select **"Add update"** post type (not Offer or Event).
 4. Type the post text in the description field. Max 1500 chars.

@@ -9,7 +9,7 @@ Read /Users/renostars/reno-star-business-intelligent/config/env.json for paths a
    node /Users/renostars/.openclaw/workspace/scripts/seo-weekly-report.mjs
    ```
 2. If the script works, summarize the output
-3. If it errors with 'not yet authorized', note that gsc-reporter@reno-website-490720.iam.gserviceaccount.com needs to be added to Search Console
+3. If it errors with 'not yet authorized', note that ${GSC_SERVICE_ACCOUNT} needs to be added to Search Console
 4. If the script doesn't exist or fails for other reasons, generate the report manually:
 
 ### Manual Report Generation
@@ -18,13 +18,13 @@ TOKEN=$(PATH=$PATH:/opt/homebrew/share/google-cloud-sdk/bin gcloud auth applicat
 
 # This week
 curl -X POST "https://searchconsole.googleapis.com/webmasters/v3/sites/https%3A%2F%2Fwww.reno-stars.com%2F/searchAnalytics/query" \
-  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: reno-website-490720" \
+  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: ${GCP_PROJECT_ID}" \
   -H "Content-Type: application/json" \
   -d '{"startDate":"7daysAgo","endDate":"today","dimensions":["query"],"rowLimit":25}'
 
 # Last week (for comparison)
 curl -X POST "https://searchconsole.googleapis.com/webmasters/v3/sites/https%3A%2F%2Fwww.reno-stars.com%2F/searchAnalytics/query" \
-  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: reno-website-490720" \
+  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: ${GCP_PROJECT_ID}" \
   -H "Content-Type: application/json" \
   -d '{"startDate":"14daysAgo","endDate":"7daysAgo","dimensions":["query"],"rowLimit":25}'
 ```
@@ -51,7 +51,7 @@ LOCATION_ID="1497199709887249563"
 # Daily metrics for past 7 days
 curl -s "https://businessprofileperformance.googleapis.com/v1/locations/${LOCATION_ID}:getDailyMetricsTimeSeries?dailyMetric=BUSINESS_IMPRESSIONS_DESKTOP_MAPS&dailyMetric=BUSINESS_IMPRESSIONS_DESKTOP_SEARCH&dailyMetric=BUSINESS_IMPRESSIONS_MOBILE_MAPS&dailyMetric=BUSINESS_IMPRESSIONS_MOBILE_SEARCH&dailyMetric=CALL_CLICKS&dailyMetric=WEBSITE_CLICKS&dailyMetric=BUSINESS_DIRECTION_REQUESTS&dailyRange.startDate.year=$(date +%Y)&dailyRange.startDate.month=$(date -v-7d +%m)&dailyRange.startDate.day=$(date -v-7d +%d)&dailyRange.endDate.year=$(date +%Y)&dailyRange.endDate.month=$(date +%m)&dailyRange.endDate.day=$(date +%d)" \
   -H "Authorization: Bearer $TOKEN" \
-  -H "x-goog-user-project: reno-website-490720"
+  -H "x-goog-user-project: ${GCP_PROJECT_ID}"
 ```
 Report: total impressions (maps + search), website clicks, calls, direction requests. Compare to prior week if data available.
 

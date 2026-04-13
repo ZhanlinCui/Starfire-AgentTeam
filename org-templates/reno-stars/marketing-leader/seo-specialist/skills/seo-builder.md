@@ -33,7 +33,7 @@ Process ALL qualifying pages in a single run — do NOT stop after one page:
 ```bash
 TOKEN=$(PATH=$PATH:/opt/homebrew/share/google-cloud-sdk/bin gcloud auth application-default print-access-token)
 curl -X POST "https://searchconsole.googleapis.com/webmasters/v3/sites/https%3A%2F%2Fwww.reno-stars.com%2F/searchAnalytics/query" \
-  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: reno-website-490720" \
+  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: ${GCP_PROJECT_ID}" \
   -H "Content-Type: application/json" \
   -d '{"startDate":"7daysAgo","endDate":"today","dimensions":["page"],"rowLimit":50}'
 ```
@@ -60,7 +60,7 @@ curl -X POST "https://searchconsole.googleapis.com/webmasters/v3/sites/https%3A%
 TOKEN=$(PATH=$PATH:/opt/homebrew/share/google-cloud-sdk/bin gcloud auth application-default print-access-token)
 # Get sitemap URLs submitted vs indexed
 curl -s -X GET "https://searchconsole.googleapis.com/webmasters/v3/sites/https%3A%2F%2Fwww.reno-stars.com%2F/sitemaps" \
-  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: reno-website-490720"
+  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: ${GCP_PROJECT_ID}"
 ```
 Report: total submitted vs indexed. If indexed < 80% of submitted, flag as action item — investigate which pages aren't indexed and why (thin content, noindex, crawl errors).
 
@@ -84,14 +84,14 @@ Batch everything — the goal is to improve every qualifying page each run, not 
 - Production site: https://www.reno-stars.com
 - PRODUCTION Repo: /Users/renostars/.openclaw/workspace/reno-stars-nextjs-prod
 - Database: Read from /Users/renostars/reno-star-business-intelligent/config/env.json → services.neon_db
-- Google Cloud project: reno-website-490720 | GSC: https://www.reno-stars.com/ | GA4: G-3EZTQFQ7XH
-- gcloud CLI: /opt/homebrew/share/google-cloud-sdk/bin/gcloud (authenticated as airenostars@gmail.com)
-- Google Ads: MCC 895-054-0400, CID 874-074-0439, dev token in config/env.json → google.ads_dev_token
+- Google Cloud project: ${GCP_PROJECT_ID} | GSC: https://www.reno-stars.com/ | GA4: G-3EZTQFQ7XH
+- gcloud CLI: /opt/homebrew/share/google-cloud-sdk/bin/gcloud (authenticated as ${OPERATOR_EMAIL})
+- Google Ads: MCC ${GADS_MCC_ID}, CID ${GADS_CUSTOMER_ID}, dev token in config/env.json → google.ads_dev_token
 
 ## RULES
 - Push to Reno-Stars/reno-stars-nextjs (NOT the fork)
 - git pull --rebase before working, push when done
-- git config user.email airenostars@gmail.com, user.name airenostars
+- git config user.email ${OPERATOR_EMAIL}, user.name airenostars
 - Run pnpm typecheck && pnpm lint && pnpm test:run before pushing
 - ALL content bilingual (en+zh), natural Chinese
 - Follow existing code patterns exactly
@@ -196,7 +196,7 @@ Check:
 ### Yelp
 Navigate: `https://biz.yelp.com/biz_info/S_kdh-5GuSvSiY_P43jLsw`
 Check:
-- Email verified? (banner shown = no — flag "verify Yelp email: airenostars@gmail.com")
+- Email verified? (banner shown = no — flag "verify Yelp email: ${OPERATOR_EMAIL}")
 - Photo count: `https://biz.yelp.com/biz_photos/S_kdh-5GuSvSiY_P43jLsw` — if < 30, upload from /Volumes/LaCie/Projects/ Social ready folders
 - Business info complete: hours, categories, service area, website
 - Any unresponded reviews: `https://biz.yelp.com/r2r/S_kdh-5GuSvSiY_P43jLsw`
@@ -234,7 +234,7 @@ Fix any actionable issues (upload photos, fill missing fields, verify email) bef
 ```bash
 TOKEN=$(PATH=$PATH:/opt/homebrew/share/google-cloud-sdk/bin gcloud auth application-default print-access-token)
 curl -X POST "https://searchconsole.googleapis.com/webmasters/v3/sites/https%3A%2F%2Fwww.reno-stars.com%2F/searchAnalytics/query" \
-  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: reno-website-490720" \
+  -H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: ${GCP_PROJECT_ID}" \
   -H "Content-Type: application/json" \
   -d '{"startDate":"28daysAgo","endDate":"today","dimensions":["query"],"rowLimit":50}'
 ```
@@ -301,7 +301,7 @@ Action: Ask recent clients to review on Yelp or Houzz
 When a new blog post or guide is published on reno-stars.com, syndicate it to external platforms for backlinks:
 
 ### Medium
-- Account: airenostars@gmail.com (login via Google)
+- Account: ${OPERATOR_EMAIL} (login via Google)
 - URL: https://medium.com/
 - For each new blog post, write a **fresh shorter version** (400-600 words) — do NOT copy-paste from the website
 - Include a link back to the original guide at the end: "Read the full guide with real project data at [link]"
@@ -310,7 +310,7 @@ When a new blog post or guide is published on reno-stars.com, syndicate it to ex
 - Frequency: 1 article per week max (don't flood)
 
 ### Pinterest
-- Account: airenostars@gmail.com (login via Google)
+- Account: ${OPERATOR_EMAIL} (login via Google)
 - URL: https://www.pinterest.com/
 - Boards: "Kitchen Renovations Vancouver", "Bathroom Renovations Vancouver", "Before & After Renovations", "Home Renovation Ideas"
 - For each new project published on the website, create a pin:

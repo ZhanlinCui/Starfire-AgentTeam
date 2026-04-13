@@ -8,7 +8,7 @@ type: reference
 
 - **Profile URL:** https://pinterest.com/airenostars/
 - **Username:** airenostars
-- **Email:** airenostars@gmail.com
+- **Email:** ${OPERATOR_EMAIL}
 - **Account Type:** Business (Service Provider, Home vertical)
 - **Display Name:** Reno Stars | Vancouver Renovation Company
 - **Website:** https://www.reno-stars.com

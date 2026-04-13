@@ -18,7 +18,7 @@ type: project
 - Local: ~/.openclaw/workspace/reno-star-email-ai-handle-service
 
 ## Google Sheets Integration
-- Service account: reno-sheets-writer@reno-website-490720.iam.gserviceaccount.com
+- Service account: reno-sheets-writer@${GCP_PROJECT_ID}.iam.gserviceaccount.com
 - Spreadsheet ID: 19votqeqJ1lO2pZ3eXzRMm7e-YKKGxv3BvCc0dVJivY4
 - SA key base64-encoded in Railway env var GOOGLE_SHEETS_SA_KEY
 

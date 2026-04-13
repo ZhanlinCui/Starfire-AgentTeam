@@ -5,7 +5,7 @@ type: project
 ---
 
 ## Account
-- MCC: 895-054-0400 | CID: 874-074-0439
+- MCC: ${GADS_MCC_ID} | CID: ${GADS_CUSTOMER_ID}
 - Dev token: in config/env.json → google.ads_dev_token (Test Access, Basic pending)
 - 14 campaigns total (4 active targets, 8 legacy/dead, 2 other) — all currently PAUSED
 
