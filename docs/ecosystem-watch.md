@@ -213,6 +213,110 @@ beyond git — it's a brilliant prompt library, not an orchestration platform.
 
 ---
 
+### Composio — `composio-dev/composio`
+
+**Pitch:** "The integration layer for AI agents — 250+ tools across Slack,
+GitHub, Telegram, Linear, Discord, and more, with managed auth."
+
+**Shape:** Python + TypeScript SDK. Pure integration library — no agent
+runtime, no visual canvas. Plugs into any LLM framework (LangChain,
+LangGraph, AutoGen, CrewAI, Claude, OpenAI Agents). Managed auth so agents
+can act on user-connected accounts. MIT-adjacent, ~18k ⭐.
+
+**Overlap with us:** Both provide agent-accessible Slack, Telegram, and
+Discord channels. Both handle OAuth / credential management for workspace
+integrations. Channels feature in `platform/internal/handlers/channels.go`
+does a subset of what Composio does for the messaging platforms.
+
+**Differentiation:** Composio is a tool library, not a runtime or org
+hierarchy. No canvas, no A2A between agents, no org structure. They're
+"the 250 tools agents can call"; we're "the company that runs the agents."
+Composio could be a dependency inside a Starfire workspace skill — not a
+competitor for the platform layer.
+
+**Worth borrowing:**
+- **Trigger model:** inbound webhook → fire agent → respond in same channel.
+  Our channels feature handles outbound well but inbound triggers are still
+  manually configured. Composio's trigger schema is worth adopting.
+- **"Connected accounts" pattern:** per-workspace OAuth token stored per
+  integration, reused across runs. Our `workspace_channels` JSONB config is
+  close; formalize as a named model.
+- **Auth sandbox:** test mode that mocks API calls — useful for our
+  `POST /workspaces/:id/channels/:id/test` endpoint.
+
+**Terminology collisions:**
+- "actions" = their tool calls; we use "skills."
+- "triggers" = their inbound webhooks; we use channels + schedules.
+
+**Signals to react to:**
+- If they add persistent agent identity across trigger runs → direct overlap
+  with our workspace model.
+- If they add A2A between agent sessions or multi-agent orchestration → threat
+  to our integration story.
+- If `agentskills.io` adopts Composio trigger schema → we should too.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~18k ⭐, active
+
+---
+
+### n8n — `n8n-io/n8n`
+
+**Pitch:** "Fair-code workflow automation with 400+ integrations — build AI
+pipelines visually, self-host or cloud."
+
+**Shape:** Node.js, self-hosted or n8n cloud. Visual workflow builder (nodes
++ edges, not unlike React Flow). 400+ connectors: Slack, Telegram, Discord,
+WhatsApp, Email, GitHub, Linear, Notion, … plus dedicated AI nodes
+(LLM chains, agent nodes, vector stores, tool use). Fair-code license
+(source-available, free for internal use). ~50k ⭐, pushed daily.
+
+**Overlap with us:**
+- Visual graph metaphor for orchestrating work (their nodes ≈ our canvas
+  workspaces).
+- Connects AI agents to Slack / Telegram / Discord / WhatsApp — identical
+  surface to our `workspace_channels` feature.
+- Scheduled automations (cron triggers) → same as `workspace_schedules`.
+- Self-hostable, Docker Compose first-class.
+
+**Differentiation:** n8n is trigger→step→step→output (stateless sequential
+workflow per run). No persistent agent identity, no shared memory across
+runs, no org hierarchy, no A2A between agents. Each execution is isolated.
+We're "agents that remember, collaborate, and hold roles"; they're "workflows
+that transform data." The UX audiences barely overlap: n8n users are ops/no-code
+builders; Starfire users are developers building agent companies.
+
+**Worth borrowing:**
+- **Channel trigger UX:** select platform → OAuth → pick chat → done in
+  three clicks. Our channel setup requires more manual config; this flow is
+  the right target for `POST /workspaces/:id/channels`.
+- **"Test workflow" dry-run:** one-click test execution with live output.
+  Maps well onto our `POST /workspaces/:id/channels/:id/test` — we should
+  fire a real test message and show the round-trip result inline.
+- **Sticky notes on canvas:** freeform annotation nodes for documentation.
+  Cheap win for our canvas — could be a "comment node" workspace type.
+- **Execution log with step-level timing:** n8n shows each node's in/out
+  data and ms. Our `activity_logs` captures A2A traffic but not intra-agent
+  step timing. Worth adding to the trace view.
+
+**Terminology collisions:**
+- "workflow" — their atomic unit; for us "workflow" is informal. No hard
+  collision but our marketing copy should avoid it to stay distinct.
+- "nodes" — their workflow steps; our canvas nodes are workspaces. Different
+  enough to not cause user confusion, but worth noting in docs.
+
+**Signals to react to:**
+- If n8n ships persistent agent nodes (memory between runs) → direct
+  substitute for simple Starfire use cases. They've been adding AI nodes
+  fast (AI Agent node shipped 2024-Q3).
+- If they add multi-agent coordination with shared state → revisit our
+  differentiation messaging.
+- If a major Slack/Discord bot tutorial uses n8n instead of a custom agent
+  → indicates channel-first UX is the market expectation we need to match.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~50k ⭐, pushed daily
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
