@@ -13,7 +13,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-export const PLATFORM_URL = process.env.STARFIRE_URL || "http://localhost:8080";
+// Prefer STARFIRE_URL (the canonical MCP env var), fall back to PLATFORM_URL
+// (what the workspace runtime already injects for heartbeat/register), and
+// only then to localhost:8080. Injecting STARFIRE_URL at container provision
+// is handled by platform/internal/provisioner/provisioner.go; this fallback
+// chain protects older containers and host-side users alike. Fixes #67.
+export const PLATFORM_URL =
+  process.env.STARFIRE_URL ||
+  process.env.PLATFORM_URL ||
+  "http://localhost:8080";
 
 export async function apiCall(method: string, path: string, body?: unknown) {
   try {

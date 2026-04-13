@@ -115,21 +115,7 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 	}
 	log.Printf("Provisioner: config volume %s ready", configVolume)
 
-	// Build environment variables
-	env := []string{
-		fmt.Sprintf("WORKSPACE_ID=%s", cfg.WorkspaceID),
-		fmt.Sprintf("WORKSPACE_CONFIG_PATH=/configs"),
-		fmt.Sprintf("PLATFORM_URL=%s", cfg.PlatformURL),
-		fmt.Sprintf("TIER=%d", cfg.Tier),
-		"PLUGINS_DIR=/plugins",
-	}
-	if cfg.AwarenessNamespace != "" && cfg.AwarenessURL != "" {
-		env = append(env, fmt.Sprintf("AWARENESS_NAMESPACE=%s", cfg.AwarenessNamespace))
-		env = append(env, fmt.Sprintf("AWARENESS_URL=%s", cfg.AwarenessURL))
-	}
-	for k, v := range cfg.EnvVars {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
+	env := buildContainerEnv(cfg)
 
 	// Select image based on runtime (each adapter has its own pre-built image)
 	image := DefaultImage
@@ -263,6 +249,38 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 
 	log.Printf("Provisioner: started container %s for workspace %s at %s (internal: %s)", name, cfg.WorkspaceID, hostURL, InternalURL(cfg.WorkspaceID))
 	return hostURL, nil
+}
+
+// buildContainerEnv assembles the initial environment variables injected
+// into every workspace container.
+//
+//   - PLATFORM_URL: canonical env var the workspace runtime reads for
+//     heartbeat / register / A2A proxy.
+//   - STARFIRE_URL: canonical env var the Starfire MCP client reads
+//     (mcp-server/src/index.ts). Injecting it at provision time so
+//     mcp__starfire__* tools called FROM inside the agent container
+//     reach the host platform instead of localhost:8080 (which is the
+//     container itself). Fixes #67.
+//
+// Extracted from Start() so it's unit-testable without standing up a
+// Docker daemon.
+func buildContainerEnv(cfg WorkspaceConfig) []string {
+	env := []string{
+		fmt.Sprintf("WORKSPACE_ID=%s", cfg.WorkspaceID),
+		"WORKSPACE_CONFIG_PATH=/configs",
+		fmt.Sprintf("PLATFORM_URL=%s", cfg.PlatformURL),
+		fmt.Sprintf("STARFIRE_URL=%s", cfg.PlatformURL),
+		fmt.Sprintf("TIER=%d", cfg.Tier),
+		"PLUGINS_DIR=/plugins",
+	}
+	if cfg.AwarenessNamespace != "" && cfg.AwarenessURL != "" {
+		env = append(env, fmt.Sprintf("AWARENESS_NAMESPACE=%s", cfg.AwarenessNamespace))
+		env = append(env, fmt.Sprintf("AWARENESS_URL=%s", cfg.AwarenessURL))
+	}
+	for k, v := range cfg.EnvVars {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	return env
 }
 
 // ApplyTierConfig configures a HostConfig based on the workspace tier.

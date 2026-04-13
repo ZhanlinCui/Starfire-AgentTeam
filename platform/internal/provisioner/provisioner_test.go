@@ -1,6 +1,7 @@
 package provisioner
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
@@ -330,5 +331,127 @@ func TestConfigVolumeName(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("ConfigVolumeName(%q) = %q, want %q", tt.id, got, tt.want)
 		}
+	}
+}
+
+// ---------- buildContainerEnv — #67 STARFIRE_URL injection ----------
+
+func TestBuildContainerEnv_InjectsBothPlatformURLAndStarfireURL(t *testing.T) {
+	cfg := WorkspaceConfig{
+		WorkspaceID: "ws-abc123",
+		PlatformURL: "http://host.docker.internal:8080",
+		Tier:        2,
+	}
+	env := buildContainerEnv(cfg)
+
+	wantPairs := map[string]string{
+		"WORKSPACE_ID":          "ws-abc123",
+		"WORKSPACE_CONFIG_PATH": "/configs",
+		"PLATFORM_URL":          "http://host.docker.internal:8080",
+		"STARFIRE_URL":          "http://host.docker.internal:8080",
+		"TIER":                  "2",
+		"PLUGINS_DIR":           "/plugins",
+	}
+	for k, wantV := range wantPairs {
+		want := k + "=" + wantV
+		found := false
+		for _, e := range env {
+			if e == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected env to contain %q, got %v", want, env)
+		}
+	}
+}
+
+func TestBuildContainerEnv_StarfireURLAlwaysMatchesPlatformURL(t *testing.T) {
+	// Regression guard: STARFIRE_URL must never drift from PLATFORM_URL —
+	// if someone changes one they must change the other. This test pins
+	// the invariant. See #67.
+	for _, url := range []string{
+		"http://localhost:8080",
+		"http://host.docker.internal:8080",
+		"http://platform:8080",
+		"https://starfire.example.com",
+	} {
+		cfg := WorkspaceConfig{WorkspaceID: "ws-x", PlatformURL: url, Tier: 1}
+		env := buildContainerEnv(cfg)
+		var pURL, sURL string
+		for _, e := range env {
+			if strings.HasPrefix(e, "PLATFORM_URL=") {
+				pURL = strings.TrimPrefix(e, "PLATFORM_URL=")
+			}
+			if strings.HasPrefix(e, "STARFIRE_URL=") {
+				sURL = strings.TrimPrefix(e, "STARFIRE_URL=")
+			}
+		}
+		if pURL != sURL {
+			t.Errorf("PLATFORM_URL (%q) must match STARFIRE_URL (%q)", pURL, sURL)
+		}
+		if pURL != url {
+			t.Errorf("expected PLATFORM_URL=%q, got %q", url, pURL)
+		}
+	}
+}
+
+func TestBuildContainerEnv_AwarenessOnlyWhenBothSet(t *testing.T) {
+	// Both set → both injected.
+	cfg := WorkspaceConfig{
+		WorkspaceID:        "ws-x",
+		PlatformURL:        "http://localhost:8080",
+		AwarenessURL:       "http://awareness:9000",
+		AwarenessNamespace: "ns-1",
+	}
+	env := buildContainerEnv(cfg)
+	hasNS := false
+	hasURL := false
+	for _, e := range env {
+		if e == "AWARENESS_NAMESPACE=ns-1" {
+			hasNS = true
+		}
+		if e == "AWARENESS_URL=http://awareness:9000" {
+			hasURL = true
+		}
+	}
+	if !hasNS || !hasURL {
+		t.Errorf("both awareness vars must be present: env=%v", env)
+	}
+
+	// Only namespace set → neither injected (must be both-or-nothing).
+	cfg.AwarenessURL = ""
+	env2 := buildContainerEnv(cfg)
+	for _, e := range env2 {
+		if strings.HasPrefix(e, "AWARENESS_") {
+			t.Errorf("awareness vars must NOT be injected when URL is missing: got %q", e)
+		}
+	}
+}
+
+func TestBuildContainerEnv_CustomEnvVarsAppended(t *testing.T) {
+	cfg := WorkspaceConfig{
+		WorkspaceID: "ws-x",
+		PlatformURL: "http://localhost:8080",
+		EnvVars:     map[string]string{"CUSTOM": "value", "GITHUB_TOKEN": "fake-token-for-test"},
+	}
+	env := buildContainerEnv(cfg)
+	seen := map[string]string{}
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			seen[parts[0]] = parts[1]
+		}
+	}
+	if seen["CUSTOM"] != "value" {
+		t.Errorf("CUSTOM env missing, got env=%v", env)
+	}
+	if seen["GITHUB_TOKEN"] != "fake-token-for-test" {
+		t.Errorf("GITHUB_TOKEN env missing, got env=%v", env)
+	}
+	// Built-in defaults still present
+	if seen["STARFIRE_URL"] == "" {
+		t.Errorf("STARFIRE_URL must still be set alongside custom envs")
 	}
 }
