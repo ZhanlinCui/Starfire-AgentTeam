@@ -552,7 +552,30 @@ func (h *PluginsHandler) Uninstall(c *gin.Context) {
 		return
 	}
 
-	// Delete plugin directory from container (as root to handle file ownership)
+	// Read the plugin's manifest BEFORE deletion to learn which skill dirs
+	// it owns, so we can clean them out of /configs/skills/ and avoid the
+	// auto-restart re-mounting them. Issue #106.
+	skillNames := h.readPluginSkillsFromContainer(ctx, containerName, pluginName)
+
+	// 1. Strip plugin's rule/fragment markers from CLAUDE.md (mirrors
+	//    AgentskillsAdaptor.uninstall lines 184-188). Best-effort: if
+	//    the user edited CLAUDE.md, our marker stays untouched.
+	h.stripPluginMarkersFromMemory(ctx, containerName, pluginName)
+
+	// 2. Remove copied skill dirs declared in the plugin's plugin.yaml.
+	for _, skill := range skillNames {
+		if err := validatePluginName(skill); err != nil {
+			// Defensive: a malformed skill name in plugin.yaml shouldn't
+			// turn into a path-traversal exec. Just skip it.
+			log.Printf("Plugin uninstall: skipping invalid skill name %q in %s: %v", skill, pluginName, err)
+			continue
+		}
+		_, _ = h.execAsRoot(ctx, containerName, []string{
+			"rm", "-rf", "/configs/skills/" + skill,
+		})
+	}
+
+	// 3. Delete the plugin directory itself (as root to handle file ownership).
 	_, err := h.execAsRoot(ctx, containerName, []string{
 		"rm", "-rf", "/configs/plugins/" + pluginName,
 	})
@@ -581,6 +604,72 @@ func (h *PluginsHandler) Uninstall(c *gin.Context) {
 }
 
 // --- helpers ---
+
+// readPluginSkillsFromContainer reads /configs/plugins/<name>/plugin.yaml
+// from the running container and returns the `skills:` list. Returns an
+// empty slice if the file is missing or unparseable — uninstall must keep
+// running even if the manifest is gone (already half-deleted, etc.).
+func (h *PluginsHandler) readPluginSkillsFromContainer(ctx context.Context, containerName, pluginName string) []string {
+	out, err := h.execInContainer(ctx, containerName, []string{
+		"cat", "/configs/plugins/" + pluginName + "/plugin.yaml",
+	})
+	if err != nil || len(out) == 0 {
+		return nil
+	}
+	info := parseManifestYAML(pluginName, []byte(out))
+	return info.Skills
+}
+
+// stripPluginMarkersFromMemory rewrites /configs/CLAUDE.md (the runtime's
+// memory file) in-place, removing any block whose marker line starts with
+// `# Plugin: <name> /` — mirrors AgentskillsAdaptor.uninstall's stripping
+// logic so install/uninstall are symmetric. Best-effort: silent on read or
+// write failure, since the rest of uninstall must still succeed.
+func (h *PluginsHandler) stripPluginMarkersFromMemory(ctx context.Context, containerName, pluginName string) {
+	// Use sed via bash -c for atomic in-place delete: drop the marker line
+	// and the blank line that follows it (install adds a leading blank line
+	// before the marker via append_to_memory). Three sed passes mirror the
+	// install layout: leading blank, marker line, then we also strip empty
+	// trailing markers from older installs that didn't add the prefix blank.
+	// Falls through silently if CLAUDE.md doesn't exist (fresh workspace).
+	marker := "# Plugin: " + pluginName + " /"
+	// AgentskillsAdaptor.append_to_memory writes blocks of the shape:
+	//   # Plugin: <name> / rule: foo.md
+	//   <blank>
+	//   <content lines…>
+	// separated from the next block by a single blank line. We strip from
+	// our marker up to (but not including) the next `# Plugin:` line of
+	// any plugin (which marks the boundary), or EOF. Other plugins'
+	// blocks and surrounding user content stay intact.
+	// Block layout per AgentskillsAdaptor: marker line, one blank, content
+	// lines, then a terminating blank (or EOF, or the next plugin's marker).
+	// We track blanks-seen-since-marker: the 2nd blank ends our skip; any
+	// `# Plugin: ` line also ends our skip (handles back-to-back blocks).
+	script := fmt.Sprintf(
+		`awk 'BEGIN{skip=0; blanks=0} /^%s/{skip=1; blanks=0; next} skip==1 && /^[[:space:]]*$/{blanks++; if(blanks>=2){skip=0; print; next} next} /^# Plugin: /{if(skip==1)skip=0} skip==1{next} {print}' /configs/CLAUDE.md > /tmp/claude.new && mv /tmp/claude.new /configs/CLAUDE.md`,
+		regexpEscapeForAwk(marker),
+	)
+	_, _ = h.execAsRoot(ctx, containerName, []string{"bash", "-c", script})
+}
+
+// regexpEscapeForAwk escapes characters that have special meaning inside an
+// awk ERE pattern. Plugin names go through validatePluginName so the input
+// is already restricted to [A-Za-z0-9_-], but the literal `# Plugin: …/`
+// prefix and a future relaxation of validatePluginName both motivate
+// escaping defensively.
+func regexpEscapeForAwk(s string) string {
+	// `/` is the regex delimiter in awk's /.../ syntax — must be escaped
+	// alongside the standard regex specials.
+	specials := `\^$.|?*+()[]{}/`
+	var b strings.Builder
+	for _, r := range s {
+		if strings.ContainsRune(specials, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
 
 func (h *PluginsHandler) readPluginManifest(pluginPath, fallbackName string) pluginInfo {
 	data, err := os.ReadFile(filepath.Join(pluginPath, "plugin.yaml"))
