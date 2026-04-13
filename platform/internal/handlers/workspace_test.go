@@ -394,8 +394,12 @@ func TestWorkspaceDelete_ConfirmationRequired(t *testing.T) {
 
 	handler.Delete(c)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	// #88: confirmation required now returns 409 Conflict (not 200) so
+	// curl --fail / fetch().ok / any HTTP-status-aware client surfaces
+	// the confirmation requirement instead of silently treating it as
+	// success.
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected status 409, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var resp map[string]interface{}
