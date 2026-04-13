@@ -432,6 +432,64 @@ builders; Starfire users are developers building agent companies.
 - Their TypeScript-first stack and MCP server target the same developer audience as our Canvas + mcp-server. Co-marketing opportunity: "run your Starfire agent on a schedule via Trigger.dev" is a cleaner story than our current in-house cron for some user segments.
 
 **Last reviewed:** 2026-04-13 · **Stars / activity:** ~14.5k ⭐, v4.4.3 March 10, 2026
+### LangGraph — `langchain-ai/langgraph`
+
+**Pitch:** "Build resilient language agents as graphs."
+
+**Shape:** Python + TypeScript SDK (MIT), ~29.1k ⭐, v1.1.7 series, last commit April 10, 2026. Low-level, stateful orchestration library inspired by Pregel. Agents are directed graphs (`StateGraph`) where each node is a computation step and edges route flow — including cycles, conditional branches, and parallel fan-out. Core runtime primitives: **checkpointing** (durable state snapshots that survive crashes), **human-in-the-loop interrupts** (pause at any node, inspect/modify state, resume), and **named channels** (typed edge data streams connecting nodes). Deployment via **LangSmith Deployment** (formerly LangGraph Platform, renamed Oct 2025): cloud SaaS, hybrid, or fully self-hosted. `workspace-template:langgraph` is one of Starfire's six supported Docker runtime images.
+
+**Overlap with us:** Starfire's LangGraph adapter (`workspace-template/adapters/langgraph/`) runs LangGraph agents inside our containers — this is a live dependency, not just competitive watch. LangGraph's checkpointing directly complements our workspace state persistence: their `MemorySaver` / `PostgresSaver` checkpoint backends map to the same durability problem our workspace lifecycle solves at the platform level. LangSmith's run tracing overlaps with our Langfuse + `GET /workspaces/:id/traces` stack. Both treat human-in-the-loop as a first-class design concern.
+
+**Differentiation:** LangGraph is a **library for building a single agent's internal logic** — it has no concept of multiple independent agents communicating over a network. "Multi-agent" in LangGraph means multiple `StateGraph` instances called from within one Python process. There is no workspace registry, no Docker isolation per agent, no A2A protocol, no real-time WebSocket canvas, no channels to Slack/Telegram/Discord. LangSmith Deployment manages hosted LangGraph servers, but it is not an org hierarchy — it's a deployment target for individual graphs. We're the operational layer above LangGraph; their graphs can be the implementation inside our containers.
+
+**Worth borrowing:**
+- **Checkpoint-as-first-class-API** — `checkpointer.get_tuple(config)` returns a serializable snapshot of full graph state including pending messages, which thread of execution was running, and the next node. Our workspace state is implicit (Docker volume + DB records); formalizing a "workspace checkpoint" API in the same shape would enable cleaner pause/resume and disaster recovery.
+- **Named channels as typed edge data** — LangGraph's `Annotated[list, operator.add]` channel pattern gives edges a schema and a reducer function. If our A2A messages adopted a channel-schema layer, workspaces could declare what data types they accept and emit, enabling static validation before runtime.
+- **Interrupt + `Command` API** — the v1.1 `Command(goto=..., update=...)` primitive lets agents dynamically rewrite their own graph traversal at runtime. This is the cleanest human-in-the-loop approval UX we've seen; worth studying before extending our `approvals` API.
+
+**Terminology collisions:**
+- "channels" — LangGraph: named typed data streams connecting graph nodes (internal data-flow concept). Ours: social messaging platform integrations (Slack, Telegram, etc.). Completely different meanings — documentation must be explicit if our workspace configs ever reference both.
+- "graph" — LangGraph: the agent's execution graph (StatGraph definition). Ours: the Canvas org chart. Same word, different scopes.
+- "checkpointing" — LangGraph: serializing graph state to a backend. Ours: informal term for workspace lifecycle persistence. Worth aligning terminology if we ever formalize workspace snapshot APIs.
+
+**Signals to react to:**
+- If LangGraph ships native multi-agent federation (separate graphs communicating over HTTP, not in-process) → the gap between their model and ours closes significantly; reassess the LangGraph adapter's role.
+- If LangSmith Deployment expands to support org-level multi-workspace management → they become a platform layer competing with us at the deployment level.
+- If `langgraph` + `langgraphjs` star velocity continues climbing (29.1k now, was 16.4k in early 2026) → the TypeScript SDK is catching up; watch for Canvas-adjacent tooling from the LangChain ecosystem.
+- LangGraph v1.1 brought type-safe streaming and Pydantic coercion — if structured A2A message schemas become an ecosystem expectation, adopt them in our A2A proxy layer.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~29.1k ⭐, v1.1.7 series, last commit April 10, 2026
+
+---
+
+### CrewAI — `crewAIInc/crewAI`
+
+**Pitch:** "Framework for orchestrating role-playing, autonomous AI agents."
+
+**Shape:** Python (MIT), ~48.7k ⭐, v1.14.2a1 as of April 8, 2026. Built from scratch, independent of LangChain. Two distinct execution models: **Crews** (autonomous, role-based multi-agent collaboration — each agent has a role, goal, and backstory; tasks are delegated dynamically) and **Flows** (deterministic, event-driven structured pipelines with explicit state management). Enterprise tier: **CrewAI AMP** ($99+/mo) — hosted execution, tracing, environment management, multi-tenant deployment on AWS/Azure/GCP. **CrewAI Studio** — visual builder connecting crews to Gmail, Slack, Microsoft Teams, HubSpot, Salesforce, Notion as trigger surfaces. 100k+ certified developers via community courses. `workspace-template:crewai` is one of Starfire's six supported Docker runtime images.
+
+**Overlap with us:** Starfire's CrewAI adapter (`workspace-template/adapters/crewai/`) runs CrewAI agents inside our containers — active dependency. The **role-based agent model** (Researcher, Writer, Analyst, etc.) is structurally identical to Starfire's per-workspace agent roles and system prompts; the naming and framing are our closest conceptual match in the ecosystem. **CrewAI Studio** is their visual builder — same aspiration as our Canvas, with drag-and-drop crew composition and channel trigger configuration. CrewAI Flows' structured pipeline syntax maps to our workspace delegation chains. AMP's enterprise console (environment management, live monitoring, redeployment) overlaps directly with our Platform API.
+
+**Differentiation:** CrewAI agents run in-process — a Crew is a single Python execution, not independently deployable containers. No A2A protocol; inter-agent communication within a Crew is direct Python method calls, not HTTP. No real-time WebSocket canvas or live org chart. Studio connects agents to channel triggers, but the agents themselves have no persistent identity between runs (no workspace lifecycle). AMP provides multi-tenant deployment but no graph-based org visualization. We're "a live company of persistent agents"; CrewAI is "a team of agents for a single run."
+
+**Worth borrowing:**
+- **Role + goal + backstory triad** — CrewAI's three-field agent identity (role, goal, backstory) is the most battle-tested prompt structure for role-based agents in the ecosystem. Our `config.yaml` `role:` field maps to the first; we have no equivalent of the structured goal/backstory fields. Adding them to workspace config would sharpen agent self-description and improve initial-prompt quality.
+- **CrewAI Studio trigger model** — select a platform (Slack, Teams, Gmail) → authorize → pick an event → map payload fields to crew inputs → deploy. This is the target UX for our `POST /workspaces/:id/channels` setup flow, which currently requires more manual config.
+- **`@crew` and `@task` decorators** — CrewAI's declarative Python API where class attributes decorated as `@agent`, `@task`, `@crew` auto-wire into the execution graph. Clean pattern for an SDK that wraps our A2A protocol.
+
+**Terminology collisions:**
+- "crew" — their atomic multi-agent unit. We call the same concept a "team" (sibling workspaces under a parent). Sales and docs must be explicit; developers switching between both will be confused.
+- "task" — CrewAI: a unit of work assigned to an agent within a Crew. Ours: informal (used in delegation context). CrewAI's definition is stricter and more visible to end-users.
+- "flow" — CrewAI: a structured pipeline with state and event triggers. Ours: not a defined term. Their precision is worth adopting if we ever name our delegation-chain pattern.
+- "role" — same word, effectively the same meaning. Friendly collision — helps frame our workspace roles to developers who know CrewAI.
+
+**Signals to react to:**
+- If CrewAI Studio adds a canvas view of multi-crew org hierarchies → direct visual competitor with 48.7k ⭐ and an existing user base of 100k+ certified developers; update differentiation messaging immediately.
+- If AMP ships Telegram/Discord/WhatsApp channel triggers (currently Gmail/Slack/Teams/HubSpot/Salesforce/Notion) → full channel parity with our `workspace_channels` adapters; our edge shifts to multi-agent channel routing across a persistent org.
+- If Flows gains persistent agent identity across runs → closes the session gap; revisit our "persistent workspace" differentiator for the CrewAI audience.
+- Watch v1.x release cadence: v1.14.2 in early April 2026 indicates very high velocity. Treat AMP as a serious enterprise platform competitor in the same sales cycle as Starfire.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~48.7k ⭐, v1.14.2a1 April 8, 2026
 
 ---
 
