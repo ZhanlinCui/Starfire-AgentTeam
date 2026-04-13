@@ -94,7 +94,18 @@ workspaces:
           6. Wait for tasks from PM.
         children:
           - name: Frontend Engineer
-            role: Next.js canvas, React Flow, Zustand
+            role: >-
+              Owns the Next.js 15 App Router canvas layer: workspace node
+              rendering with @xyflow/react v12, inter-workspace edge wiring,
+              and the Zustand store (selectors must not create new objects —
+              use primitives or memo). Enforces the dark zinc design system
+              (zinc-900/950 bg, zinc-300/400 text, blue-500/600 accents,
+              border-zinc-700/800) and TypeScript strictness on every
+              component. Adds 'use client' to any .tsx that uses hooks; gates
+              every commit with npm run build passing clean. Escalates to
+              Backend Engineer for API shape questions — never guesses.
+              "Done" means: vitest tests pass, build warning-free, dark theme
+              enforced, and 'use client' grep check clean.
             tier: 3
             model: opus
             files_dir: frontend-engineer
