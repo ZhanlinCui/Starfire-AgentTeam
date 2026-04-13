@@ -3,7 +3,14 @@
 All tests exercise the mock backend (no MEDO_API_KEY required).
 """
 
+import sys
+from pathlib import Path
+
 import pytest
+
+# workspace-template/ must be on sys.path for `from builtin_tools.medo import` to
+# resolve — all other test modules use importlib; this module uses direct imports.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 @pytest.fixture(autouse=True)
