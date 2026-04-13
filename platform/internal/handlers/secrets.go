@@ -119,11 +119,16 @@ func (h *SecretsHandler) Set(c *gin.Context) {
 		return
 	}
 
+	// Persist encryption_version alongside the bytes (#85). ON CONFLICT
+	// also rewrites the version — re-setting a secret while encryption
+	// is enabled upgrades a historical plaintext row to AES-GCM.
+	version := crypto.CurrentEncryptionVersion()
 	_, err = db.DB.ExecContext(ctx, `
-		INSERT INTO workspace_secrets (workspace_id, key, encrypted_value)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (workspace_id, key) DO UPDATE SET encrypted_value = $3, updated_at = now()
-	`, workspaceID, body.Key, encrypted)
+		INSERT INTO workspace_secrets (workspace_id, key, encrypted_value, encryption_version)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (workspace_id, key) DO UPDATE
+			SET encrypted_value = $3, encryption_version = $4, updated_at = now()
+	`, workspaceID, body.Key, encrypted, version)
 	if err != nil {
 		log.Printf("Set secret error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save secret"})
@@ -223,11 +228,13 @@ func (h *SecretsHandler) SetGlobal(c *gin.Context) {
 		return
 	}
 
+	globalVersion := crypto.CurrentEncryptionVersion()
 	_, err = db.DB.ExecContext(ctx, `
-		INSERT INTO global_secrets (key, encrypted_value)
-		VALUES ($1, $2)
-		ON CONFLICT (key) DO UPDATE SET encrypted_value = $2, updated_at = now()
-	`, body.Key, encrypted)
+		INSERT INTO global_secrets (key, encrypted_value, encryption_version)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (key) DO UPDATE
+			SET encrypted_value = $2, encryption_version = $3, updated_at = now()
+	`, body.Key, encrypted, globalVersion)
 	if err != nil {
 		log.Printf("Set global secret error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save"})
@@ -266,9 +273,10 @@ func (h *SecretsHandler) GetModel(c *gin.Context) {
 
 	// Check if MODEL_PROVIDER secret exists
 	var modelBytes []byte
+	var modelVersion int
 	err := db.DB.QueryRowContext(ctx,
-		`SELECT encrypted_value FROM workspace_secrets WHERE workspace_id = $1 AND key = 'MODEL_PROVIDER'`,
-		workspaceID).Scan(&modelBytes)
+		`SELECT encrypted_value, encryption_version FROM workspace_secrets WHERE workspace_id = $1 AND key = 'MODEL_PROVIDER'`,
+		workspaceID).Scan(&modelBytes, &modelVersion)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusOK, gin.H{"model": "", "source": "default"})
 		return
@@ -278,7 +286,7 @@ func (h *SecretsHandler) GetModel(c *gin.Context) {
 		return
 	}
 
-	decrypted, err := crypto.Decrypt(modelBytes)
+	decrypted, err := crypto.DecryptVersioned(modelBytes, modelVersion)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt"})
 		return

@@ -192,7 +192,7 @@ func TestExtended_SecretsSet(t *testing.T) {
 
 	// Expect INSERT (encrypted value is dynamic, use AnyArg)
 	mock.ExpectExec("INSERT INTO workspace_secrets").
-		WithArgs("22222222-2222-2222-2222-222222222222", "OPENAI_API_KEY", sqlmock.AnyArg()).
+		WithArgs("22222222-2222-2222-2222-222222222222", "OPENAI_API_KEY", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	w := httptest.NewRecorder()
