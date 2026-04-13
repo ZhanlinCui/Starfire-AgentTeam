@@ -20,6 +20,16 @@ from a2a_client import (
 )
 
 
+def _auth_headers_for_heartbeat() -> dict[str, str]:
+    """Return Phase 30.1 auth headers; tolerate platform_auth being absent
+    in older installs (e.g. during rolling upgrade)."""
+    try:
+        from platform_auth import auth_headers
+        return auth_headers()
+    except Exception:
+        return {}
+
+
 async def report_activity(
     activity_type: str, target_id: str = "", summary: str = "", status: str = "ok",
     task_text: str = "", response_text: str = "",
@@ -55,6 +65,7 @@ async def report_activity(
                         "sample_error": "",
                         "uptime_seconds": 0,
                     },
+                    headers=_auth_headers_for_heartbeat(),
                 )
     except Exception:
         pass  # Best-effort — don't block delegation on activity reporting

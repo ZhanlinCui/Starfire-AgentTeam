@@ -194,6 +194,20 @@ async def main():  # pragma: no cover
                 },
             )
             print(f"Registered with platform: {resp.status_code}")
+            # Phase 30.1 — capture the auth token issued at first register.
+            # The platform only mints one on first register per workspace,
+            # so a subsequent restart gets an empty auth_token and we
+            # keep using the on-disk copy from the original issuance.
+            if resp.status_code == 200:
+                try:
+                    body = resp.json()
+                    tok = body.get("auth_token")
+                    if tok:
+                        from platform_auth import save_token
+                        save_token(tok)
+                        print(f"Saved workspace auth token (prefix={tok[:8]}…)")
+                except Exception as parse_exc:
+                    print(f"Warning: couldn't parse register response for token: {parse_exc}")
         except Exception as e:
             print(f"Warning: failed to register with platform: {e}")
 

@@ -83,6 +83,89 @@
 
 ---
 
+## Phase 30: SaaS — Remote Workspaces & Cross-Network Federation — IN PROGRESS
+
+**Goal:** let a Python agent running on a laptop in another city boot,
+register, authenticate, accept A2A from its parent PM on the platform,
+and appear on the canvas as a first-class workspace.
+
+**Why now:** the self-hostable single-box model has landed; the next
+meaningful expansion is letting orgs span machines and networks. This
+is the step that turns Starfire from "Docker-compose on one box" into
+a multi-tenant SaaS-shaped product.
+
+**Design thesis:** ride the existing `runtime='external'` escape hatch.
+Every Docker-touching handler already short-circuits when a workspace
+is external. We don't need a parallel subsystem — we need to close
+four small gaps and add per-workspace auth. See
+[`docs/remote-workspaces-readiness.md`](docs/remote-workspaces-readiness.md)
+for the full code audit.
+
+### Shipping order (eight bounded steps, ~2 weeks to GA)
+
+- [ ] **30.1 Workspace auth tokens** — foundation; prevents spoofing.
+  New `workspace_auth_tokens` table; `POST /registry/register` issues
+  a token; middleware validates `Authorization: Bearer <token>` on
+  `/registry/heartbeat`, `/registry/update-card`. Lazy bootstrap so
+  in-flight workspaces upgrade gracefully. Transparent to local
+  containers — provisioner carries the token through the existing env-var
+  pattern. No feature flag.
+
+- [ ] **30.2 Secrets pull endpoint** — `GET /workspaces/:id/secrets`
+  returns decrypted secrets JSON, gated by the 30.1 token. Local agents
+  can use it too (removes env-at-create coupling for rotating secrets).
+
+- [ ] **30.3 Plugin tarball download** — `GET /plugins/:name/download`
+  returns a tarball; agent unpacks locally. Replaces Docker-exec plugin
+  install for remote agents. Behind `REMOTE_PLUGIN_DOWNLOAD_ENABLED`.
+
+- [ ] **30.4 Workspace state polling** — `GET /workspaces/:id/state`
+  returns `{status, paused, deleted_at, pending_events[]}` as a drop-in
+  for the WebSocket feed remote agents can't reach. Behind
+  `REMOTE_STATE_POLLING_ENABLED`.
+
+- [ ] **30.5 A2A proxy token validation** — the proxy enforces the caller's
+  auth token on `POST /workspaces/:id/a2a`. Mutual auth between agents.
+
+- [ ] **30.6 Direct sibling discovery + URL caching** — agents call
+  `GET /registry/{parent_id}/peers` once, cache sibling URLs, call them
+  directly for A2A. Resilient to brief platform outages.
+
+- [ ] **30.7 Poll-liveness for external runtime** — `LivenessChecker`
+  interface in `registry/`; `PollLiveness` marks offline if no heartbeat
+  in 90s. Docker checker becomes one implementation, poll-liveness
+  another. Health sweep routes by runtime. Behind
+  `REMOTE_LIVENESS_POLLING_ENABLED`.
+
+- [ ] **30.8 Remote-agent SDK + docs** — `sdk/python/starfire_agent/`
+  thin client: register → pull secrets → run A2A loop → poll state →
+  heartbeat. Working `examples/remote-agent/` a new user can run on a
+  laptop. Remove the three feature flags. Remote workspaces become GA.
+
+### Out of scope for Phase 30
+
+- Mutual TLS / platform-identity verification from the agent side.
+  Agent trusts any platform URL in its env. Defer until real multi-
+  tenant deployment forces the question.
+- Agent-to-agent mesh across NATs. Direct sibling calls only work when
+  siblings are reachable from each other. Behind-NAT ↔ behind-NAT needs
+  a relay — defer to Phase 31.
+- Platform-managed persistent state for remote agents. Remote agents
+  own their filesystem; platform never mounts.
+
+### Success criteria
+
+- `examples/remote-agent/` boots on a laptop disconnected from the
+  platform's LAN, registers, receives a task from parent PM via A2A,
+  returns a result, appears on the canvas.
+- `tests/e2e/test_federation.sh` spawns a second platform instance +
+  remote agent pointing at the first; both platforms see the agent as
+  a workspace in the right state.
+- Spoofing test: attempt to impersonate a workspace with a guessed ID
+  but no token → 401.
+
+---
+
 ## PR Workflow Rules
 
 All PRs must follow this checklist:

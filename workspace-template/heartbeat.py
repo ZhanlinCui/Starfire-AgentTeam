@@ -81,8 +81,9 @@ class HeartbeatLoop:
             try:
                 client = httpx.AsyncClient(timeout=10.0)
                 while True:
-                    # 1. Send heartbeat
+                    # 1. Send heartbeat (Phase 30.1: include auth header if token known)
                     try:
+                        from platform_auth import auth_headers
                         await client.post(
                             f"{self.platform_url}/registry/heartbeat",
                             json={
@@ -93,6 +94,7 @@ class HeartbeatLoop:
                                 "current_task": self.current_task,
                                 "uptime_seconds": int(time.time() - self.start_time),
                             },
+                            headers=auth_headers(),
                         )
                         self.error_count = 0
                         self.request_count = 0
