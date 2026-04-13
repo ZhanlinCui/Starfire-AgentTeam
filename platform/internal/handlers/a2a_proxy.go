@@ -17,6 +17,7 @@ import (
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/registry"
+	"github.com/agent-molecule/platform/internal/wsauth"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -172,7 +173,25 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 		return
 	}
 
-	status, respBody, proxyErr := h.proxyA2ARequest(ctx, workspaceID, body, c.GetHeader("X-Workspace-ID"), true)
+	callerID := c.GetHeader("X-Workspace-ID")
+
+	// Phase 30.5 — validate the caller's auth token when the caller IS
+	// a workspace (not canvas or a system caller). Canvas requests have
+	// no X-Workspace-ID so they bypass this check (the existing
+	// access-control layer already trusts them). System callers
+	// (webhook:* / system:* / test:*) also bypass — they never hold a
+	// workspace token.
+	//
+	// The bind is strict: the token must match `callerID`, not
+	// `workspaceID` (the target). A compromised token from workspace A
+	// must never authenticate calls from A pretending to be B.
+	if callerID != "" && !isSystemCaller(callerID) && callerID != workspaceID {
+		if err := validateCallerToken(ctx, c, callerID); err != nil {
+			return // response already written with 401
+		}
+	}
+
+	status, respBody, proxyErr := h.proxyA2ARequest(ctx, workspaceID, body, callerID, true)
 	if proxyErr != nil {
 		for k, v := range proxyErr.Headers {
 			c.Header(k, v)
@@ -448,3 +467,43 @@ func nilIfEmpty(s string) *string {
 	}
 	return &s
 }
+
+// validateCallerToken enforces the Phase 30.5 auth-token contract on the
+// caller of an A2A proxy request. Same lazy-bootstrap shape as
+// registry.requireWorkspaceToken: if the caller workspace has any live
+// token on file, the Authorization header is mandatory and must match;
+// if the caller has zero live tokens, they're grandfathered through
+// (their next /registry/register will mint their first token, after
+// which this branch never fires again for them).
+//
+// On auth failure this writes the 401 via c and returns an error so the
+// handler aborts without running the proxy.
+func validateCallerToken(ctx context.Context, c *gin.Context, callerID string) error {
+	hasLive, err := wsauth.HasAnyLiveToken(ctx, db.DB, callerID)
+	if err != nil {
+		// Fail-open here matches the heartbeat path — A2A caller auth is
+		// defense-in-depth on top of access-control hierarchy, not the
+		// sole gate on the secret material. A DB hiccup shouldn't take
+		// the whole A2A path down.
+		log.Printf("wsauth: caller HasAnyLiveToken(%s) failed: %v — allowing A2A", callerID, err)
+		return nil
+	}
+	if !hasLive {
+		return nil // legacy / pre-upgrade caller
+	}
+	tok := wsauth.BearerTokenFromHeader(c.GetHeader("Authorization"))
+	if tok == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing caller auth token"})
+		return errInvalidCallerToken
+	}
+	if err := wsauth.ValidateToken(ctx, db.DB, callerID, tok); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid caller auth token"})
+		return err
+	}
+	return nil
+}
+
+// errInvalidCallerToken is a sentinel for validateCallerToken's "missing
+// token" branch so the handler-level guard can detect it without string
+// matching (the wsauth errors are typed for the invalid case).
+var errInvalidCallerToken = errors.New("missing caller auth token")
