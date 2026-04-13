@@ -872,3 +872,121 @@ def test_process_error_reaches_logs_via_execute(caplog):
     error_messages = " | ".join(r.message for r in caplog.records if r.levelname == "ERROR")
     assert "exit_code=1" in error_messages
     assert "CLAUDE_CODE_OAUTH_TOKEN invalid" in error_messages
+
+
+# ---------------------------------------------------------------------------
+# _reset_session_after_error — #75: session contamination after ProcessError
+# ---------------------------------------------------------------------------
+
+
+def test_reset_session_clears_session_id_on_process_error():
+    """A ProcessError-like exception clears _session_id so the next
+    attempt doesn't try to resume a dead session."""
+    e = ClaudeSDKExecutor(system_prompt=None, config_path="/tmp", heartbeat=None)
+    e._session_id = "sess-abc-123"
+
+    class FakeProcessError(Exception):
+        def __init__(self):
+            super().__init__("Command failed with exit code 1 (exit code: 1)")
+            self.exit_code = 1
+            self.stderr = "whatever"
+
+    e._reset_session_after_error(FakeProcessError())
+    assert e._session_id is None, "session_id must be cleared after a ProcessError"
+
+
+def test_reset_session_respects_rate_limit_continuity():
+    """Transient rate-limit errors leave the session alone — resuming preserves
+    conversational continuity. Only subprocess-level failures need a reset."""
+    e = ClaudeSDKExecutor(system_prompt=None, config_path="/tmp", heartbeat=None)
+    e._session_id = "sess-preserve-me"
+
+    # A rate-limit error has no exit_code, no "exit code" in message, and
+    # its class name is a plain Exception.
+    rate_limit = Exception("Too many requests - rate limit exceeded")
+    e._reset_session_after_error(rate_limit)
+    assert e._session_id == "sess-preserve-me", (
+        "Rate-limit error must NOT clear session_id — it would break "
+        "conversational continuity across retries"
+    )
+
+
+def test_reset_session_handles_missing_session_id_gracefully():
+    """Calling with no session_id set is a no-op (no crash, no log spam)."""
+    e = ClaudeSDKExecutor(system_prompt=None, config_path="/tmp", heartbeat=None)
+    assert e._session_id is None
+
+    class FakeProcessError(Exception):
+        def __init__(self):
+            super().__init__("boom")
+            self.exit_code = 1
+            self.stderr = "err"
+
+    e._reset_session_after_error(FakeProcessError())
+    assert e._session_id is None  # still None, no exception raised
+
+
+def test_reset_session_triggers_on_exit_code_message():
+    """Some SDK errors don't have an exit_code attr but mention it in
+    their message. Treat those as subprocess errors too."""
+    e = ClaudeSDKExecutor(system_prompt=None, config_path="/tmp", heartbeat=None)
+    e._session_id = "sess-xyz"
+
+    # No exit_code attribute, but the message signals a subprocess crash
+    msg_only = Exception("Fatal error in message reader: Command failed with exit code 1")
+    e._reset_session_after_error(msg_only)
+    assert e._session_id is None
+
+
+def test_execute_clears_session_between_retries_on_process_error(caplog):
+    """End-to-end: execute() retries a retryable ProcessError, and the
+    second retry sees a fresh session_id (=None) rather than the stale
+    one from before the crash. This proves #75 is actually wired."""
+    import logging
+    from claude_sdk_executor import ClaudeSDKExecutor
+
+    e = ClaudeSDKExecutor(system_prompt=None, config_path="/tmp", heartbeat=None)
+    e._session_id = "stale-session-doomed"
+
+    ctx = _make_context(["do something"])
+    eq = _make_event_queue()
+
+    # Track the session_id visible on each attempt via the options builder
+    seen_session_ids = []
+    original_build = e._build_options
+
+    def spy_build():
+        seen_session_ids.append(e._session_id)
+        return original_build()
+
+    class FakeProcessError(Exception):
+        def __init__(self):
+            # "exit code 1" is in the retryable patterns, so we'll get the loop
+            super().__init__("Command failed with exit code 1 (exit code: 1)")
+            self.exit_code = 1
+            self.stderr = "first crash"
+
+    async def always_fail(prompt, options):
+        if False:
+            yield  # pragma: no cover
+        raise FakeProcessError()
+
+    with caplog.at_level(logging.INFO), \
+         patch("claude_sdk_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("claude_sdk_executor.read_delegation_results", return_value=""), \
+         patch("claude_sdk_executor.commit_memory", new=AsyncMock()), \
+         patch("claude_sdk_executor.set_current_task", new=AsyncMock()), \
+         patch("claude_agent_sdk.query", new=always_fail), \
+         patch.object(e, "_build_options", side_effect=spy_build), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        asyncio.run(e.execute(ctx, eq))
+
+    # First attempt sees the stale session; second/third attempts see None
+    assert seen_session_ids[0] == "stale-session-doomed"
+    assert all(s is None for s in seen_session_ids[1:]), (
+        f"after first ProcessError, subsequent attempts should see a cleared "
+        f"session_id; got {seen_session_ids}"
+    )
+    # INFO log confirms the reset fired
+    info_messages = " | ".join(r.message for r in caplog.records if r.levelname == "INFO")
+    assert "SDK session reset after FakeProcessError" in info_messages
