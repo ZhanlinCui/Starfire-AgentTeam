@@ -21,6 +21,7 @@ import logging
 import os
 import stat
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,12 @@ logger = logging.getLogger(__name__)
 # pause / delete. Overridable via RemoteAgentClient constructor kwargs.
 DEFAULT_HEARTBEAT_INTERVAL = 30.0    # seconds
 DEFAULT_STATE_POLL_INTERVAL = 30.0   # seconds
+
+# Phase 30.6 — sibling URL cache TTL. Cached URLs expire after this many
+# seconds, forcing a re-discovery call. Short enough that a sibling that
+# moved (restart with new port) is picked up quickly; long enough that
+# we don't hit the discovery endpoint on every A2A call.
+DEFAULT_URL_CACHE_TTL = 300.0        # 5 minutes
 
 
 @dataclass
@@ -52,6 +59,18 @@ class WorkspaceState:
         later; we just don't want to keep heartbeating against a dead row.
         """
         return self.paused or self.deleted
+
+
+@dataclass
+class PeerInfo:
+    """A sibling or parent workspace that this agent can communicate with."""
+    id: str
+    name: str
+    url: str
+    role: str = ""
+    tier: int = 2
+    status: str = "unknown"
+    agent_card: dict[str, Any] = field(default_factory=dict)
 
 
 class RemoteAgentClient:
@@ -90,6 +109,7 @@ class RemoteAgentClient:
         token_dir: Path | None = None,
         heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL,
         state_poll_interval: float = DEFAULT_STATE_POLL_INTERVAL,
+        url_cache_ttl: float = DEFAULT_URL_CACHE_TTL,
         session: requests.Session | None = None,
     ) -> None:
         self.workspace_id = workspace_id
@@ -98,6 +118,12 @@ class RemoteAgentClient:
         self.reported_url = reported_url
         self.heartbeat_interval = heartbeat_interval
         self.state_poll_interval = state_poll_interval
+        self.url_cache_ttl = url_cache_ttl
+        # Phase 30.6 — sibling URL cache keyed by workspace id. Values are
+        # (url, expires_at_unix_seconds). Process-memory only; we re-fetch
+        # on restart because agent lifetimes are short enough that
+        # persisting doesn't buy much.
+        self._url_cache: dict[str, tuple[str, float]] = {}
         self._session = session or requests.Session()
         self._token_dir = token_dir or (
             Path.home() / ".starfire" / workspace_id
@@ -271,6 +297,163 @@ class RemoteAgentClient:
         resp.raise_for_status()
 
     # ------------------------------------------------------------------
+    # Peer discovery + cache (Phase 30.6)
+    # ------------------------------------------------------------------
+
+    def get_peers(self) -> list[PeerInfo]:
+        """Fetch the list of peer workspaces this agent can communicate with.
+
+        Hits ``GET /registry/:id/peers`` with the bearer token. The returned
+        list includes siblings (same parent) and, if applicable, the parent.
+        Each peer's URL is seeded into the local cache so subsequent calls
+        to :py:meth:`discover_peer` short-circuit without hitting the
+        platform.
+
+        Raises on 401 (stale/missing token → call :py:meth:`register`) and
+        other non-2xx.
+        """
+        resp = self._session.get(
+            f"{self.platform_url}/registry/{self.workspace_id}/peers",
+            headers={
+                **self._auth_headers(),
+                "X-Workspace-ID": self.workspace_id,
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json() or []
+        peers: list[PeerInfo] = []
+        now = time.time()
+        for row in data:
+            pid = str(row.get("id", ""))
+            url = str(row.get("url", ""))
+            if not pid:
+                continue
+            peer = PeerInfo(
+                id=pid,
+                name=str(row.get("name", "")),
+                url=url,
+                role=str(row.get("role", "")),
+                tier=int(row.get("tier", 2) or 2),
+                status=str(row.get("status", "unknown")),
+                agent_card=row.get("agent_card") or {},
+            )
+            peers.append(peer)
+            # Seed the cache so a subsequent call_peer doesn't need a
+            # discover round-trip. Only cache HTTP-shaped URLs; skip the
+            # "remote://no-inbound" placeholder and empty strings.
+            if url.startswith(("http://", "https://")):
+                self._url_cache[pid] = (url, now + self.url_cache_ttl)
+        return peers
+
+    def discover_peer(self, target_id: str) -> str | None:
+        """Resolve a peer's URL, using the cache when fresh.
+
+        Returns the URL string, or None if the platform has no usable URL
+        for this target. On 401/403 the caller should re-authenticate or
+        verify the hierarchy rule; those are raised as ``HTTPError``.
+
+        Cache semantics: a cached entry is returned immediately if its TTL
+        hasn't expired; otherwise the platform is hit and the cache
+        refreshed. Call :py:meth:`invalidate_peer_url` to drop an entry
+        that was stale (connection error, 5xx) so the next discover
+        re-fetches instead of returning the dead URL again.
+        """
+        cached = self._url_cache.get(target_id)
+        if cached is not None:
+            url, expires_at = cached
+            if time.time() < expires_at:
+                return url
+            # Expired — drop and fall through to refresh
+            self._url_cache.pop(target_id, None)
+
+        resp = self._session.get(
+            f"{self.platform_url}/registry/discover/{target_id}",
+            headers={
+                **self._auth_headers(),
+                "X-Workspace-ID": self.workspace_id,
+            },
+            timeout=10.0,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        url = str((resp.json() or {}).get("url", ""))
+        if url.startswith(("http://", "https://")):
+            self._url_cache[target_id] = (url, time.time() + self.url_cache_ttl)
+            return url
+        return None
+
+    def invalidate_peer_url(self, target_id: str) -> None:
+        """Drop a peer's cached URL. Call this after a direct-call failure
+        so the next call_peer performs a fresh discover."""
+        self._url_cache.pop(target_id, None)
+
+    def call_peer(
+        self,
+        target_id: str,
+        message: str,
+        prefer_direct: bool = True,
+    ) -> dict[str, Any]:
+        """Send an A2A ``message/send`` to a peer.
+
+        Preferred path (``prefer_direct=True``, default):
+            1. Resolve target URL via :py:meth:`discover_peer` (cache-hot
+               path when we've seen this peer before).
+            2. POST the JSON-RPC envelope directly to the peer's URL.
+            3. On connection error / 5xx, invalidate the cache and retry
+               via the platform proxy — graceful fallback so a stale URL
+               doesn't brick inter-agent communication.
+
+        Proxy-only path (``prefer_direct=False``):
+            Always routes through ``POST /workspaces/:id/a2a`` — useful
+            when both agents are behind NAT and can't reach each other
+            directly, but the platform can reach both.
+
+        Returns the full JSON-RPC response dict so callers can inspect
+        ``result`` vs ``error`` without us flattening the envelope.
+        """
+        body = {
+            "jsonrpc": "2.0",
+            "id": str(uuid.uuid4()),
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "role": "user",
+                    "messageId": str(uuid.uuid4()),
+                    "parts": [{"kind": "text", "text": message}],
+                }
+            },
+        }
+        headers = {
+            **self._auth_headers(),
+            "X-Workspace-ID": self.workspace_id,
+            "Content-Type": "application/json",
+        }
+
+        if prefer_direct:
+            url = self.discover_peer(target_id)
+            if url:
+                try:
+                    resp = self._session.post(url, json=body, headers=headers, timeout=30.0)
+                    resp.raise_for_status()
+                    return resp.json()
+                except Exception as exc:
+                    logger.warning(
+                        "direct A2A to %s (%s) failed: %s — invalidating cache, falling back to proxy",
+                        target_id, url, exc,
+                    )
+                    self.invalidate_peer_url(target_id)
+
+        # Proxy fallback (or prefer_direct=False)
+        resp = self._session.post(
+            f"{self.platform_url}/workspaces/{target_id}/a2a",
+            json=body, headers=headers, timeout=30.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    # ------------------------------------------------------------------
     # Run loop
     # ------------------------------------------------------------------
 
@@ -334,4 +517,11 @@ class RemoteAgentClient:
             time.sleep(self.heartbeat_interval)
 
 
-__all__ = ["RemoteAgentClient", "WorkspaceState", "DEFAULT_HEARTBEAT_INTERVAL", "DEFAULT_STATE_POLL_INTERVAL"]
+__all__ = [
+    "RemoteAgentClient",
+    "WorkspaceState",
+    "PeerInfo",
+    "DEFAULT_HEARTBEAT_INTERVAL",
+    "DEFAULT_STATE_POLL_INTERVAL",
+    "DEFAULT_URL_CACHE_TTL",
+]

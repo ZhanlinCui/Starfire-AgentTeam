@@ -34,7 +34,7 @@ Design notes:
 
 from __future__ import annotations
 
-from .client import RemoteAgentClient, WorkspaceState
+from .client import PeerInfo, RemoteAgentClient, WorkspaceState
 
-__all__ = ["RemoteAgentClient", "WorkspaceState", "__version__"]
+__all__ = ["RemoteAgentClient", "WorkspaceState", "PeerInfo", "__version__"]
 __version__ = "0.1.0"

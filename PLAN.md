@@ -127,7 +127,7 @@ for the full code audit.
 - [x] **30.5 A2A proxy token validation** — the proxy enforces the caller's
   auth token on `POST /workspaces/:id/a2a`. Mutual auth between agents.
 
-- [ ] **30.6 Direct sibling discovery + URL caching** — agents call
+- [x] **30.6 Direct sibling discovery + URL caching** — agents call
   `GET /registry/{parent_id}/peers` once, cache sibling URLs, call them
   directly for A2A. Resilient to brief platform outages.
 
