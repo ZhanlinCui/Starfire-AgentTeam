@@ -77,7 +77,7 @@
 
 - [x] Plugins install/uninstall in Skills tab (PR #39)
 - [x] Pause/resume from context menu
-- [ ] Org template import from canvas
+- [x] Org template import from canvas (PR — `OrgTemplatesSection` in TemplatePalette)
 - [ ] Workspace search (Cmd+K)
 - [ ] Batch operations
 
@@ -143,9 +143,9 @@ point for "what else is out there."
 |-------|-------|-----------|
 | Go (platform) | 476 | `go test -race` |
 | Python (workspace) | 1,040 | pytest |
-| Canvas (frontend) | 345 | Vitest |
+| Canvas (frontend) | 352 | Vitest |
 | SDK (python) | 87 | pytest |
-| **Total** | **1,948** | |
+| **Total** | **1,955** | |
 
 E2E: 68/68 comprehensive checks passing, 62 API tests.
 

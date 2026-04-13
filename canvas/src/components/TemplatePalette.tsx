@@ -15,6 +15,126 @@ interface Template {
   skill_count: number;
 }
 
+export interface OrgTemplate {
+  dir: string;
+  name: string;
+  description: string;
+  workspaces: number;
+}
+
+/** Fetch the list of org templates from the platform. Returns [] on error
+ * so the UI shows the empty state instead of crashing. */
+export async function fetchOrgTemplates(): Promise<OrgTemplate[]> {
+  try {
+    return await api.get<OrgTemplate[]>("/org/templates");
+  } catch {
+    return [];
+  }
+}
+
+/** Import an org template by directory name. Throws on platform error so the
+ * caller can surface the message in its error state. */
+export async function importOrgTemplate(dir: string): Promise<void> {
+  await api.post("/org/import", { dir });
+}
+
+/**
+ * Section listing org templates (multi-workspace hierarchies). Click "Import"
+ * to instantiate the entire tree via `POST /org/import { dir }`. PLAN.md §20.3.
+ *
+ * Exported separately so the org import flow has a focused unit-test surface
+ * without re-rendering the full palette.
+ */
+export function OrgTemplatesSection() {
+  const [orgs, setOrgs] = useState<OrgTemplate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadOrgs = useCallback(async () => {
+    setLoading(true);
+    setOrgs(await fetchOrgTemplates());
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadOrgs();
+  }, [loadOrgs]);
+
+  const handleImport = async (org: OrgTemplate) => {
+    setImporting(org.dir);
+    setError(null);
+    try {
+      await importOrgTemplate(org.dir);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  return (
+    <div className="space-y-2" data-testid="org-templates-section">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[10px] uppercase tracking-wide text-zinc-500 font-semibold">
+          Org Templates
+        </h3>
+        <button
+          onClick={loadOrgs}
+          className="text-[9px] text-zinc-500 hover:text-zinc-300"
+        >
+          ↻
+        </button>
+      </div>
+
+      {loading && <div className="text-[10px] text-zinc-500">Loading…</div>}
+
+      {!loading && orgs.length === 0 && (
+        <div className="text-[10px] text-zinc-500">
+          No org templates in <code>org-templates/</code>
+        </div>
+      )}
+
+      {error && (
+        <div className="px-2 py-1 bg-red-950/40 border border-red-800/50 rounded text-[10px] text-red-400">
+          {error}
+        </div>
+      )}
+
+      {orgs.map((o) => {
+        const isImporting = importing === o.dir;
+        return (
+          <div
+            key={o.dir}
+            className="bg-zinc-800/30 border border-zinc-700/40 rounded-lg p-2.5"
+          >
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[11px] font-semibold text-zinc-200 truncate">
+                {o.name || o.dir}
+              </span>
+              <span className="text-[9px] font-mono text-violet-400 bg-violet-950/40 px-1.5 py-0.5 rounded shrink-0">
+                {o.workspaces}w
+              </span>
+            </div>
+            {o.description && (
+              <p className="text-[10px] text-zinc-500 mb-2 line-clamp-2 leading-relaxed">
+                {o.description}
+              </p>
+            )}
+            <button
+              onClick={() => handleImport(o)}
+              disabled={isImporting}
+              className="w-full px-2 py-1 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 rounded text-[10px] text-violet-300 font-medium transition-colors disabled:opacity-50"
+            >
+              {isImporting ? "Importing…" : "Import org"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const TIER_LABELS: Record<number, { label: string; color: string }> = {
   1: { label: "T1", color: "text-zinc-400 bg-zinc-800/60" },
   2: { label: "T2", color: "text-sky-400 bg-sky-950/40" },
@@ -278,7 +398,8 @@ export function TemplatePalette() {
             })}
           </div>
 
-          <div className="px-4 py-3 border-t border-zinc-800/60 space-y-2">
+          <div className="px-4 py-3 border-t border-zinc-800/60 space-y-3">
+            <OrgTemplatesSection />
             <ImportAgentButton onImported={loadTemplates} />
             <button
               onClick={loadTemplates}
