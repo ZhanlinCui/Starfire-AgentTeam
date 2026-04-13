@@ -501,3 +501,148 @@ func TestWorkspaceDelete_ChildrenQueryError(t *testing.T) {
 		t.Errorf("unmet sqlmock expectations: %v", err)
 	}
 }
+
+// ==================== Phase 30.4 — State polling ====================
+
+const stateWsID = "550e8400-e29b-41d4-a716-446655440000"
+
+func stateReq(w *httptest.ResponseRecorder, auth string) *gin.Context {
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: stateWsID}}
+	req := httptest.NewRequest("GET", "/workspaces/"+stateWsID+"/state", nil)
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	c.Request = req
+	return c
+}
+
+func TestWorkspaceState_LegacyGrandfatheredOnlineStatus(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp")
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT status\s+FROM workspaces\s+WHERE id`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("online"))
+
+	w := httptest.NewRecorder()
+	c := stateReq(w, "")
+	handler.State(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["status"] != "online" || body["paused"] != false || body["deleted"] != false {
+		t.Errorf("unexpected body: %+v", body)
+	}
+}
+
+func TestWorkspaceState_PausedDetected(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp")
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT status\s+FROM workspaces\s+WHERE id`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("paused"))
+
+	w := httptest.NewRecorder()
+	c := stateReq(w, "")
+	handler.State(c)
+
+	var body map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["paused"] != true {
+		t.Errorf("paused flag should be true when status=paused; body=%v", body)
+	}
+}
+
+func TestWorkspaceState_DeletedRowReturns404WithDeletedFlag(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp")
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT status\s+FROM workspaces\s+WHERE id`).
+		WithArgs(stateWsID).
+		WillReturnError(sql.ErrNoRows)
+
+	w := httptest.NewRecorder()
+	c := stateReq(w, "")
+	handler.State(c)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for hard-deleted row, got %d", w.Code)
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["deleted"] != true {
+		t.Errorf("deleted flag should be true on 404; body=%+v", body)
+	}
+}
+
+func TestWorkspaceState_MissingTokenWhenOnFile(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp")
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	w := httptest.NewRecorder()
+	c := stateReq(w, "")
+	handler.State(c)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 when token required and absent, got %d", w.Code)
+	}
+}
+
+func TestWorkspaceState_ValidTokenReturnsStatus(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", "/tmp")
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id, workspace_id FROM workspace_auth_tokens`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "workspace_id"}).AddRow("t1", stateWsID))
+	mock.ExpectExec(`UPDATE workspace_auth_tokens SET last_used_at`).
+		WithArgs("t1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT status\s+FROM workspaces\s+WHERE id`).
+		WithArgs(stateWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("degraded"))
+
+	w := httptest.NewRecorder()
+	c := stateReq(w, "Bearer good")
+	handler.State(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["status"] != "degraded" {
+		t.Errorf("status should be 'degraded', got %v", body["status"])
+	}
+}
