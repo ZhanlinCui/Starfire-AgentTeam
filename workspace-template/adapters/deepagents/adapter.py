@@ -88,6 +88,13 @@ class DeepAgentsAdapter(BaseAdapter):
                 openai_api_key=os.environ.get("CEREBRAS_API_KEY", ""),
                 openai_api_base="https://api.cerebras.ai/v1",
             )
+        elif provider == "qianfan":
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model=model_name,
+                openai_api_key=os.environ.get("QIANFAN_API_KEY", os.environ.get("AISTUDIO_API_KEY", "")),
+                openai_api_base="https://qianfan.baidubce.com/v2",
+            )
         elif provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
             kwargs = {"model": model_name}
