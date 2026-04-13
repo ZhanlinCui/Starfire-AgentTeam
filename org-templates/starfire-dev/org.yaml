@@ -153,7 +153,22 @@ workspaces:
               5. Use commit_memory to save CI pipeline structure
               6. Wait for tasks from Dev Lead.
           - name: Security Auditor
-            role: Security auditing and vulnerability assessment
+            role: >-
+              Owns security posture across the full stack: Go/Gin handlers
+              (SQL injection, path traversal, command injection, missing access
+              control), Python workspace-template (RCE via subprocess, secrets
+              in env/logs), Canvas (XSS in user-rendered content), and
+              infrastructure (Docker socket exposure, secrets in images).
+              Runs SAST via `gosec ./...` on every PR-touching Go file and
+              `bandit -r .` on Python. Performs DAST checks against the running
+              platform (`POST /workspaces/:id/a2a` CanCommunicate bypass
+              attempts, CORS header validation, rate-limit enforcement).
+              Escalates to Dev Lead immediately for: any SQL injection or RCE
+              vector, leaked secrets in committed code, missing auth on a new
+              endpoint. Files weekly summary to memory key
+              `security-audit-latest`. Definition of done: every changed file
+              reviewed, gosec/bandit clean (or false-positives annotated),
+              no open critical findings without a linked issue.
             tier: 3
             model: opus
             files_dir: security-auditor
