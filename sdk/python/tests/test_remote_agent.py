@@ -7,13 +7,14 @@ in a third-party mock library.
 from __future__ import annotations
 
 import stat
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from starfire_agent import RemoteAgentClient, WorkspaceState
+from starfire_agent import PeerInfo, RemoteAgentClient, WorkspaceState
 
 
 # ---------------------------------------------------------------------------
@@ -343,3 +344,185 @@ def test_workspace_state_should_stop_semantics():
     assert WorkspaceState("w", "degraded", False, False).should_stop is False
     assert WorkspaceState("w", "paused", True, False).should_stop is True
     assert WorkspaceState("w", "removed", False, True).should_stop is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 30.6 — sibling URL cache + call_peer
+# ---------------------------------------------------------------------------
+
+def test_get_peers_seeds_cache(client: RemoteAgentClient):
+    client.save_token("t")
+    client._session.get.return_value = FakeResponse(200, [
+        {"id": "sibling-1", "name": "Research", "url": "http://10.0.0.5:8000", "role": "researcher", "tier": 2, "status": "online"},
+        {"id": "sibling-2", "name": "Dev",      "url": "http://10.0.0.6:8000", "role": "developer",  "tier": 2, "status": "online"},
+    ])
+
+    peers = client.get_peers()
+
+    assert len(peers) == 2
+    assert peers[0].id == "sibling-1"
+    assert peers[0].name == "Research"
+    assert peers[0].url == "http://10.0.0.5:8000"
+    # Cache seeded for both
+    assert client._url_cache["sibling-1"][0] == "http://10.0.0.5:8000"
+    assert client._url_cache["sibling-2"][0] == "http://10.0.0.6:8000"
+    # Request included bearer + X-Workspace-ID
+    headers = client._session.get.call_args[1]["headers"]
+    assert headers["Authorization"] == "Bearer t"
+    assert headers["X-Workspace-ID"] == "ws-abc-123"
+
+
+def test_get_peers_skips_non_http_urls_in_cache(client: RemoteAgentClient):
+    """Cache seed only accepts http(s); the 'remote://no-inbound' placeholder
+    for remote agents without inbound servers must not poison the cache."""
+    client.save_token("t")
+    client._session.get.return_value = FakeResponse(200, [
+        {"id": "sib-remote", "name": "Remote", "url": "remote://no-inbound"},
+        {"id": "sib-http",   "name": "HTTP",   "url": "http://192.168.1.7:8000"},
+    ])
+
+    client.get_peers()
+
+    assert "sib-remote" not in client._url_cache
+    assert "sib-http" in client._url_cache
+
+
+def test_discover_peer_cache_hit(client: RemoteAgentClient):
+    client._url_cache["sib-x"] = ("http://cached.url:8000", time.time() + 60)
+
+    url = client.discover_peer("sib-x")
+
+    assert url == "http://cached.url:8000"
+    # No network call
+    client._session.get.assert_not_called()
+
+
+def test_discover_peer_cache_miss_hits_platform(client: RemoteAgentClient):
+    client.save_token("t")
+    client._session.get.return_value = FakeResponse(
+        200, {"id": "sib-y", "url": "http://fresh.url:8000", "name": "Y"}
+    )
+
+    url = client.discover_peer("sib-y")
+
+    assert url == "http://fresh.url:8000"
+    assert client._url_cache["sib-y"][0] == "http://fresh.url:8000"
+    # Request used discover endpoint
+    called_url = client._session.get.call_args[0][0]
+    assert "/registry/discover/sib-y" in called_url
+
+
+def test_discover_peer_expired_cache_refreshes(client: RemoteAgentClient, monkeypatch):
+    # Cache entry already expired
+    client._url_cache["sib-stale"] = ("http://stale.url", time.time() - 10)
+    client.save_token("t")
+    client._session.get.return_value = FakeResponse(
+        200, {"url": "http://fresh.url:9000"}
+    )
+
+    url = client.discover_peer("sib-stale")
+
+    assert url == "http://fresh.url:9000"
+    # Cache replaced with fresh entry
+    assert client._url_cache["sib-stale"][0] == "http://fresh.url:9000"
+
+
+def test_discover_peer_404_returns_none(client: RemoteAgentClient):
+    client.save_token("t")
+    client._session.get.return_value = FakeResponse(404, {"error": "not found"})
+    assert client.discover_peer("missing") is None
+
+
+def test_invalidate_peer_url_drops_cache_entry(client: RemoteAgentClient):
+    client._url_cache["sib-x"] = ("http://x", time.time() + 100)
+    client.invalidate_peer_url("sib-x")
+    assert "sib-x" not in client._url_cache
+    # Idempotent — second call is safe
+    client.invalidate_peer_url("sib-x")
+
+
+def test_call_peer_direct_path_on_cache_hit(client: RemoteAgentClient):
+    client.save_token("t")
+    client._url_cache["sib"] = ("http://direct.peer:8000", time.time() + 60)
+
+    client._session.post.return_value = FakeResponse(
+        200, {"jsonrpc": "2.0", "id": "x", "result": {"ok": True}}
+    )
+
+    out = client.call_peer("sib", "hello sibling")
+
+    assert out["result"]["ok"] is True
+    # Exactly ONE post: direct to the cached URL, not through proxy
+    assert client._session.post.call_count == 1
+    called_url = client._session.post.call_args[0][0]
+    assert called_url == "http://direct.peer:8000"
+    body = client._session.post.call_args[1]["json"]
+    assert body["method"] == "message/send"
+    assert body["params"]["message"]["parts"][0]["text"] == "hello sibling"
+    headers = client._session.post.call_args[1]["headers"]
+    assert headers["X-Workspace-ID"] == "ws-abc-123"
+
+
+def test_call_peer_falls_back_to_proxy_on_direct_error(client: RemoteAgentClient):
+    client.save_token("t")
+    client._url_cache["sib"] = ("http://dead.peer:8000", time.time() + 60)
+
+    # First post (direct): connection error. Second post (proxy): success.
+    client._session.post.side_effect = [
+        ConnectionError("unreachable"),
+        FakeResponse(200, {"jsonrpc": "2.0", "result": {"via": "proxy"}}),
+    ]
+
+    out = client.call_peer("sib", "hello")
+
+    assert out["result"]["via"] == "proxy"
+    assert client._session.post.call_count == 2
+    # Direct URL was invalidated so next call re-discovers
+    assert "sib" not in client._url_cache
+    # Second call went to /workspaces/sib/a2a
+    proxy_url = client._session.post.call_args_list[1][0][0]
+    assert "/workspaces/sib/a2a" in proxy_url
+
+
+def test_call_peer_proxy_only_when_prefer_direct_false(client: RemoteAgentClient):
+    client.save_token("t")
+    client._url_cache["sib"] = ("http://direct.peer:8000", time.time() + 60)
+
+    client._session.post.return_value = FakeResponse(
+        200, {"jsonrpc": "2.0", "result": {"via": "proxy-only"}}
+    )
+
+    client.call_peer("sib", "hello", prefer_direct=False)
+
+    # Exactly one post — went straight to proxy despite cache hit
+    assert client._session.post.call_count == 1
+    assert "/workspaces/sib/a2a" in client._session.post.call_args[0][0]
+
+
+def test_call_peer_no_cached_url_uses_discover_then_direct(client: RemoteAgentClient):
+    """Fresh call: no cache entry → discover via GET, then direct POST to the
+    returned URL. Tests the full discover-then-call sequence in one shot."""
+    client.save_token("t")
+    # discover returns a URL
+    client._session.get.return_value = FakeResponse(
+        200, {"url": "http://newly-discovered:9000"}
+    )
+    # direct post succeeds
+    client._session.post.return_value = FakeResponse(
+        200, {"jsonrpc": "2.0", "result": {"ok": True}}
+    )
+
+    out = client.call_peer("new-sib", "hi")
+
+    assert out["result"]["ok"] is True
+    assert client._url_cache["new-sib"][0] == "http://newly-discovered:9000"
+    called_url = client._session.post.call_args[0][0]
+    assert called_url == "http://newly-discovered:9000"
+
+
+def test_peer_info_dataclass_defaults():
+    p = PeerInfo(id="x", name="y", url="http://z")
+    assert p.role == ""
+    assert p.tier == 2
+    assert p.status == "unknown"
+    assert p.agent_card == {}
