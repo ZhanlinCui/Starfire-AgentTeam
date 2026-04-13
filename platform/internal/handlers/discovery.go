@@ -56,15 +56,24 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 		var wsName, wsRuntime string
 		db.DB.QueryRowContext(ctx, `SELECT COALESCE(name,''), COALESCE(runtime,'langgraph') FROM workspaces WHERE id = $1`, targetID).Scan(&wsName, &wsRuntime)
 
-		// External workspaces: return their URL rewritten for Docker container access
+		// External workspaces: return their registered URL.
+		// Rewrite 127.0.0.1/localhost → host.docker.internal ONLY when the
+		// caller itself is a Docker container; a remote (external) caller
+		// lives on the other side of the wire and needs the URL as-is
+		// (localhost rewrites wouldn't resolve from its host anyway).
+		// Phase 30.6.
 		if wsRuntime == "external" {
 			var wsURL string
 			db.DB.QueryRowContext(ctx, `SELECT COALESCE(url,'') FROM workspaces WHERE id = $1`, targetID).Scan(&wsURL)
 			if wsURL != "" {
-				// Rewrite 127.0.0.1 → host.docker.internal so containers can reach the host
-				dockerURL := strings.Replace(wsURL, "127.0.0.1", "host.docker.internal", 1)
-				dockerURL = strings.Replace(dockerURL, "localhost", "host.docker.internal", 1)
-				c.JSON(http.StatusOK, gin.H{"id": targetID, "url": dockerURL, "name": wsName})
+				outURL := wsURL
+				var callerRuntime string
+				db.DB.QueryRowContext(ctx, `SELECT COALESCE(runtime,'langgraph') FROM workspaces WHERE id = $1`, callerID).Scan(&callerRuntime)
+				if callerRuntime != "external" {
+					outURL = strings.Replace(outURL, "127.0.0.1", "host.docker.internal", 1)
+					outURL = strings.Replace(outURL, "localhost", "host.docker.internal", 1)
+				}
+				c.JSON(http.StatusOK, gin.H{"id": targetID, "url": outURL, "name": wsName})
 				return
 			}
 		}
