@@ -44,6 +44,20 @@ Environment:
 	root.AddCommand(buildEventsCmd())
 	root.AddCommand(buildRegistryCmd())
 
+	// 100% platform coverage: operator subcommands + raw escape hatch.
+	root.AddCommand(buildAPICmd())
+	root.AddCommand(buildPluginCmd())
+	root.AddCommand(buildSecretCmd())
+	root.AddCommand(buildScheduleCmd())
+	root.AddCommand(buildChannelCmd())
+	root.AddCommand(buildApprovalCmd())
+	root.AddCommand(buildDelegationCmd())
+	root.AddCommand(buildBundleCmd())
+	root.AddCommand(buildOrgCmd())
+	root.AddCommand(buildTracesCmd())
+	root.AddCommand(buildActivityCmd())
+	root.AddCommand(buildHMAMemoryCmd())
+
 	return root
 }
 
