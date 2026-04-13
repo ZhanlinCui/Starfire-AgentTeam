@@ -10,6 +10,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// defaultMemoryNamespace is used when a caller omits the field on POST or
+// when querying for memories written before migration 017. Matches the
+// column default in platform/migrations/017_memories_fts_namespace.up.sql.
+const defaultMemoryNamespace = "general"
+
+// memoryFTSMinQueryLen is the shortest query length that gets Postgres
+// full-text search treatment. Anything shorter uses ILIKE because
+// tsvector requires at least one token and single characters tokenise
+// to nothing in the 'english' config.
+const memoryFTSMinQueryLen = 2
+
 type MemoriesHandler struct{}
 
 func NewMemoriesHandler() *MemoriesHandler {
@@ -17,14 +28,18 @@ func NewMemoriesHandler() *MemoriesHandler {
 }
 
 // Commit handles POST /workspaces/:id/memories
-// Stores a memory fact with a scope (LOCAL, TEAM, GLOBAL).
+// Stores a memory fact with a scope (LOCAL, TEAM, GLOBAL) and an optional
+// namespace (defaults to "general"). Namespaces implement the Holaboss
+// knowledge/{facts,procedures,blockers,reference}/ pattern so agents can
+// file and recall memories by category.
 func (h *MemoriesHandler) Commit(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
 	var body struct {
-		Content string `json:"content" binding:"required"`
-		Scope   string `json:"scope" binding:"required"` // LOCAL, TEAM, GLOBAL
+		Content   string `json:"content" binding:"required"`
+		Scope     string `json:"scope" binding:"required"` // LOCAL, TEAM, GLOBAL
+		Namespace string `json:"namespace,omitempty"`      // optional; defaults to "general"
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -33,6 +48,15 @@ func (h *MemoriesHandler) Commit(c *gin.Context) {
 
 	if body.Scope != "LOCAL" && body.Scope != "TEAM" && body.Scope != "GLOBAL" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be LOCAL, TEAM, or GLOBAL"})
+		return
+	}
+
+	namespace := body.Namespace
+	if namespace == "" {
+		namespace = defaultMemoryNamespace
+	}
+	if len(namespace) > 50 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "namespace must be <= 50 characters"})
 		return
 	}
 
@@ -48,24 +72,31 @@ func (h *MemoriesHandler) Commit(c *gin.Context) {
 
 	var memoryID string
 	err := db.DB.QueryRowContext(ctx, `
-		INSERT INTO agent_memories (workspace_id, content, scope)
-		VALUES ($1, $2, $3) RETURNING id
-	`, workspaceID, body.Content, body.Scope).Scan(&memoryID)
+		INSERT INTO agent_memories (workspace_id, content, scope, namespace)
+		VALUES ($1, $2, $3, $4) RETURNING id
+	`, workspaceID, body.Content, body.Scope, namespace).Scan(&memoryID)
 	if err != nil {
 		log.Printf("Commit memory error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store memory"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"id": memoryID, "scope": body.Scope})
+	c.JSON(http.StatusCreated, gin.H{"id": memoryID, "scope": body.Scope, "namespace": namespace})
 }
 
 // Search handles GET /workspaces/:id/memories
 // Searches memories visible to the requesting workspace.
+//
+// Supports:
+//   - ?scope=LOCAL|TEAM|GLOBAL for access-control slicing
+//   - ?q=... full-text search (ts_rank ordered) when len>=memoryFTSMinQueryLen;
+//     falls back to ILIKE for shorter strings
+//   - ?namespace=... additional filter on the Holaboss-style namespace tag
 func (h *MemoriesHandler) Search(c *gin.Context) {
 	workspaceID := c.Param("id")
 	scope := c.DefaultQuery("scope", "")
 	query := c.DefaultQuery("q", "")
+	namespace := c.DefaultQuery("namespace", "")
 	ctx := c.Request.Context()
 
 	// Get workspace info for access control
@@ -79,14 +110,14 @@ func (h *MemoriesHandler) Search(c *gin.Context) {
 	switch scope {
 	case "LOCAL":
 		// Only this workspace's memories
-		sqlQuery = `SELECT id, workspace_id, content, scope, created_at FROM agent_memories WHERE workspace_id = $1 AND scope = 'LOCAL'`
+		sqlQuery = `SELECT id, workspace_id, content, scope, namespace, created_at FROM agent_memories WHERE workspace_id = $1 AND scope = 'LOCAL'`
 		args = []interface{}{workspaceID}
 
 	case "TEAM":
 		// Team = self + parent + siblings (same parent_id)
 		if parentID != nil {
 			// Child workspace: team is parent + siblings sharing same parent_id
-			sqlQuery = `SELECT m.id, m.workspace_id, m.content, m.scope, m.created_at
+			sqlQuery = `SELECT m.id, m.workspace_id, m.content, m.scope, m.namespace, m.created_at
 				FROM agent_memories m
 				JOIN workspaces w ON w.id = m.workspace_id
 				WHERE m.scope = 'TEAM' AND w.status != 'removed'
@@ -94,7 +125,7 @@ func (h *MemoriesHandler) Search(c *gin.Context) {
 			args = []interface{}{*parentID}
 		} else {
 			// Root workspace: team is self + direct children only
-			sqlQuery = `SELECT m.id, m.workspace_id, m.content, m.scope, m.created_at
+			sqlQuery = `SELECT m.id, m.workspace_id, m.content, m.scope, m.namespace, m.created_at
 				FROM agent_memories m
 				JOIN workspaces w ON w.id = m.workspace_id
 				WHERE m.scope = 'TEAM' AND w.status != 'removed'
@@ -104,22 +135,43 @@ func (h *MemoriesHandler) Search(c *gin.Context) {
 
 	case "GLOBAL":
 		// All GLOBAL memories (readable by everyone)
-		sqlQuery = `SELECT id, workspace_id, content, scope, created_at FROM agent_memories WHERE scope = 'GLOBAL'`
+		sqlQuery = `SELECT id, workspace_id, content, scope, namespace, created_at FROM agent_memories WHERE scope = 'GLOBAL'`
 		args = []interface{}{}
 
 	default:
 		// All accessible memories
-		sqlQuery = `SELECT id, workspace_id, content, scope, created_at FROM agent_memories WHERE workspace_id = $1`
+		sqlQuery = `SELECT id, workspace_id, content, scope, namespace, created_at FROM agent_memories WHERE workspace_id = $1`
 		args = []interface{}{workspaceID}
 	}
 
-	// Add text search if query provided
-	if query != "" {
-		sqlQuery += ` AND content ILIKE $` + nextArg(len(args))
+	// Namespace filter (optional) — applies regardless of scope.
+	if namespace != "" {
+		sqlQuery += ` AND namespace = ` + nextArg(len(args))
+		args = append(args, namespace)
+	}
+
+	// Text search: FTS with ts_rank ordering for multi-char queries,
+	// ILIKE fallback for 1-char and empty-after-tokenization edge cases.
+	// ILIKE path is preserved as the secondary ORDER BY tie-breaker is
+	// still created_at DESC so empty-tsvector rows don't leak to the top.
+	ftsActive := false
+	if len(query) >= memoryFTSMinQueryLen {
+		sqlQuery += ` AND content_tsv @@ plainto_tsquery('english', ` + nextArg(len(args)) + `)`
+		args = append(args, query)
+		ftsActive = true
+	} else if query != "" {
+		sqlQuery += ` AND content ILIKE ` + nextArg(len(args))
 		args = append(args, "%"+query+"%")
 	}
 
-	sqlQuery += ` ORDER BY created_at DESC LIMIT 50`
+	if ftsActive {
+		// Rank FTS hits first, tie-break by recency.
+		sqlQuery += ` ORDER BY ts_rank(content_tsv, plainto_tsquery('english', ` + nextArg(len(args)) + `)) DESC, created_at DESC`
+		args = append(args, query)
+	} else {
+		sqlQuery += ` ORDER BY created_at DESC`
+	}
+	sqlQuery += ` LIMIT 50`
 
 	rows, err := db.DB.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
@@ -131,8 +183,8 @@ func (h *MemoriesHandler) Search(c *gin.Context) {
 
 	memories := make([]map[string]interface{}, 0)
 	for rows.Next() {
-		var id, wsID, content, memScope, createdAt string
-		if rows.Scan(&id, &wsID, &content, &memScope, &createdAt) != nil {
+		var id, wsID, content, memScope, memNS, createdAt string
+		if rows.Scan(&id, &wsID, &content, &memScope, &memNS, &createdAt) != nil {
 			continue
 		}
 
@@ -148,6 +200,7 @@ func (h *MemoriesHandler) Search(c *gin.Context) {
 			"workspace_id": wsID,
 			"content":      content,
 			"scope":        memScope,
+			"namespace":    memNS,
 			"created_at":   createdAt,
 		})
 	}
