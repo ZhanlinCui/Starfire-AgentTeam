@@ -515,6 +515,59 @@ builders; Starfire users are developers building agent companies.
 **Last reviewed:** 2026-04-13 · **Stars / activity:** ~217 ⭐, 63 forks, v2.3.7 pushed Apr 13 2026
 ---
 
+### Sierra — `sierra.ai` *(commercial, no public repo)*
+
+**Pitch:** "AI agents for customer service — production-grade conversational AI that handles complex customer issues end-to-end without human escalation."
+
+**Shape:** Enterprise SaaS (YC-backed, ~$4B valuation, 2024). Sierra builds custom AI agents for specific companies (Sonos, Weight Watchers, OluKai) rather than a general-purpose platform. Each deployment is a brand-trained agent that handles returns, account management, troubleshooting, and purchasing through multi-turn natural-language conversation. No self-serve tier; sold via enterprise contract. Backed by Bret Taylor and Clay Bavor (ex-Google). No public SDK or API.
+
+**Overlap with us:** Both are "agents with persistent state and human-readable conversation history." Sierra's agent architecture (multi-turn session, tool calls to CRMs/ERPs, escalation triggers) is the same shape as a Starfire workspace with A2A access to backend tools. Sierra targets the customer-service vertical; Starfire targets engineering teams. Same underlying pattern, radically different buyer.
+
+**Differentiation:** Sierra is a fully managed, vertically specialized offering — customers buy a branded agent, not a platform. Starfire sells the platform and lets teams compose their own agents. Sierra has no org hierarchy, no multi-agent orchestration within a session, no developer API. Starfire has no trained vertical-specific knowledge, no out-of-box CRM/ERP connectors, no customer service SLA guarantees. Sierra's moat is vertical depth + enterprise trust; ours is composability + developer control.
+
+**Worth borrowing:**
+- **Agent personality/brand layer** — Sierra's agents adopt a company's tone, policies, and vocabulary as a first-class config layer. Our `SOUL.md` convention in the OpenClaw adapter is the nearest equivalent; worth generalising as a platform concept (a "persona" config block in org.yaml that injects brand voice into every system-prompt).
+- **Escalation to human** — Sierra has a defined handoff protocol when confidence drops or the issue requires a human. Our `approvals` table covers the "pause for review" pattern; a formal escalation tool (create a ticket, notify a human via channel) is missing.
+
+**Terminology collisions:**
+- "agent" — Sierra: a deployed brand-trained assistant. Ours: a Docker workspace with a role. Conceptually adjacent, not interchangeable.
+- "session" — Sierra: one customer conversation. Ours: not a first-class concept.
+
+**Signals to react to:**
+- If Sierra opens a developer API or self-serve tier → they enter our addressable market for teams that want a customer-facing agent alongside their internal engineering agents.
+- If Sierra raises another round or announces a platform play → they may be building the platform we're building, just starting from the customer service vertical rather than engineering.
+- Enterprise buyers comparing us to Sierra → emphasize Starfire's programmability and multi-agent composition vs Sierra's closed vertical depth.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** commercial SaaS, ~$4B valuation, no public repo
+
+---
+
+### ERNIE / Baidu LLM line — `qianfan.baidubce.com`
+
+**Pitch:** Baidu's family of large language models — ERNIE 4.5, ERNIE Speed, ERNIE Lite — available via the Qianfan platform with OpenAI-compatible endpoints. Primary model provider for the Chinese-market hackathon ecosystem and the cheapest LLM option for Starfire sub-agents given available free credits.
+
+**Shape:** Cloud API (Baidu Cloud). ERNIE models span capability tiers: ERNIE 4.5 (flagship, strong reasoning), ERNIE Speed (fast, cost-efficient), ERNIE Lite (cheapest, for low-stakes tasks). Accessed via `https://qianfan.baidubce.com/v2` with OpenAI-compat JSON format. Auth: `QIANFAN_API_KEY` (standard) or `AISTUDIO_API_KEY` (via Google AI Studio compat layer at `https://generativelanguage.googleapis.com/v1beta/openai`). Not a competitor; it's infrastructure.
+
+**Overlap with us:** Starfire now has `AISTUDIO_API_KEY` and `QIANFAN_API_KEY` as recognised adapter keys (openclaw adapter fix, SHA d779e16). The MeDo hackathon integration targets the Baidu Cloud ecosystem, making ERNIE models the natural default for hackathon workspaces. ERNIE Speed / ERNIE Lite are cost candidates for Research Lead and Market Analyst sub-agents where we don't need Opus-class reasoning.
+
+**Differentiation:** ERNIE is a model line, not a platform. No agents, no orchestration, no workflow. Starfire is the platform; ERNIE is one of many possible backends. The entry here is about when to route to ERNIE rather than Anthropic or OpenAI.
+
+**Worth borrowing:**
+- **Tiered model routing by task complexity** — ERNIE's Speed/Lite/4.5 tiers make explicit the "pick the cheapest model that can do the job" principle. Starfire's PM could route shallow research tasks (keyword search, web fetch) to ERNIE Lite and deep reasoning tasks (code review, architecture analysis) to Claude Opus. A `model_policy` field in org.yaml per-workspace would encode this without hard-coding model IDs.
+- **Qianfan model hub metadata** — the Qianfan API surfaces context window, pricing, and availability per model in a machine-readable format. Worth scraping for a Starfire model registry that shows operators the cost/capability tradeoff at provisioning time.
+
+**Terminology collisions:**
+- "knowledge base" — Baidu Qianfan's knowledge base feature (RAG pipeline) vs our `agent_memories` table. Overlapping concept; their offering is more mature on retrieval.
+
+**Signals to react to:**
+- If `QIANFAN_API_KEY` free credit expires → swap hackathon sub-agents back to `AISTUDIO_API_KEY` + Gemini Flash.
+- If ERNIE 4.5 closes the gap with Claude Sonnet on English-language reasoning → evaluate as a cost-saving default for non-PM workspaces.
+- If Baidu opens ERNIE function-calling / tool-use parity with GPT-4o → ERNIE becomes viable for the Backend Engineer and QA Engineer workspaces, which require reliable structured output.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** commercial API (Baidu Cloud), ERNIE 4.5 released Q1 2026
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
