@@ -40,7 +40,9 @@ the class into this module.
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from .protocol import SKILLS_SUBDIR, InstallContext, InstallResult
@@ -157,6 +159,28 @@ class AgentskillsAdaptor:
                         result.files_written.append(str(p.relative_to(ctx.configs_dir)))
             if copied:
                 ctx.logger.info("%s: copied %d skill dir(s) to %s", self.plugin_name, copied, dst_skills_root)
+
+        # 4. Setup script — run setup.sh if present (for npm/pip dependencies).
+        # Mirrors sdk/python/starfire_plugin/builtins.py — must stay in sync
+        # (drift guard: tests/test_plugins_builtins_drift.py).
+        setup_script = ctx.plugin_root / "setup.sh"
+        if setup_script.is_file():
+            ctx.logger.info("%s: running setup.sh", self.plugin_name)
+            try:
+                proc = subprocess.run(
+                    ["bash", str(setup_script)],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=str(ctx.plugin_root),
+                    env={**os.environ, "CONFIGS_DIR": str(ctx.configs_dir)},
+                )
+                if proc.returncode == 0:
+                    ctx.logger.info("%s: setup.sh completed successfully", self.plugin_name)
+                else:
+                    result.warnings.append(f"setup.sh exited {proc.returncode}: {proc.stderr[:200]}")
+                    ctx.logger.warning("%s: setup.sh failed: %s", self.plugin_name, proc.stderr[:200])
+            except subprocess.TimeoutExpired:
+                result.warnings.append("setup.sh timed out (120s)")
+                ctx.logger.warning("%s: setup.sh timed out", self.plugin_name)
 
         return result
 

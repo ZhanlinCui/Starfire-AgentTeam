@@ -318,3 +318,78 @@ async def test_base_adapter_memory_filename_override_flows_through_install(tmp_p
     assert (configs / "AGENTS.md").exists()
     assert "# Plugin: my-plugin /" in (configs / "AGENTS.md").read_text()
     assert not (configs / "CLAUDE.md").exists()
+
+
+# ---------- setup.sh hook ----------------------------------------------------
+
+async def test_setup_sh_runs_with_configs_dir_env(tmp_path: Path):
+    """setup.sh in plugin root must execute with CONFIGS_DIR exported and
+    cwd at plugin_root. Marker file proves the hook ran."""
+    plugin = tmp_path / "p"
+    (plugin / "skills" / "s1").mkdir(parents=True)
+    (plugin / "skills" / "s1" / "SKILL.md").write_text("---\nname: s1\ndescription: d\n---\n")
+    setup = plugin / "setup.sh"
+    setup.write_text(
+        '#!/bin/bash\nset -e\n'
+        'echo "ran from $PWD" > "$CONFIGS_DIR/setup-trace.txt"\n'
+    )
+    setup.chmod(0o755)
+    configs = tmp_path / "configs"
+    configs.mkdir()
+
+    result = await AgentskillsAdaptor("p", "claude_code").install(_make_ctx(configs, plugin))
+
+    trace = configs / "setup-trace.txt"
+    assert trace.is_file(), "setup.sh did not run"
+    assert str(plugin) in trace.read_text(), "setup.sh did not run with cwd=plugin_root"
+    assert result.warnings == [], "successful setup must not warn"
+
+
+async def test_setup_sh_nonzero_exit_records_warning_does_not_raise(tmp_path: Path):
+    """A failing setup.sh must NOT abort install — skills/rules still land,
+    the failure is surfaced as a warning on InstallResult."""
+    plugin = tmp_path / "p"
+    plugin.mkdir()
+    setup = plugin / "setup.sh"
+    setup.write_text('#!/bin/bash\necho "boom" >&2\nexit 7\n')
+    setup.chmod(0o755)
+    configs = tmp_path / "configs"
+    configs.mkdir()
+
+    result = await AgentskillsAdaptor("p", "claude_code").install(_make_ctx(configs, plugin))
+
+    assert result.warnings, "non-zero exit must produce a warning"
+    assert "exited 7" in result.warnings[0]
+    assert "boom" in result.warnings[0]
+
+
+async def test_setup_sh_timeout_records_warning(tmp_path: Path, monkeypatch):
+    """A hanging setup.sh must be killed after the bounded timeout and
+    surfaced as a warning — not allowed to wedge install indefinitely."""
+    import subprocess as _sp
+    plugin = tmp_path / "p"
+    plugin.mkdir()
+    (plugin / "setup.sh").write_text("#!/bin/bash\nsleep 999\n")
+    (plugin / "setup.sh").chmod(0o755)
+    configs = tmp_path / "configs"
+    configs.mkdir()
+
+    def _raise_timeout(*a, **kw):
+        raise _sp.TimeoutExpired(cmd=a[0], timeout=120)
+    monkeypatch.setattr("plugins_registry.builtins.subprocess.run", _raise_timeout)
+
+    result = await AgentskillsAdaptor("p", "claude_code").install(_make_ctx(configs, plugin))
+
+    assert any("timed out" in w for w in result.warnings)
+
+
+async def test_setup_sh_absent_no_warning(tmp_path: Path):
+    """No setup.sh → no hook executed, no warnings."""
+    plugin = tmp_path / "p"
+    plugin.mkdir()
+    configs = tmp_path / "configs"
+    configs.mkdir()
+
+    result = await AgentskillsAdaptor("p", "claude_code").install(_make_ctx(configs, plugin))
+
+    assert result.warnings == []
