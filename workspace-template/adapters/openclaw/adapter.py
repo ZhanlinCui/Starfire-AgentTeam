@@ -80,16 +80,24 @@ class OpenClawAdapter(BaseAdapter):
                 )
             logger.info("OpenClaw CLI installed")
 
-        # 2. Resolve API key and model
-        api_key = os.environ.get("OPENAI_API_KEY", os.environ.get("GROQ_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")))
-        # Determine provider URL from model prefix
-        provider_urls = {
-            "openai": "https://api.openai.com/v1",
-            "groq": "https://api.groq.com/openai/v1",
-            "openrouter": "https://openrouter.ai/api/v1",
-        }
-        prefix = config.model.split(":")[0] if ":" in config.model else "openai"
-        provider_url = config.runtime_config.get("provider_url", provider_urls.get(prefix, "https://api.openai.com/v1"))
+        # 2. Resolve API key and provider URL.
+        # Check all recognised env vars in priority order so that Baidu hackathon
+        # keys (AISTUDIO_API_KEY, QIANFAN_API_KEY) work without requiring OPENROUTER_API_KEY.
+        _KEY_PROVIDERS = [
+            ("OPENAI_API_KEY",     "https://api.openai.com/v1"),
+            ("GROQ_API_KEY",       "https://api.groq.com/openai/v1"),
+            ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+            ("AISTUDIO_API_KEY",   "https://generativelanguage.googleapis.com/v1beta/openai"),
+            ("QIANFAN_API_KEY",    "https://qianfan.baidubce.com/v2"),
+        ]
+        api_key, auto_provider_url = "", "https://api.openai.com/v1"
+        for _env_var, _url in _KEY_PROVIDERS:
+            _val = os.environ.get(_env_var, "")
+            if _val:
+                api_key, auto_provider_url = _val, _url
+                logger.info("OpenClaw: using API key from %s → %s", _env_var, _url)
+                break
+        provider_url = config.runtime_config.get("provider_url", auto_provider_url)
         model = config.model
         if ":" in model:
             _, model = model.split(":", 1)
