@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -90,6 +91,39 @@ var a2aClient = &http.Client{}
 type proxyA2AError struct {
 	Status   int
 	Response gin.H
+	// Optional response headers (e.g. Retry-After on 503-busy). Kept separate
+	// from Response so the handler can set real HTTP headers, not just JSON.
+	Headers map[string]string
+}
+
+// busyRetryAfterSeconds is the Retry-After hint returned with 503-busy
+// responses when an upstream workspace agent is overloaded (single-threaded
+// mid-synthesis). Chosen to be long enough for typical PM synthesis work
+// to complete but short enough that a caller's retry loop won't stall
+// coordination. See issue #110.
+const busyRetryAfterSeconds = 30
+
+// isUpstreamBusyError classifies an http.Client.Do error as a transient
+// "upstream busy" condition — a timeout or connection-reset while the
+// container is still alive. Distinguishes legitimate busy-agent failures
+// from fatal network errors so callers can retry with Retry-After.
+func isUpstreamBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	// url.Error wraps "read tcp … EOF" and "Post …: context deadline
+	// exceeded" strings from the stdlib HTTP client without typing the
+	// inner cause. Fall back to substring match for those.
+	msg := err.Error()
+	return strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "connection reset")
 }
 
 func (e *proxyA2AError) Error() string {
@@ -140,6 +174,9 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 
 	status, respBody, proxyErr := h.proxyA2ARequest(ctx, workspaceID, body, c.GetHeader("X-Workspace-ID"), true)
 	if proxyErr != nil {
+		for k, v := range proxyErr.Headers {
+			c.Header(k, v)
+		}
 		c.JSON(proxyErr.Status, proxyErr.Response)
 		return
 	}
@@ -327,6 +364,23 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 			return 0, nil, &proxyA2AError{
 				Status:   http.StatusServiceUnavailable,
 				Response: gin.H{"error": "workspace agent unreachable — container restart triggered", "restarting": true},
+			}
+		}
+		// Container is alive but upstream Do() failed with a timeout/EOF-
+		// shaped error — the agent is most likely mid-synthesis on a
+		// previous request (single-threaded main loop). Surface as 503
+		// Busy with a Retry-After hint so callers can distinguish this
+		// from a real unreachable-agent (502) and retry with backoff.
+		// Issue #110.
+		if isUpstreamBusyError(err) {
+			return 0, nil, &proxyA2AError{
+				Status:   http.StatusServiceUnavailable,
+				Headers:  map[string]string{"Retry-After": strconv.Itoa(busyRetryAfterSeconds)},
+				Response: gin.H{
+					"error":       "workspace agent busy — retry after a short backoff",
+					"busy":        true,
+					"retry_after": busyRetryAfterSeconds,
+				},
 			}
 		}
 		return 0, nil, &proxyA2AError{
