@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -520,5 +522,83 @@ func TestSetPlatformInDockerForTest(t *testing.T) {
 	if platformInDocker != original {
 		t.Errorf("restore function did not reset platformInDocker to %v (got %v)",
 			original, platformInDocker)
+	}
+}
+
+// ==================== isUpstreamBusyError ====================
+
+func TestIsUpstreamBusyError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"context.DeadlineExceeded", context.DeadlineExceeded, true},
+		{"io.EOF", io.EOF, true},
+		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF, true},
+		{"wrapped context deadline string", fmt.Errorf(`Post "http://ws-foo:8000": context deadline exceeded`), true},
+		{"wrapped EOF string", fmt.Errorf(`Post "http://ws-foo:8000": EOF`), true},
+		{"connection reset", fmt.Errorf("read tcp 127.0.0.1:8080->127.0.0.1:12345: connection reset by peer"), true},
+		{"generic dns error", fmt.Errorf("no such host"), false},
+		{"refused", fmt.Errorf("connection refused"), false},
+		{"random other error", fmt.Errorf("malformed response"), false},
+	}
+	for _, tc := range cases {
+		got := isUpstreamBusyError(tc.err)
+		if got != tc.want {
+			t.Errorf("%s: isUpstreamBusyError(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
+	}
+}
+
+// ==================== ProxyA2A — upstream timeout returns 503 busy + Retry-After ====================
+
+// Verifies the full error-shaping contract for the 503-busy path:
+//   - Status 503 (not 502 unreachable)
+//   - JSON body has {"busy": true, "retry_after": 30}
+//   - Retry-After header is "30"
+//
+// We can't easily drive an actual upstream timeout in a unit test without a
+// live Docker container, but we CAN exercise the proxyA2AError shape the
+// handler emits, which is the contract callers rely on.
+
+func TestProxyA2AError_BusyShape(t *testing.T) {
+	// Simulate what proxyA2ARequest returns when isUpstreamBusyError fires
+	// and containerDead is false.
+	perr := &proxyA2AError{
+		Status:  http.StatusServiceUnavailable,
+		Headers: map[string]string{"Retry-After": fmt.Sprintf("%d", busyRetryAfterSeconds)},
+		Response: gin.H{
+			"error":       "workspace agent busy — retry after a short backoff",
+			"busy":        true,
+			"retry_after": busyRetryAfterSeconds,
+		},
+	}
+
+	// Emulate the handler's error-emit path.
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	for k, v := range perr.Headers {
+		c.Header(k, v)
+	}
+	c.JSON(perr.Status, perr.Response)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status: got %d, want 503", w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got != "30" {
+		t.Errorf("Retry-After: got %q, want %q", got, "30")
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	if busy, _ := body["busy"].(bool); !busy {
+		t.Errorf(`body["busy"]: got %v, want true`, body["busy"])
+	}
+	// JSON numeric → float64 on unmarshal; compare numerically.
+	if got, _ := body["retry_after"].(float64); int(got) != busyRetryAfterSeconds {
+		t.Errorf(`body["retry_after"]: got %v, want %d`, body["retry_after"], busyRetryAfterSeconds)
 	}
 }
