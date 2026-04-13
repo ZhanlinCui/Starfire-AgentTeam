@@ -343,3 +343,164 @@ func TestDelegationRetryDelay_IsSaneWindow(t *testing.T) {
 		t.Errorf("delegationRetryDelay = %v, expected [2s, 30s]", delegationRetryDelay)
 	}
 }
+
+// ---------- #64: Record + UpdateStatus endpoints ----------
+
+func TestDelegationRecord_InsertsActivityLogRow(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	h := NewDelegationHandler(wh, broadcaster)
+
+	mock.ExpectExec("INSERT INTO activity_logs").
+		WithArgs(
+			"550e8400-e29b-41d4-a716-446655440000",                // workspace_id
+			"550e8400-e29b-41d4-a716-446655440000",                // source_id
+			"550e8400-e29b-41d4-a716-446655440001",                // target_id
+			"Delegating to 550e8400-e29b-41d4-a716-446655440001",  // summary
+			sqlmock.AnyArg(),                                       // request_body (jsonb)
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// RecordAndBroadcast INSERT for DELEGATION_SENT
+	mock.ExpectExec("INSERT INTO structure_events").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"}}
+	body := `{"target_id":"550e8400-e29b-41d4-a716-446655440001","task":"hello","delegation_id":"del-xyz"}`
+	c.Request = httptest.NewRequest("POST", "/delegations/record", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.Record(c)
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["delegation_id"] != "del-xyz" {
+		t.Errorf("expected delegation_id=del-xyz, got %v", resp["delegation_id"])
+	}
+	if resp["status"] != "recorded" {
+		t.Errorf("expected status=recorded, got %v", resp["status"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestDelegationRecord_RejectsInvalidUUID(t *testing.T) {
+	setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	h := NewDelegationHandler(wh, broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"}}
+	body := `{"target_id":"not-a-uuid","task":"x","delegation_id":"del-1"}`
+	c.Request = httptest.NewRequest("POST", "/delegations/record", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.Record(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid target UUID, got %d", w.Code)
+	}
+}
+
+func TestDelegationUpdateStatus_CompletedInsertsResultRow(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	h := NewDelegationHandler(wh, broadcaster)
+
+	// updateDelegationStatus UPDATE
+	mock.ExpectExec("UPDATE activity_logs").
+		WithArgs("completed", "", "550e8400-e29b-41d4-a716-446655440000", "del-xyz").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// delegate_result INSERT
+	mock.ExpectExec("INSERT INTO activity_logs").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// DELEGATION_COMPLETE broadcast
+	mock.ExpectExec("INSERT INTO structure_events").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"},
+		{Key: "delegation_id", Value: "del-xyz"},
+	}
+	body := `{"status":"completed","response_preview":"task finished ok"}`
+	c.Request = httptest.NewRequest("POST", "/delegations/del-xyz/update", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.UpdateStatus(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestDelegationUpdateStatus_RejectsUnknownStatus(t *testing.T) {
+	setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	h := NewDelegationHandler(wh, broadcaster)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"},
+		{Key: "delegation_id", Value: "del-xyz"},
+	}
+	body := `{"status":"in_progress"}`
+	c.Request = httptest.NewRequest("POST", "/delegations/del-xyz/update", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.UpdateStatus(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestDelegationUpdateStatus_FailedBroadcastsFailureEvent(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	wh := NewWorkspaceHandler(broadcaster, nil, "http://localhost:8080", t.TempDir())
+	h := NewDelegationHandler(wh, broadcaster)
+
+	mock.ExpectExec("UPDATE activity_logs").
+		WithArgs("failed", "boom", "550e8400-e29b-41d4-a716-446655440000", "del-xyz").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// DELEGATION_FAILED broadcast
+	mock.ExpectExec("INSERT INTO structure_events").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"},
+		{Key: "delegation_id", Value: "del-xyz"},
+	}
+	body := `{"status":"failed","error":"boom"}`
+	c.Request = httptest.NewRequest("POST", "/delegations/del-xyz/update", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.UpdateStatus(c)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
