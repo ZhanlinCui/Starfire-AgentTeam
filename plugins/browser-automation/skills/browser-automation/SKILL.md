@@ -1,6 +1,6 @@
 ---
 id: browser-automation
-name: Browser Automation (puppeteer-core + CDP)
+name: browser-automation
 description: Connect to Chrome via CDP proxy to automate web interactions — posting, scraping, form filling. Uses puppeteer-core (no bundled Chromium).
 tags: [browser, puppeteer, cdp]
 ---
