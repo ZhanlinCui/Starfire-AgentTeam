@@ -18,6 +18,10 @@ func buildWSCmd() *cobra.Command {
 	ws.AddCommand(buildWSCreateCmd())
 	ws.AddCommand(buildWSUpdateCmd())
 	ws.AddCommand(buildWSDeleteCmd())
+	// Lifecycle ops (restart / pause / resume) — defined in cmd_ops.go
+	for _, c := range buildWSLifecycleCmds() {
+		ws.AddCommand(c)
+	}
 
 	return ws
 }

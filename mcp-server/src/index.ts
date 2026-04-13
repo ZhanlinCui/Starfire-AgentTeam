@@ -62,10 +62,14 @@ export async function handleCreateWorkspace(params: {
   template?: string;
   tier?: number;
   parent_id?: string;
+  runtime?: string;
+  workspace_dir?: string;
+  workspace_access?: "none" | "read_only" | "read_write"; // #65
 }) {
-  const { name, role, template, tier, parent_id } = params;
+  const { name, role, template, tier, parent_id, runtime, workspace_dir, workspace_access } = params;
   const data = await apiCall("POST", "/workspaces", {
-    name, role, template, tier, parent_id,
+    name, role, template, tier, parent_id, runtime,
+    workspace_dir, workspace_access,
     canvas: { x: Math.random() * 400 + 100, y: Math.random() * 300 + 100 },
   });
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -206,6 +210,8 @@ export async function handleUpdateWorkspace(params: {
   role?: string;
   tier?: number;
   parent_id?: string | null;
+  workspace_dir?: string;
+  workspace_access?: "none" | "read_only" | "read_write"; // #65
 }) {
   const { workspace_id, ...fields } = params;
   const data = await apiCall("PATCH", `/workspaces/${workspace_id}`, fields);
@@ -489,6 +495,239 @@ export async function handleAsyncDelegate(params: {
 
 export async function handleCheckDelegations(params: { workspace_id: string }) {
   const data = await apiCall("GET", `/workspaces/${params.workspace_id}/delegations`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// ============================================================
+// Coverage completion — additions to reach 100% platform parity
+// ============================================================
+
+// --- Delegations (#64: Record/UpdateStatus) ---
+
+export async function handleRecordDelegation(params: {
+  workspace_id: string;
+  target_id: string;
+  task: string;
+  delegation_id: string;
+}) {
+  const { workspace_id, ...body } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/delegations/record`, body);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleUpdateDelegationStatus(params: {
+  workspace_id: string;
+  delegation_id: string;
+  status: "completed" | "failed";
+  error?: string;
+  response_preview?: string;
+}) {
+  const { workspace_id, delegation_id, ...body } = params;
+  const data = await apiCall(
+    "POST",
+    `/workspaces/${workspace_id}/delegations/${delegation_id}/update`,
+    body,
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// --- Activity (POST /activity, POST /notify) ---
+
+export async function handleReportActivity(params: {
+  workspace_id: string;
+  activity_type: string;
+  method?: string;
+  summary?: string;
+  status?: string;
+  error_detail?: string;
+  request_body?: unknown;
+  response_body?: unknown;
+  duration_ms?: number;
+}) {
+  const { workspace_id, ...body } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/activity`, body);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleNotifyUser(params: {
+  workspace_id: string;
+  type: string;
+  [k: string]: unknown;
+}) {
+  const { workspace_id, ...body } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/notify`, body);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// --- Canvas viewport ---
+
+export async function handleGetViewport() {
+  const data = await apiCall("GET", "/canvas/viewport");
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleSetViewport(params: { x: number; y: number; zoom: number }) {
+  const data = await apiCall("PUT", "/canvas/viewport", params);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// --- Channels (platform-wide discover) ---
+
+export async function handleDiscoverChannelChats(params: {
+  type: string;
+  config: Record<string, unknown>;
+}) {
+  const data = await apiCall("POST", "/channels/discover", params);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// --- Plugins (sources, available, compatibility) ---
+
+export async function handleListPluginSources() {
+  const data = await apiCall("GET", "/plugins/sources");
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleListAvailablePlugins(params: { workspace_id: string }) {
+  const data = await apiCall("GET", `/workspaces/${params.workspace_id}/plugins/available`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleCheckPluginCompatibility(params: {
+  workspace_id: string;
+  runtime: string;
+}) {
+  const { workspace_id, runtime } = params;
+  const data = await apiCall(
+    "GET",
+    `/workspaces/${workspace_id}/plugins/compatibility?runtime=${encodeURIComponent(runtime)}`,
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// --- Schedules (cron) ---
+
+export async function handleListSchedules(params: { workspace_id: string }) {
+  const data = await apiCall("GET", `/workspaces/${params.workspace_id}/schedules`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleCreateSchedule(params: {
+  workspace_id: string;
+  name: string;
+  cron_expr: string;
+  prompt: string;
+  timezone?: string;
+  enabled?: boolean;
+}) {
+  const { workspace_id, ...body } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/schedules`, body);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleUpdateSchedule(params: {
+  workspace_id: string;
+  schedule_id: string;
+  name?: string;
+  cron_expr?: string;
+  prompt?: string;
+  timezone?: string;
+  enabled?: boolean;
+}) {
+  const { workspace_id, schedule_id, ...body } = params;
+  const data = await apiCall(
+    "PATCH",
+    `/workspaces/${workspace_id}/schedules/${schedule_id}`,
+    body,
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleDeleteSchedule(params: {
+  workspace_id: string;
+  schedule_id: string;
+}) {
+  const data = await apiCall(
+    "DELETE",
+    `/workspaces/${params.workspace_id}/schedules/${params.schedule_id}`,
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleRunSchedule(params: {
+  workspace_id: string;
+  schedule_id: string;
+}) {
+  const data = await apiCall(
+    "POST",
+    `/workspaces/${params.workspace_id}/schedules/${params.schedule_id}/run`,
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleGetScheduleHistory(params: {
+  workspace_id: string;
+  schedule_id: string;
+}) {
+  const data = await apiCall(
+    "GET",
+    `/workspaces/${params.workspace_id}/schedules/${params.schedule_id}/history`,
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// --- Session search + shared context ---
+
+export async function handleSessionSearch(params: {
+  workspace_id: string;
+  q?: string;
+  limit?: number;
+}) {
+  const { workspace_id, q, limit } = params;
+  const qs = new URLSearchParams();
+  if (q) qs.set("q", q);
+  if (limit) qs.set("limit", String(limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await apiCall("GET", `/workspaces/${workspace_id}/session-search${suffix}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleGetSharedContext(params: { workspace_id: string }) {
+  const data = await apiCall("GET", `/workspaces/${params.workspace_id}/shared-context`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// --- K/V memory (per-workspace key-value, separate from HMA scope memories) ---
+
+export async function handleSetKV(params: {
+  workspace_id: string;
+  key: string;
+  value: string;
+  ttl_seconds?: number;
+}) {
+  const { workspace_id, ...body } = params;
+  const data = await apiCall("POST", `/workspaces/${workspace_id}/memory`, body);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleGetKV(params: { workspace_id: string; key: string }) {
+  const data = await apiCall(
+    "GET",
+    `/workspaces/${params.workspace_id}/memory/${encodeURIComponent(params.key)}`,
+  );
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleListKV(params: { workspace_id: string }) {
+  const data = await apiCall("GET", `/workspaces/${params.workspace_id}/memory`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export async function handleDeleteKV(params: { workspace_id: string; key: string }) {
+  const data = await apiCall(
+    "DELETE",
+    `/workspaces/${params.workspace_id}/memory/${encodeURIComponent(params.key)}`,
+  );
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
@@ -1015,6 +1254,230 @@ export function createServer() {
     "Check status of delegated tasks for a workspace. Returns recent delegations with their status (pending/completed/failed) and results.",
     { workspace_id: z.string().describe("Workspace ID") },
     handleCheckDelegations
+  );
+
+  // ====================================================
+  // Coverage completion — 100% platform parity (#64/#65 + gaps)
+  // ====================================================
+
+  // Delegations (#64): agents mirror direct-A2A delegations to activity_logs
+  srv.tool(
+    "record_delegation",
+    "Register an agent-initiated delegation with the platform's activity log. Used by agent tooling so GET /delegations sees the same set as check_delegation_status.",
+    {
+      workspace_id: z.string().describe("Source workspace ID (the delegator)"),
+      target_id: z.string().describe("Target workspace ID (the delegate)"),
+      task: z.string().describe("Task description sent to the target"),
+      delegation_id: z.string().describe("Agent-generated task_id to correlate with local state"),
+    },
+    handleRecordDelegation,
+  );
+
+  srv.tool(
+    "update_delegation_status",
+    "Mirror an agent-initiated delegation's status to activity_logs (completed or failed).",
+    {
+      workspace_id: z.string().describe("Source workspace ID"),
+      delegation_id: z.string().describe("Delegation ID previously registered via record_delegation"),
+      status: z.enum(["completed", "failed"]),
+      error: z.string().optional(),
+      response_preview: z.string().optional().describe("Response text (truncated to 500 chars server-side)"),
+    },
+    handleUpdateDelegationStatus,
+  );
+
+  // Activity
+  srv.tool(
+    "report_activity",
+    "Write an arbitrary activity log row from an agent (a2a events, tool calls, errors).",
+    {
+      workspace_id: z.string(),
+      activity_type: z.string().describe("a2a_receive / a2a_send / tool_call / task_complete / error / ..."),
+      method: z.string().optional(),
+      summary: z.string().optional(),
+      status: z.string().optional().describe("ok / error / pending"),
+      error_detail: z.string().optional(),
+      request_body: z.unknown().optional(),
+      response_body: z.unknown().optional(),
+      duration_ms: z.number().optional(),
+    },
+    handleReportActivity,
+  );
+
+  srv.tool(
+    "notify_user",
+    "Push a notification from the agent to the canvas via WebSocket — appears as a toast / chat bubble.",
+    {
+      workspace_id: z.string(),
+      type: z.string().describe("Notification category (e.g. 'delegation_complete', 'approval_needed')"),
+    },
+    handleNotifyUser,
+  );
+
+  // Canvas viewport
+  srv.tool(
+    "get_canvas_viewport",
+    "Get the current canvas viewport (x, y, zoom) persisted per-user.",
+    {},
+    handleGetViewport,
+  );
+
+  srv.tool(
+    "set_canvas_viewport",
+    "Persist the canvas viewport (x, y, zoom).",
+    {
+      x: z.number(),
+      y: z.number(),
+      zoom: z.number(),
+    },
+    handleSetViewport,
+  );
+
+  // Channel platform-level discovery
+  srv.tool(
+    "discover_channel_chats",
+    "Auto-detect chat IDs / channels for a given bot token (e.g. Telegram). Useful before creating a workspace channel.",
+    {
+      type: z.string().describe("Channel type (telegram, slack, etc.)"),
+      config: z.record(z.unknown()).describe("Adapter-specific config (bot_token, etc.)"),
+    },
+    handleDiscoverChannelChats,
+  );
+
+  // Plugins — sources + per-workspace availability + compatibility
+  srv.tool(
+    "list_plugin_sources",
+    "List registered plugin install-source schemes (e.g. local, github).",
+    {},
+    handleListPluginSources,
+  );
+
+  srv.tool(
+    "list_available_plugins",
+    "List plugins from the registry filtered to ones supported by this workspace's runtime.",
+    { workspace_id: z.string() },
+    handleListAvailablePlugins,
+  );
+
+  srv.tool(
+    "check_plugin_compatibility",
+    "Preflight check: which installed plugins would break if this workspace switched runtime to <runtime>?",
+    {
+      workspace_id: z.string(),
+      runtime: z.string().describe("Target runtime (claude-code, deepagents, langgraph, ...)"),
+    },
+    handleCheckPluginCompatibility,
+  );
+
+  // Schedules (cron)
+  srv.tool(
+    "list_schedules",
+    "List cron schedules for a workspace.",
+    { workspace_id: z.string() },
+    handleListSchedules,
+  );
+
+  srv.tool(
+    "create_schedule",
+    "Create a cron schedule that fires a prompt on a recurring timer.",
+    {
+      workspace_id: z.string(),
+      name: z.string(),
+      cron_expr: z.string().describe("5-field cron (e.g. '0 9 * * 1-5')"),
+      prompt: z.string(),
+      timezone: z.string().optional(),
+      enabled: z.boolean().optional(),
+    },
+    handleCreateSchedule,
+  );
+
+  srv.tool(
+    "update_schedule",
+    "Update fields on an existing schedule.",
+    {
+      workspace_id: z.string(),
+      schedule_id: z.string(),
+      name: z.string().optional(),
+      cron_expr: z.string().optional(),
+      prompt: z.string().optional(),
+      timezone: z.string().optional(),
+      enabled: z.boolean().optional(),
+    },
+    handleUpdateSchedule,
+  );
+
+  srv.tool(
+    "delete_schedule",
+    "Delete a schedule.",
+    { workspace_id: z.string(), schedule_id: z.string() },
+    handleDeleteSchedule,
+  );
+
+  srv.tool(
+    "run_schedule",
+    "Fire a schedule manually, bypassing its cron expression.",
+    { workspace_id: z.string(), schedule_id: z.string() },
+    handleRunSchedule,
+  );
+
+  srv.tool(
+    "get_schedule_history",
+    "Get past runs of a schedule — status, start/end, output preview.",
+    { workspace_id: z.string(), schedule_id: z.string() },
+    handleGetScheduleHistory,
+  );
+
+  // Session search + shared context
+  srv.tool(
+    "session_search",
+    "Search a workspace's recent session activity and memory (FTS). Useful for 'did I tell you about X'.",
+    {
+      workspace_id: z.string(),
+      q: z.string().optional(),
+      limit: z.number().optional(),
+    },
+    handleSessionSearch,
+  );
+
+  srv.tool(
+    "get_shared_context",
+    "Get the shared-context blob for a workspace (persistent cross-turn context).",
+    { workspace_id: z.string() },
+    handleGetSharedContext,
+  );
+
+  // K/V memory
+  srv.tool(
+    "memory_set",
+    "Set a key-value memory entry with optional TTL. Distinct from commit_memory which uses HMA scopes.",
+    {
+      workspace_id: z.string(),
+      key: z.string(),
+      value: z.string(),
+      ttl_seconds: z.number().optional(),
+    },
+    handleSetKV,
+  );
+
+  srv.tool(
+    "memory_get",
+    "Read a single K/V memory entry.",
+    { workspace_id: z.string(), key: z.string() },
+    handleGetKV,
+  );
+
+  srv.tool(
+    "memory_list",
+    "List all K/V memory entries for a workspace.",
+    { workspace_id: z.string() },
+    handleListKV,
+  );
+
+  srv.tool(
+    "memory_delete_kv",
+    "Delete a single K/V memory entry.",
+    { workspace_id: z.string(), key: z.string() },
+    handleDeleteKV,
   );
 
   return srv;

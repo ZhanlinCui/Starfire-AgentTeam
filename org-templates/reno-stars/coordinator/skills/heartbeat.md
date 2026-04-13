@@ -18,7 +18,7 @@ Read /Users/renostars/reno-star-business-intelligent/config/env.json for paths a
 ### Rotate Through (pick 1-2 per beat based on what's least recently checked)
 - **Git repos**: Any unpushed commits or dirty working trees across projects in config/env.json → projects?
 - **Cron logs**: Check last entry in data/cron-logs/*.jsonl — any recent errors? Any job stale (>2x its interval)?
-- **Chrome CDP**: `curl -s http://127.0.0.1:9222/json/version` — still alive?
+- **Chrome CDP**: `curl -s http://host.docker.internal:9223/json/version` — still alive?
 - **Disk space**: `df -h /` — less than 10% free?
 - **Memory maintenance**: Scan memory files for anything outdated based on recent git activity
 
