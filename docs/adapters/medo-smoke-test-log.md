@@ -1,8 +1,8 @@
-# MeDo Smoke Test Log — 2026-04-13 (Run 3)
+# MeDo Smoke Test Log — 2026-04-13 (Run 4)
 
 **Tester:** PM (direct execution)  
-**Goal:** Install Miaoda App Builder skill → build "Hello Starfire" landing page → publish → capture URL.  
-**Budget allocated:** ≤50 credits. **Credits spent:** 0 across all three runs.
+**Goal:** Install Miaoda App Builder skill → build "Hello Starfire" landing page → publish → URL.  
+**Credits spent:** 0 across all four runs.
 
 ---
 
@@ -11,124 +11,103 @@
 | Run | Blocker | Resolution |
 |-----|---------|------------|
 | 1 | `workspace-template:openclaw` image not built | ✅ Operator rebuilt image |
-| 2 | Adapter key lookup ignores `AISTUDIO_API_KEY`/`QIANFAN_API_KEY` | ✅ Code fix committed (d779e16) — needs image rebuild |
-| 3 | Executor creates fresh OpenClaw session per A2A message; responses are `payloads: []` | ❌ Architectural fix needed (see §4) |
+| 2 | Adapter key lookup ignores `AISTUDIO_API_KEY` / `QIANFAN_API_KEY` | ✅ Code fix committed (d779e16) |
+| 3 | Executor creates fresh OpenClaw session per A2A message | ✅ Code fix committed (9466943) |
+| 4 | `payloads: []` on every response — agent never returns text via `--json` mode | ❌ Root cause below |
 
 ---
 
-## Run 3 — Detailed Findings
+## Run 4 — Detailed Findings
 
-### Environment
+### Environment — all green
 | Check | Result |
 |-------|--------|
-| Platform health | ✅ `{"status":"ok"}` |
-| `workspace-template:openclaw` image | ✅ built |
-| `AISTUDIO_API_KEY` injected | ✅ confirmed — `provider: custom-generativelanguage-googleapis-com`, `model: gemini-2.0-flash` |
-| Workspace boot time | ✅ 26 seconds to `online` |
+| Platform health | ✅ |
+| `workspace-template:openclaw` image | ✅ boots in 31s |
+| AISTUDIO_API_KEY + gemini-2.0-flash | ✅ confirmed in every response meta |
+| Stable session ID (workspace ID) | ✅ `sessionKey: agent:main:explicit:a507780d-...` consistent across all calls |
 
-### A2A Communication Confirmed Working
-Three messages sent via `delegate_task`. All returned within 2 seconds with the same structure:
-```json
-{
-  "status": "ok", "summary": "completed",
-  "result": {"payloads": [], "meta": {"livenessState": "working",
-    "agentMeta": {"provider": "custom-generativelanguage-googleapis-com",
-                  "model": "gemini-2.0-flash"}}}
-}
-```
+### Messages Sent and Responses
 
-**AISTUDIO_API_KEY is working.** Gemini 2.0 Flash is the active model. Auth is resolved. ✅
+| Message | Response | Duration |
+|---------|----------|----------|
+| Install skill | `payloads: [], livenessState: working` | 1.7s |
+| Build Hello Starfire | `payloads: [], livenessState: working` | 0.8s |
+| Check status (sessions_list) | `LLM request failed: provider rejected request schema/payload` | — |
+| Reply with exactly: STATUS_OK | `payloads: [], livenessState: working` (after restart) | 1.8s |
 
-### Install Outcome — Structurally Blocked
+The "Reply with exactly: STATUS_OK" response is decisive. A vanilla LLM call with no tool use should produce a text payload. It didn't. This rules out skill complexity or message ambiguity as the cause.
 
-The natural-language install prompt reached the agent, but:
-- `payloads: []` — agent produced no text response
-- `livenessState: 'working'` — session still marked active (background work)
-- Each call creates a fresh `sessionKey` (e.g. `agent:main:explicit:ec5e46d9-...`,
-  `agent:main:explicit:f91197...`, `agent:main:explicit:a39dfe2...`)
-- `miaoda-app-builder` never appeared in `skills.entries` across any session
+### Root Cause — `openclaw agent --json` Does Not Surface Agent Text in `payloads`
 
-**Diagnosis:** The OpenClaw executor (`OpenClawA2AExecutor.execute()`) calls
-`openclaw agent --json --session-id <task_id> --timeout 120` for **every A2A message**.
-Each A2A task has a unique `task_id`, so each call creates a completely new OpenClaw session.
+The OpenClaw agent processes messages using background session dispatch (`sessions_spawn` / `sessions_yield`). In this mode:
+1. Main session receives message → immediately spawns background session → calls `sessions_yield`
+2. `openclaw agent --json` exits with `payloads: [], livenessState: 'working'`
+3. Background session processes the actual work and produces text — but only visible in interactive/streaming mode, not in the `--json` subprocess call
 
-The Miaoda App Builder skill is a **conversational, multi-turn workflow**:
-1. Create → 2. Confirm requirements → 3. Generate (5–8 min, async) → 4. Publish
+**Evidence:** Even "Reply with exactly: STATUS_OK" returns `payloads: []`. The agent is using background sessions for everything, including trivial echo requests.
 
-This workflow requires session continuity. With fresh sessions per message, the skill
-loses all context between calls — it cannot progress through the workflow.
+**Likely cause:** OpenClaw's default `SOUL.md` / `BOOTSTRAP.md` workspace config instructs the agent to always use async session patterns. In a terminal session these background responses appear naturally; via subprocess `--json`, only the main session's synchronous output is captured.
 
-Additionally, the agent appears to use `sessions_spawn` or `sessions_yield` to hand off
-the install to a background session, then immediately returns empty payloads. The background
-session's output never surfaces to the A2A caller.
+### Transient issue: LLM request failed
+After 3+ rapid A2A calls (install → build → status check), the Gemini AI Studio API returned a schema/payload rejection. Resolved by restarting the workspace (`POST /workspaces/:id/restart`). Likely a rate-limit or context-size rejection from Gemini. Restarted in 30s, normal on next call.
 
 ---
 
-## 4. Root Cause — OpenClawA2AExecutor Architecture
+## 4. Required Fix — OpenClawA2AExecutor Response Capture
 
-**Problem:** `execute()` uses `context.task_id` as the OpenClaw session ID. Every A2A message
-gets a fresh session; no conversational state is preserved.
+The executor must retrieve the agent's text response from session history **after** the main session yields. The `sessions_history` CLI command (exposed as `session_history` tool) retrieves past messages.
 
-**Required fix:** Use a stable, per-workspace session ID so all A2A messages from PM to
-the MeDo Builder workspace flow into the same OpenClaw conversation thread.
-
-**Proposed change** in `workspace-template/adapters/openclaw/adapter.py`:
+**Proposed change** to `workspace-template/adapters/openclaw/adapter.py` (`execute()` method):
 
 ```python
-# Replace this in execute():
-proc = await asyncio.create_subprocess_exec(
-    "openclaw", "agent",
-    "--session-id", context.task_id or "default",   # ← creates new session per message
-    ...
-)
-
-# With:
-_WORKSPACE_SESSION_ID = os.environ.get("WORKSPACE_ID", "starfire-default")
-
-proc = await asyncio.create_subprocess_exec(
-    "openclaw", "agent",
-    "--session-id", _WORKSPACE_SESSION_ID,           # ← stable session for this workspace
-    ...
-)
+# After proc.communicate() returns with payloads=[]:
+if not reply or reply.startswith("{'payloads': []"):
+    # Agent yielded without responding — fetch last message from session history
+    await asyncio.sleep(2)  # brief wait for background session to complete short tasks
+    hist_proc = await asyncio.create_subprocess_exec(
+        "openclaw", "sessions", "history",
+        "--session-id", self._session_id,
+        "--limit", "1", "--json",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env={**os.environ, "PATH": f"{os.path.expanduser('~/.local/bin')}:{os.environ.get('PATH', '')}"}
+    )
+    hist_stdout, _ = await asyncio.wait_for(hist_proc.communicate(), timeout=15)
+    hist_data = json.loads(hist_stdout.decode().strip() or "{}")
+    last_msg = (hist_data.get("messages") or [{}])[-1]
+    reply = last_msg.get("content", reply)  # fall back to original if no history
 ```
 
-This makes each workspace have one persistent OpenClaw conversation thread. A2A messages
-chain together as a multi-turn dialogue, preserving Miaoda skill state across calls.
-
-**Also needed:** Investigate why `payloads: []` when agent uses `sessions_yield`. OpenClaw
-may need `--wait-for-yield` or a polling mechanism to collect the background session output
-before the CLI exits.
+**Note on long tasks (5–8 min builds):** Session history won't have the build result until it completes. For Miaoda App Builder, PM must poll: send a follow-up "What is the status of the Hello Starfire app build?" message every 60s until the response contains a URL or error.
 
 ---
 
-## 5. Answers to Open Questions
+## 5. Open Questions Status
 
-### 5-C — Rate limits: **UNKNOWN** (never reached skill invocation)
-### 5-D — Failure recovery: **UNKNOWN** (never reached app generation)
+### 5-C — Rate limits
+**UNKNOWN.** Never reached skill invocation.  
+*New data:* Gemini AI Studio hit a schema/payload rejection after 3 rapid calls. This may be a Gemini-specific issue with large tool schemas (OpenClaw's `cron` schema is 6311 chars). Worth filing separately.
+
+### 5-D — Failure recovery
+**UNKNOWN.** Never reached app generation.
 
 ---
 
 ## 6. Issues to File
 
-### Issue A (new — Run 3): OpenClawA2AExecutor creates fresh session per message
-**Severity:** Blocker for any conversational skill (Miaoda App Builder, multi-turn workflows).  
-**Fix:** Use stable per-workspace `--session-id` in `execute()` (see §4).  
-**File as:** `fix(openclaw-adapter): use stable workspace session ID for multi-turn skill support`  
-**Location:** `workspace-template/adapters/openclaw/adapter.py`, `OpenClawA2AExecutor.execute()`
-
-### Issue B (from Run 2): openclaw adapter ignores AISTUDIO_API_KEY / QIANFAN_API_KEY
-**Status:** Code fix committed in d779e16. **Needs openclaw image rebuild.**  
-`bash workspace-template/build-all.sh openclaw`
-
-### Issue C (from Run 1): Provisioner swallows Docker image-not-found in `last_sample_error`
-**Status:** Open. Fix in `platform/internal/provisioner/provisioner.go`.
+| # | Issue | Status | Location |
+|---|-------|--------|----------|
+| A | `fix(openclaw): use stable workspace session ID` | ✅ fixed in 9466943 | adapter.py |
+| B | `fix(openclaw): extend key lookup for AISTUDIO/QIANFAN` | ✅ fixed in d779e16 | adapter.py |
+| C | `fix(provisioner): surface Docker errors in last_sample_error` | ❌ open | provisioner.go |
+| **D** | **`fix(openclaw): capture agent response via session history when payloads=[]`** | ❌ open — see §4 | adapter.py |
+| **E** | **`fix(openclaw): Gemini rejects request after N rapid calls with large tool schema`** | ❌ open — investigate cron schema size | adapter.py |
 
 ---
 
-## 7. Next Steps (before Run 4)
+## 7. Next Steps (before Run 5)
 
-- [ ] **Dev Lead:** Fix `OpenClawA2AExecutor.execute()` — stable session ID per workspace (Issue A)
-- [ ] **Dev Lead:** Investigate `sessions_yield` / background session output capture
-- [ ] **Operator:** Rebuild openclaw image after Issue A + B fixes:
-  `bash workspace-template/build-all.sh openclaw`
-- [ ] **PM (Run 4):** Re-run smoke test — expected to reach skill install confirmation and app build
+- [ ] **Dev Lead:** Implement §4 session-history fallback in `OpenClawA2AExecutor.execute()`
+- [ ] **Dev Lead (optional):** Trim `cron` tool schema to reduce Gemini schema-size rejection risk
+- [ ] **Operator:** Rebuild image: `bash workspace-template/build-all.sh openclaw`
+- [ ] **PM (Run 5):** Re-run smoke test — expected to finally reach skill install confirmation
