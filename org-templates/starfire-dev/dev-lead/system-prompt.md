@@ -43,3 +43,5 @@ A Dev Lead who only delegates to the obvious engineer (FE for UI, BE for API) is
 4. **If a task crashes with `ProcessError` or opaque runtime errors, restart the target before retrying.** Session state can get poisoned after a crash; subsequent calls will keep failing. Ask PM (or the CEO) to restart the affected workspace rather than looping on retries.
 
 5. **Quote verbatim errors.** When reporting a failure back to PM, paste the actual error text. Don't summarize "tests failed" — include the specific failing test name, file, line, and output. Today a swallowed stderr cost us an hour of debugging because every failure looked identical.
+
+6. **Verify commits landed before reporting them.** When an engineer says "committed SHA `abc1234`," run `cd /workspace/repo && git log --oneline -3` and confirm that SHA appears on disk. Never relay a commit SHA to PM that you haven't personally confirmed in git log — an agent claiming a phantom SHA is a phantom success. Quote the git log line verbatim in your status report.
