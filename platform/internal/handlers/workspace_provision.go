@@ -129,16 +129,31 @@ func (h *WorkspaceHandler) buildProvisionerConfig(
 ) provisioner.WorkspaceConfig {
 	// Per-workspace workspace_dir takes priority over global WORKSPACE_DIR env var.
 	// If neither is set, the provisioner creates an isolated Docker volume.
+	//
+	// #65: also read workspace_access (DB column) so restart paths preserve
+	// the mode set at create/import time. Payload's WorkspaceAccess (if
+	// present) wins, matching the existing WorkspaceDir precedence.
 	workspacePath := payload.WorkspaceDir
-	if workspacePath == "" {
-		// Check DB — needed for restarts where payload.WorkspaceDir isn't populated
-		var dbDir string
-		if err := db.DB.QueryRow(`SELECT COALESCE(workspace_dir, '') FROM workspaces WHERE id = $1`, workspaceID).Scan(&dbDir); err == nil && dbDir != "" {
-			workspacePath = dbDir
+	workspaceAccess := payload.WorkspaceAccess
+	if workspacePath == "" || workspaceAccess == "" {
+		var dbDir, dbAccess string
+		if err := db.DB.QueryRow(
+			`SELECT COALESCE(workspace_dir, ''), COALESCE(workspace_access, 'none') FROM workspaces WHERE id = $1`,
+			workspaceID,
+		).Scan(&dbDir, &dbAccess); err == nil {
+			if workspacePath == "" && dbDir != "" {
+				workspacePath = dbDir
+			}
+			if workspaceAccess == "" {
+				workspaceAccess = dbAccess
+			}
 		}
 	}
 	if workspacePath == "" {
 		workspacePath = os.Getenv("WORKSPACE_DIR")
+	}
+	if workspaceAccess == "" {
+		workspaceAccess = provisioner.WorkspaceAccessNone
 	}
 
 	return provisioner.WorkspaceConfig{
@@ -147,6 +162,7 @@ func (h *WorkspaceHandler) buildProvisionerConfig(
 		ConfigFiles:        configFiles,
 		PluginsPath:        pluginsPath,
 		WorkspacePath:      workspacePath,
+		WorkspaceAccess:    workspaceAccess,
 		Tier:               payload.Tier,
 		Runtime:            payload.Runtime,
 		EnvVars:            envVars,
