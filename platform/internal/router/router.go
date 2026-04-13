@@ -66,6 +66,11 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.POST("/workspaces", wh.Create)
 	r.GET("/workspaces", wh.List)
 	r.GET("/workspaces/:id", wh.Get)
+	// Phase 30.4 — lightweight token-gated state polling for remote agents
+	// that can't reach the platform's WebSocket. Returns {status, paused,
+	// deleted}. Separate from /workspaces/:id so the canvas path stays
+	// unauthenticated and returns its full config payload.
+	r.GET("/workspaces/:id/state", wh.State)
 	r.PATCH("/workspaces/:id", wh.Update)
 	r.DELETE("/workspaces/:id", wh.Delete)
 	r.POST("/workspaces/:id/restart", wh.Restart)
