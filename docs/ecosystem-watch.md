@@ -432,6 +432,72 @@ builders; Starfire users are developers building agent companies.
 - Their TypeScript-first stack and MCP server target the same developer audience as our Canvas + mcp-server. Co-marketing opportunity: "run your Starfire agent on a schedule via Trigger.dev" is a cleaner story than our current in-house cron for some user segments.
 
 **Last reviewed:** 2026-04-13 · **Stars / activity:** ~14.5k ⭐, v4.4.3 March 10, 2026
+### Mastra — `mastra-ai/mastra`
+
+**Pitch:** "Build and deploy AI agents that take real-world actions across your product and infrastructure."
+
+**Shape:** TypeScript framework (Apache 2.0 core; `ee/` directories under a proprietary Mastra Enterprise License), ~22.9k ⭐, 300k+ weekly npm downloads. Multi-agent, graph-based workflow engine (`.then()` / `.branch()` / `.parallel()` syntax), MCP server support, RAG pipelines, 40+ LLM providers. **Native `channels` feature**: `createSlackAdapter()` + Discord and Telegram adapters — when a user messages on a platform, the agent receives it, processes through its normal pipeline, and streams the response back. Human-in-the-loop with state persistence. Embeds into React/Next.js apps or runs as a standalone server. 1.0 GA: January 2026. From the team behind Gatsby.
+
+**Overlap with us:**
+- **Channels** — Slack, Discord, Telegram adapters are a first-class docs section (`mastra.ai/docs/agents/channels`). Same platforms, same inbound-webhook → agent → reply pattern as our `workspace_channels` + `POST /webhooks/:type`.
+- Graph workflow engine with human-in-the-loop persistence → same instinct as our approval flow + workspace lifecycle pause/resume.
+- MCP server support — agents can *expose* themselves as MCP servers, same as our `mcp-server/` making Starfire tools available to Claude Code.
+- Multi-agent with agents calling each other via tool handoffs → analogous to A2A delegation at a smaller scale.
+
+**Differentiation:** Mastra is a **framework for embedding AI into TypeScript applications** — designed to live inside a Next.js app, not stand alone. No visual canvas, no Docker container isolation per agent, no org hierarchy, no WebSocket-driven real-time graph, no provisioner. Agents run in-process. Their "channels" serve a single agent; our channels are per-workspace integrations across a whole multi-agent org. No A2A federation or workspace registry equivalent. The EE dual-license is a friction point for enterprise procurement.
+
+**Worth borrowing:**
+- **`stepExecutionPath` on workflow results** — the returned object includes the exact list of step IDs that ran, enabling post-hoc trace reconstruction without a separate tracing system. Our `activity_logs` tracks A2A calls but not intra-agent step sequencing; this field is cheap to add.
+- **Channels as a top-level docs section** — Mastra treats messaging adapters as a first-class feature, not buried in integrations. We should promote `workspace_channels` the same way in docs and marketing.
+- **Unified multi-provider model router** — single abstraction over 40+ LLM providers at the framework layer. We select models at the workspace level; a router above that would enable load-balancing and cost-switching across workspaces.
+
+**Terminology collisions:**
+- "channels" — Mastra: messaging platform adapters for a single agent. Ours: per-workspace social integrations across a multi-agent org. Near-identical surface concept — will confuse developers reading both docs.
+- "workflow" — Mastra: their graph-based multi-step task engine (a precise, named concept). Ours: informal. Mastra's precision is worth adopting.
+- "agent" — in-process TypeScript object vs. our Docker container. Different operational footprint despite the same name.
+
+**Signals to react to:**
+- If Mastra ships a visual org/multi-agent canvas → direct overlap with 22.9k ⭐ and a TypeScript base that exactly matches our Canvas audience; update differentiation messaging immediately.
+- If their EE tier formalizes multi-tenant agent deployment → platform competitor, not just a framework.
+- If npm install share keeps growing and Mastra becomes the default TypeScript agent framework → publish an official Mastra adapter so Mastra agents can register as Starfire workspaces.
+- If `channels` docs expand to WhatsApp/email → audit our `workspace_channels` adapter parity.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~22.9k ⭐, 300k+ weekly npm downloads, last commit April 8, 2026
+
+---
+
+### Agno — `agno-agi/agno`
+
+**Pitch:** "Build, run, manage agentic software at scale."
+
+**Shape:** Python framework + runtime (Apache 2.0), ~39.4k ⭐, v2.5.16 released April 10, 2026. Formerly Phidata, rebranded Agno in 2025. Two distinct layers: **(1) Agent Framework** — Python agents with tools, per-run/per-user/persistent memory tiers, knowledge bases (PDFs, URLs, databases), 100+ integrations. **(2) AgentOS** — a browser-based production control-plane UI for monitoring agents, sessions, traces, and metrics. FastAPI-based stateless runtime, horizontally scalable, self-hosted (Docker / Kubernetes). Native **channel integrations**: Slack bot (with workspace search tool), Telegram interface (added Q1 2026 with multi-modal support), WhatsApp.
+
+**Overlap with us:**
+- **AgentOS is the closest OSS equivalent to our Canvas + Platform combo.** It provides a browser UI for managing and monitoring multi-agent systems — same core function as our Go platform + React Flow canvas.
+- Slack, Telegram, WhatsApp channel support → identical surface to our `workspace_channels` adapters and `POST /webhooks/:type` inbound webhook.
+- Per-user + per-session memory isolation → same model as our `agent_memories` namespace scoping and `workspace_secrets`.
+- Approval workflows + audit logging → parallel to our `approvals` table and `activity_logs`.
+- Docker-compose self-hosted, runs in your infrastructure → same deployment philosophy.
+
+**Differentiation:** Agno agents run as FastAPI service endpoints, not Docker-isolated containers. No A2A protocol for inter-agent communication — multi-agent "teams" are in-process coordinator + subagent patterns, not independently provisioned workspaces communicating over HTTP. AgentOS shows a flat session list, not a live org-chart graph. We're "an AI company visualized as a real-time org chart"; Agno is "Python agents with production ops tooling." A2A federation and the canvas org hierarchy are our clearest differentiators.
+
+**Worth borrowing:**
+- **AgentOS session/trace layout** — session viewer, trace timeline, per-agent metrics displayed side-by-side. This is the production ops view we're missing; our Canvas excels at the "company org chart" but is weak for "what is each agent doing right now." Study their UX before building our monitoring tab.
+- **Tiered memory model** — agents have distinct memory tiers: per-run (ephemeral context), per-user (cross-session knowledge about a specific user), and persistent (long-term agent knowledge). Our `agent_memories` uses a flat namespace; adopting explicit tiers would make our memory model more predictable for developers.
+- **Knowledge base as a first-class primitive** — agents given a PDF, URL, or database as a named knowledge source, not just injected context. A structured knowledge-base tab per workspace would be a meaningful UX upgrade over our current `shared-context` approach.
+
+**Terminology collisions:**
+- "team" — Agno: an in-process coordinator managing subagents. Ours: sibling workspaces under a parent in the org hierarchy. Same word, architecturally different — will confuse devs who know Agno.
+- "session" — Agno: a per-user conversation thread tracked in the DB, a first-class API concept. Ours: implicit, no API-level session concept (tracked through `activity_logs`). Gap worth closing.
+- "AgentOS" — their product name for the control plane UI. We have no product name for our canvas + platform; when we name it, avoid "OS" to stay distinct.
+
+**Signals to react to:**
+- If AgentOS ships a graph-based multi-agent visualization (not a flat list) → direct canvas competitor with 39.4k ⭐ and proven production credibility; update differentiation messaging immediately.
+- If they add A2A support → erodes our protocol differentiator for the Python-native market.
+- If Telegram/WhatsApp adapters reach feature parity with our `workspace_channels` → our edge shifts to *multi-agent channel routing* (one channel, many agents) rather than single-agent channel access. Worth building now.
+- High release velocity (v2.5.16 in April, formerly Phidata with years of production use) — treat as a serious platform-layer competitor, not just a framework.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~39.4k ⭐, v2.5.16 April 10, 2026
 
 ---
 
