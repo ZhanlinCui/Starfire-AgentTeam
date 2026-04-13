@@ -206,6 +206,111 @@ func (h *DelegationHandler) updateDelegationStatus(workspaceID, delegationID, st
 	}
 }
 
+// Record handles POST /workspaces/:id/delegations/record — the agent-initiated
+// "I just fired a delegation directly via A2A, please record it" endpoint (#64).
+//
+// The canvas-driven POST /delegate endpoint records to activity_logs AND fires
+// the A2A request. Agents calling delegate_to_workspace fire A2A themselves
+// (preserves OTEL trace-context propagation + retry logic) — this endpoint
+// lets them register the row without double-firing the request.
+//
+// Body: {"target_id": "...", "task": "...", "delegation_id": "..."}
+//   - delegation_id is the agent-generated task_id (matches what
+//     check_delegation_status returns, so a single ID correlates the two
+//     views).
+func (h *DelegationHandler) Record(c *gin.Context) {
+	sourceID := c.Param("id")
+	ctx := c.Request.Context()
+
+	var body struct {
+		TargetID     string `json:"target_id" binding:"required"`
+		Task         string `json:"task" binding:"required"`
+		DelegationID string `json:"delegation_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if _, err := uuid.Parse(body.TargetID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_id must be a valid UUID"})
+		return
+	}
+
+	taskJSON, _ := json.Marshal(map[string]interface{}{
+		"task":          body.Task,
+		"delegation_id": body.DelegationID,
+	})
+	if _, err := db.DB.ExecContext(ctx, `
+		INSERT INTO activity_logs (workspace_id, activity_type, method, source_id, target_id, summary, request_body, status)
+		VALUES ($1, 'delegation', 'delegate', $2, $3, $4, $5::jsonb, 'dispatched')
+	`, sourceID, sourceID, body.TargetID, "Delegating to "+body.TargetID, string(taskJSON)); err != nil {
+		log.Printf("Delegation Record: insert failed for %s: %v", body.DelegationID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record delegation"})
+		return
+	}
+
+	h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_SENT", sourceID, map[string]interface{}{
+		"delegation_id": body.DelegationID,
+		"target_id":     body.TargetID,
+		"task_preview":  truncate(body.Task, 100),
+	})
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"delegation_id": body.DelegationID,
+		"status":        "recorded",
+	})
+}
+
+// UpdateStatus handles POST /workspaces/:id/delegations/:delegation_id/update — agent
+// reports completion/failure for a delegation it recorded via Record (#64).
+//
+// Body: {"status": "completed"|"failed", "error": "...", "response_preview": "..."}
+func (h *DelegationHandler) UpdateStatus(c *gin.Context) {
+	sourceID := c.Param("id")
+	delegationID := c.Param("delegation_id")
+	ctx := c.Request.Context()
+
+	var body struct {
+		Status          string `json:"status" binding:"required"`
+		Error           string `json:"error,omitempty"`
+		ResponsePreview string `json:"response_preview,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if body.Status != "completed" && body.Status != "failed" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status must be 'completed' or 'failed'"})
+		return
+	}
+
+	h.updateDelegationStatus(sourceID, delegationID, body.Status, body.Error)
+
+	if body.Status == "completed" {
+		respJSON, _ := json.Marshal(map[string]interface{}{
+			"text":          body.ResponsePreview,
+			"delegation_id": delegationID,
+		})
+		if _, err := db.DB.ExecContext(ctx, `
+			INSERT INTO activity_logs (workspace_id, activity_type, method, source_id, summary, response_body, status)
+			VALUES ($1, 'delegation', 'delegate_result', $2, $3, $4::jsonb, 'completed')
+		`, sourceID, sourceID, "Delegation completed ("+truncate(body.ResponsePreview, 80)+")", string(respJSON)); err != nil {
+			log.Printf("Delegation UpdateStatus: result insert failed for %s: %v", delegationID, err)
+		}
+		h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_COMPLETE", sourceID, map[string]interface{}{
+			"delegation_id":    delegationID,
+			"response_preview": truncate(body.ResponsePreview, 200),
+		})
+	} else {
+		h.broadcaster.RecordAndBroadcast(ctx, "DELEGATION_FAILED", sourceID, map[string]interface{}{
+			"delegation_id": delegationID,
+			"error":         body.Error,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": body.Status, "delegation_id": delegationID})
+}
+
 // ListDelegations handles GET /workspaces/:id/delegations
 // Returns recent delegations for a workspace with their status.
 func (h *DelegationHandler) ListDelegations(c *gin.Context) {

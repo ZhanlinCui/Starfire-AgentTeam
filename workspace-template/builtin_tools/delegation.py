@@ -97,10 +97,57 @@ async def _notify_completion(task_id: str, target_workspace_id: str, status: str
         logger.debug("Delegation notify failed (best-effort): %s", e)
 
 
+async def _record_delegation_on_platform(task_id: str, target_workspace_id: str, task: str):
+    """Register the delegation in the platform's activity_logs (#64 fix).
+
+    Best-effort POST to /workspaces/<self>/delegations/record. The agent still
+    fires A2A directly for speed + OTEL propagation, but the platform's
+    GET /delegations endpoint now mirrors the same set an agent's local
+    check_delegation_status sees.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/delegations/record",
+                json={
+                    "target_id": target_workspace_id,
+                    "task": task,
+                    "delegation_id": task_id,
+                },
+            )
+    except Exception as e:
+        logger.debug("Delegation record failed (best-effort): %s", e)
+
+
+async def _update_delegation_on_platform(task_id: str, status: str, error: str = "", response_preview: str = ""):
+    """Mirror status changes to the platform's activity_logs (#64 fix).
+
+    Paired with _record_delegation_on_platform — fires on completion/failure
+    so the platform view stays in sync with the agent's local dict.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{PLATFORM_URL}/workspaces/{WORKSPACE_ID}/delegations/{task_id}/update",
+                json={
+                    "status": status,
+                    "error": error,
+                    "response_preview": response_preview[:500],
+                },
+            )
+    except Exception as e:
+        logger.debug("Delegation update failed (best-effort): %s", e)
+
+
 async def _execute_delegation(task_id: str, workspace_id: str, task: str):
     """Background coroutine that sends the A2A request and stores the result."""
     delegation = _delegations[task_id]
     delegation.status = DelegationStatus.IN_PROGRESS
+
+    # #64: register on the platform so GET /workspaces/<self>/delegations
+    # sees the same set as check_delegation_status. Best-effort — platform
+    # unreachability must not block the actual A2A delegation.
+    await _record_delegation_on_platform(task_id, workspace_id, task)
 
     tracer = get_tracer()
     with tracer.start_as_current_span("task_delegate") as delegate_span:
@@ -191,6 +238,12 @@ async def _execute_delegation(task_id: str, workspace_id: str, task: str):
                             log_event(event_type="delegation", action="delegate", resource=workspace_id,
                                       outcome="success", trace_id=task_id, attempt=attempt + 1)
                             await _notify_completion(task_id, workspace_id, "completed")
+                            # #64: mirror to platform activity_logs so
+                            # GET /delegations shows the completion state.
+                            await _update_delegation_on_platform(
+                                task_id, "completed", "",
+                                delegation.result or "",
+                            )
                             return
 
                         if "error" in result:
@@ -208,6 +261,10 @@ async def _execute_delegation(task_id: str, workspace_id: str, task: str):
             log_event(event_type="delegation", action="delegate", resource=workspace_id,
                       outcome="failure", trace_id=task_id, last_error=str(last_error))
             await _notify_completion(task_id, workspace_id, "failed")
+            # #64: mirror failure to platform activity_logs.
+            await _update_delegation_on_platform(
+                task_id, "failed", str(last_error), "",
+            )
 
 
 @tool
