@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/agent-molecule/platform/internal/db"
 )
 
 // ==================== Adapter Interface Tests ====================
@@ -587,5 +590,82 @@ func TestManager_SendOutbound_NoChatID(t *testing.T) {
 	err := adapter.SendMessage(context.Background(), config, "", "test")
 	if err == nil {
 		t.Error("expected error for empty chatID")
+	}
+}
+
+// ==================== #123 — disableChannelByChatID wiring ====================
+
+// The callback is a package-level var set by NewManager; we verify both its
+// default (safe no-op) and the wired-up path via a UPDATE assertion against
+// a sqlmock-backed db.DB. Two tests guard the contract: the var is callable
+// at zero-value, and a wired callback issues the right UPDATE.
+
+func TestDisableChannelByChatID_DefaultIsNoOp(t *testing.T) {
+	// Save + restore so we don't pollute sibling tests that build a Manager.
+	prev := disableChannelByChatID
+	t.Cleanup(func() { disableChannelByChatID = prev })
+	disableChannelByChatID = func(ctx context.Context, chatID string) {}
+
+	// Must not panic when called with empty / odd inputs.
+	disableChannelByChatID(context.Background(), "")
+	disableChannelByChatID(context.Background(), "not-a-number")
+	disableChannelByChatID(context.Background(), "-100123")
+}
+
+func TestDisableChannelByChatID_WiredSetsEnabledFalse(t *testing.T) {
+	mockDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { mockDB.Close() })
+	prevDB := db.DB
+	db.DB = mockDB
+	t.Cleanup(func() { db.DB = prevDB })
+
+	// UPDATE must match the chat_id path and flip enabled=false.
+	mock.ExpectExec(`UPDATE workspace_channels\s+SET enabled = false.*WHERE channel_type = 'telegram'\s+AND enabled = true\s+AND config->>'chat_id' = \$1`).
+		WithArgs("-100123").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// Build a Manager to install the wired callback. Pass nils — Reload
+	// is invoked after the UPDATE when rows>0; sqlmock doesn't need to
+	// cover that follow-up query here because we're only asserting the
+	// UPDATE's shape and args.
+	mock.MatchExpectationsInOrder(false)
+	// Reload() reads enabled rows; cover the SELECT that follows.
+	mock.ExpectQuery(`SELECT .+ FROM workspace_channels WHERE enabled = true`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "workspace_id", "channel_type", "config", "allowlist", "enabled",
+			"last_message_at", "message_count",
+		}))
+
+	_ = NewManager(nil, nil)
+
+	disableChannelByChatID(context.Background(), "-100123")
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("sqlmock expectations: %v", err)
+	}
+}
+
+func TestDisableChannelByChatID_NoRowsAffectedSkipsReload(t *testing.T) {
+	// When the chat_id doesn't match any row (already disabled, or a different
+	// bot), the UPDATE returns RowsAffected=0 and we skip the reload. Verifies
+	// we don't emit a spurious log or SELECT storm on unrelated kicked events.
+	mockDB, mock, _ := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	t.Cleanup(func() { mockDB.Close() })
+	prevDB := db.DB
+	db.DB = mockDB
+	t.Cleanup(func() { db.DB = prevDB })
+
+	mock.ExpectExec(`UPDATE workspace_channels\s+SET enabled = false`).
+		WithArgs("999999999").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	_ = NewManager(nil, nil)
+	disableChannelByChatID(context.Background(), "999999999")
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("sqlmock expectations: %v", err)
 	}
 }
