@@ -110,6 +110,15 @@ func (h *DelegationHandler) Delegate(c *gin.Context) {
 
 // executeDelegation runs in a goroutine — sends A2A and stores the result.
 // Updates delegation status through: pending → dispatched → received → completed/failed
+// delegationRetryDelay is the pause between the first failed proxy attempt
+// and the retry. The first failure triggers `proxyA2ARequest`'s reactive
+// health check (marks workspace offline, clears cached URL, triggers
+// container restart). This delay gives the restart + re-register a chance
+// to land a fresh URL in the cache before we try again. Fixes #74 —
+// bulk restarts used to produce spurious "failed to reach workspace
+// agent" errors when delegations fired within the warm-up window.
+const delegationRetryDelay = 8 * time.Second
+
 func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID string, a2aBody []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -123,6 +132,24 @@ func (h *DelegationHandler) executeDelegation(sourceID, targetID, delegationID s
 	})
 
 	status, respBody, proxyErr := h.workspace.proxyA2ARequest(ctx, targetID, a2aBody, sourceID, true)
+
+	// #74: one retry after the reactive URL refresh has had a chance to
+	// run. The proxyA2ARequest's health-check path on a connection error
+	// marks the workspace offline, clears cached keys, and kicks off a
+	// restart — all on the *next* request's benefit, not this one. A short
+	// pause + second attempt catches the common restart-race case where
+	// the first attempt sees a stale 127.0.0.1:<ephemeral> URL from a
+	// container that was just recreated.
+	if proxyErr != nil && isTransientProxyError(proxyErr) {
+		log.Printf("Delegation %s: first attempt failed (%s) — retrying in %s after reactive URL refresh",
+			delegationID, proxyErr.Error(), delegationRetryDelay)
+		select {
+		case <-ctx.Done():
+			// outer timeout hit before retry window elapsed
+		case <-time.After(delegationRetryDelay):
+			status, respBody, proxyErr = h.workspace.proxyA2ARequest(ctx, targetID, a2aBody, sourceID, true)
+		}
+	}
 
 	if proxyErr != nil {
 		log.Printf("Delegation %s: failed — %s", delegationID, proxyErr.Error())
@@ -237,6 +264,25 @@ func (h *DelegationHandler) ListDelegations(c *gin.Context) {
 }
 
 // --- helpers ---
+
+// isTransientProxyError returns true when the proxy error looks like a
+// restart-race condition worth retrying (connection refused, EOF, stale
+// URL pointing at a dead ephemeral port, container-restart-triggered
+// 503). Static 4xx errors (bad request, access denied, not found) are
+// NOT retried — retrying them wastes the 8-second delay for no benefit.
+func isTransientProxyError(err *proxyA2AError) bool {
+	if err == nil {
+		return false
+	}
+	// 503 is the explicit "container unreachable / restart triggered"
+	// response from a2a_proxy.go after its reactive health check.
+	// 502 is "failed to reach workspace agent" — the pre-reactive-check
+	// error for plain connection failures.
+	if err.Status == http.StatusServiceUnavailable || err.Status == http.StatusBadGateway {
+		return true
+	}
+	return false
+}
 
 func extractResponseText(body []byte) string {
 	var resp map[string]interface{}
