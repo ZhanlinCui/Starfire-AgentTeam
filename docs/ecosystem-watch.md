@@ -375,6 +375,66 @@ builders; Starfire users are developers building agent companies.
 
 ---
 
+### Letta — `letta-ai/letta`
+
+**Pitch:** "The platform for building stateful agents: AI with advanced memory that can learn and self-improve over time."
+
+**Shape:** Python + TypeScript SDK (Apache-2.0), ~22k ⭐, v0.16.7 released March 31, 2026. Formerly MemGPT (the research project that pioneered OS-inspired virtual context management for LLMs). Letta's defining feature is a **multi-block memory architecture**: each agent holds named, editable in-context memory segments ("core memory") such as `human`, `persona`, and `archival` blocks, which the agent can read and write via tool calls. Memories persist across sessions in a Letta Server (self-hosted or Letta Cloud). Agents are accessed via a REST API. The **ADE (Agent Development Environment)** is a graphical interface for creating, testing, and monitoring agents in real-time. Multi-agent support via subagents and shared memory. Model-agnostic (OpenAI, Anthropic, local LLMs via Ollama).
+
+**Overlap with us:** Letta's named memory blocks (`human`, `persona`, `archival`) are a structured evolution of the same problem our `agent_memories` table and `MEMORY.md` file solve — persistent, durable knowledge for a long-lived agent. The ADE's graphical agent-monitoring interface overlaps with our Canvas; both offer a UI to inspect and interact with running agents. Letta Server exposes a REST API that accepts messages at agent endpoints — structurally similar to our A2A proxy (`POST /workspaces/:id/a2a`). Multi-agent subagent support maps to our parent/child workspace hierarchy. Letta's `initial_prompt` equivalent (agent system prompt + memory bootstrap) mirrors our `initial_prompt` in `config.yaml`.
+
+**Differentiation:** Letta is focused on **the single-agent memory problem**, not the multi-agent org problem. No Docker container isolation per agent, no workspace registry, no real-time WebSocket org chart, no scheduling, no channels to Slack/Telegram/Discord. The ADE shows individual agents; it does not visualize an org hierarchy or inter-agent A2A traffic. Letta's multi-agent support is hierarchical subagent spawning within a single Letta Server context — not independently deployable, independently schedulable workspaces. We're "a company of agents"; Letta is "an agent with a very good memory."
+
+**Worth borrowing:**
+- **Named, agent-editable memory blocks** — the `human` / `persona` / `archival` distinction is the clearest taxonomy we've seen for agent memory. Our `agent_memories` namespace is flat; adopting explicit named blocks (at minimum: `self`, `user`, `task-context`, `long-term-knowledge`) would make memory more inspectable and auditable in the Canvas.
+- **Memory self-editing as a tool call** — Letta agents call `core_memory_replace(label, old, new)` and `archival_memory_insert(content)` as first-class tool actions, making memory updates part of the visible tool-call trace. Our `commit_memory` MCP tool is close; making it show up in `activity_logs` as a named tool call (not a silent background action) would match this pattern.
+- **ADE real-time message inspector** — the ADE shows each tool call, memory read/write, and reasoning step inline in a timeline. This is more granular than our Canvas chat tab; it's the reference design for a "step-through debug mode" in our trace view.
+
+**Terminology collisions:**
+- "archival memory" — Letta: a searchable long-term store the agent queries via tool calls. Ours: not a defined term. Our `agent_memories` table is functionally similar but not surfaced to agents as a named primitive.
+- "persona" — Letta: a named memory block containing the agent's self-description. Ours: the `role:` field in `config.yaml` plus the system prompt. Same intent, different packaging.
+- "agent" — Letta: a long-lived server-side object with persistent memory, accessed via REST. Ours: a Docker container running one of six runtimes. Same word, substantially different operational model.
+
+**Signals to react to:**
+- If Letta ships a multi-agent canvas that visualizes org hierarchies (not just individual agent inspection) → direct overlap with our Canvas; they have strong memory credibility that could attract our target buyer.
+- If Letta formalizes a memory-block schema as an open spec (building on their MemGPT research lineage) → evaluate adopting it as Starfire's `agent_memories` schema to gain interoperability with the Letta ecosystem.
+- If Letta Cloud adds Slack/Telegram/Discord inbound triggers → they gain channels capability; currently absent, but a REST API means it's one webhook away.
+- Watch v0.x → v1.0 trajectory: v0.16.7 suggests pre-1.0 API stability; a 1.0 GA announcement would signal enterprise readiness and an accelerated sales motion.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~22k ⭐, v0.16.7 March 31, 2026
+
+---
+
+### Trigger.dev — `triggerdotdev/trigger.dev`
+
+**Pitch:** "Build and deploy fully-managed AI agents and workflows."
+
+**Shape:** TypeScript (Apache-2.0), ~14.5k ⭐, v4.4.3 released March 10, 2026. Started as a developer-friendly alternative to cron + background jobs; v4 repositions it squarely as **durable execution infrastructure for AI agents**. Tasks are TypeScript functions decorated with `task()` — they run in a managed cloud with: automatic retry with exponential backoff, checkpoint/resume (task state saved to storage, resumed after crash or timeout), queue and concurrency control, and cron scheduling up to one-year duration. Human-in-the-loop via `waitForApproval()`. MCP server available (`trigger-dev` MCP) so AI assistants (Claude Code, Cursor, etc.) can trigger tasks, check run status, and deploy from chat. Warm starts execute in 100–300ms. Fully self-hostable.
+
+**Overlap with us:** Trigger.dev's `schedules.task()` cron system overlaps directly with our `workspace_schedules` table and `POST /workspaces/:id/schedules` API — both schedule recurring prompts/tasks on a cron expression. The checkpoint/resume model (`waitForApproval`, `wait.for()`) is a precise parallel to our workspace `pause` / `resume` lifecycle. Human-in-the-loop approval gates match our `POST /workspaces/:id/approvals`. The MCP server enabling AI agents to trigger tasks maps to the same use case as our MCP server's `delegate_task` tool. Both platforms treat long-running, fault-tolerant execution as a core design constraint.
+
+**Differentiation:** Trigger.dev has **no agent identity** — tasks are stateless TypeScript functions, not persistent agents with memory, roles, or system prompts. No visual canvas, no org hierarchy, no A2A protocol, no workspace registry. It is execution infrastructure, not an agent platform. The right mental model: Trigger.dev is to Starfire what Temporal is to Starfire — a lower-level durable execution substrate that Starfire's workspaces could use as a backend for their scheduled tasks, rather than a replacement for Starfire itself. Their `/channels` story is inbound-only (HTTP triggers, webhooks, cron) with no native Slack/Telegram messaging surface.
+
+**Worth borrowing:**
+- **Idempotency keys on task invocation** — `trigger("send-report", payload, { idempotencyKey: runId })` ensures a task is only ever executed once for a given key, even if triggered multiple times. Our delegation system has no equivalent guard; duplicate delegations from container-restart races are a known issue (see `delegationRetryDelay` in `delegation.go`). Adding idempotency keys to `POST /workspaces/:id/delegate` would fix the duplicate-execution class of bugs.
+- **`waitForApproval()` inline in task code** — instead of a separate approvals table and polling loop, the task itself calls `await wait.for({ event: "approval" })` and suspends. Our approval flow requires a separate API round-trip and the agent to re-check; Trigger.dev's inline suspension is the right long-term model.
+- **Warm-start pool for sub-300ms agent starts** — Trigger.dev pre-warms TypeScript runtimes to achieve 100–300ms cold start. Our Docker workspace startup is measured in seconds. Worth evaluating their warm-pool approach for our claude-code and langgraph adapters.
+
+**Terminology collisions:**
+- "task" — Trigger.dev: a decorated TypeScript function, the atomic unit of execution. Ours: informal (used in delegation context and `current_task` heartbeat field). Their definition is more precise; consider whether our heartbeat `current_task` field should be renamed to avoid collision with Trigger.dev vocabulary in integrations.
+- "schedule" — same word, same meaning. Trigger.dev's cron schedule API and ours (`workspace_schedules`) are functionally identical at the surface. Our docs should distinguish "Starfire schedules" from "Trigger.dev schedules" clearly when positioning integrations.
+- "run" — Trigger.dev: a single execution of a task with full lifecycle tracking. Ours: informal. No hard collision.
+
+**Signals to react to:**
+- If Trigger.dev ships native agent identity (persistent state, memory across runs, named agents) → crosses from infrastructure into platform territory; reevaluate positioning.
+- If the `trigger-dev` MCP becomes a de facto standard for AI-tool-triggered background work → add a Trigger.dev adapter to our workspace runtime so Starfire agents can fire Trigger.dev tasks as a tool call (complementary, not competitive).
+- If Trigger.dev ships a Slack/Discord trigger adapter → they gain a channels surface; currently absent. Watch their integration roadmap.
+- Their TypeScript-first stack and MCP server target the same developer audience as our Canvas + mcp-server. Co-marketing opportunity: "run your Starfire agent on a schedule via Trigger.dev" is a cleaner story than our current in-house cron for some user segments.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~14.5k ⭐, v4.4.3 March 10, 2026
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
