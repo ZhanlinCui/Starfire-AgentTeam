@@ -47,6 +47,10 @@ venv/
 # Docker
 *.log
 
+# Local docker-compose overrides (per-developer port remaps, etc.)
+docker-compose.override.yml
+docker-compose.override.yaml
+
 # Test / coverage
 coverage/
 .coverage
