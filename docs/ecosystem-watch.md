@@ -568,6 +568,57 @@ builders; Starfire users are developers building agent companies.
 
 ---
 
+### MeDo — `moda.baidu.com` *(commercial, no public repo)*
+
+**Pitch:** Baidu's no-code AI application builder — scaffold and publish AI-powered apps through a visual editor with pre-built LLM integrations.
+
+**Shape:** SaaS platform (Baidu Cloud, Chinese-market primary). Users compose apps from prompt nodes, data connectors, and UI blocks via a drag-and-drop canvas. Published apps get a hosted endpoint. REST API for programmatic create/update/publish. No OSS repo; requires Baidu Cloud account. Hackathon track: MeDo SEEAI May 2026.
+
+**Overlap with us:** Both expose a canvas (theirs visual, ours org-chart + agent config). Both have an app-publish lifecycle. Our Canvas + workspace provisioner covers roughly the same surface for technical teams; MeDo targets non-developers. Starfire is integrating MeDo via the new `medo.py` builtin tool to enter the May 2026 hackathon.
+
+**Differentiation:** MeDo is a no-code builder for end-user AI apps; Starfire is a developer platform for multi-agent engineering workflows. MeDo has no A2A, no workspace Docker runtime, no persistent agent memory. Starfire has no no-code UI builder. The integration is complementary: Starfire agents can create and publish MeDo apps programmatically as a delivery step.
+
+**Worth borrowing:**
+- **Visual prompt-node composition** — their drag-and-drop prompt pipeline could inspire a simpler Canvas view for non-technical stakeholders who want to inspect an agent's workflow without reading system-prompt.md.
+
+**Terminology collisions:**
+- "app" — a published MeDo application vs a Starfire workspace; different lifecycles.
+- "canvas" — their visual editor surface vs our org-chart canvas.
+
+**Signals to react to:**
+- If MeDo opens a REST API to third-party agent platforms → expand `medo.py` from stub to full integration; file a Hermes-style adapter PR.
+- If the MeDo hackathon win generates user interest → prioritise MeDo as a first-class delivery target alongside GitHub and Slack.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** commercial SaaS (Baidu Cloud), active hackathon track May 2026
+
+---
+
+### Inngest — `inngest/inngest`
+
+**Pitch:** "The durable execution engine for AI agents and background functions — write reliable step functions that survive failures, retries, and deploys."
+
+**Shape:** Go + TypeScript SDK (Apache 2.0), ~5.2k ⭐. Cloud-hosted or self-hosted. Developers define "functions" as async step graphs; Inngest handles scheduling, retries, concurrency limits, rate limits, and failure recovery. HTTP-native — functions live in your existing web server and Inngest calls them. Comparable to Temporal but lighter: no gRPC, no workflow history replay, just durable HTTP step execution.
+
+**Overlap with us:** Starfire ships an in-house cron scheduler and a Temporal adapter for durable background work. Inngest is a third option in the same space: schedule-driven agent tasks, retry-on-failure, fan-out. Any Starfire feature that today uses `CronCreate` or temporal_workflow could instead use Inngest's step functions.
+
+**Differentiation:** Inngest is infrastructure-as-a-service for function scheduling; Starfire is an agent platform. Inngest has no concept of persistent agent identity, workspace lifecycle, org hierarchy, or A2A. Our Temporal adapter is the direct equivalent for complex multi-step workflows; Inngest targets simpler event-triggered functions with less operational overhead than Temporal.
+
+**Worth borrowing:**
+- **HTTP-native step graph model** — Inngest steps live in a plain web route. Adopting this pattern for Starfire's skill execution would remove the need for the workspace's internal runner process for short tasks.
+- **Built-in rate limiting per function** — our current delegation tool has no per-workspace rate limit; Inngest's concurrency + rate-limit primitives are the reference design.
+
+**Terminology collisions:**
+- "function" — Inngest functions are durable async step graphs; ours are Python tool functions decorated with `@tool`.
+- "event" — Inngest events trigger functions; our `event_queue` in A2A is different.
+
+**Signals to react to:**
+- If Inngest ships native agent-state primitives (memory, long-running sessions) → direct overlap with our workspace model; re-evaluate our Temporal dependency.
+- If Inngest becomes the dominant alternative to Temporal in AI stacks → add an `inngest` adapter alongside `temporal_workflow.py`.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~5.2k ⭐, v0.x actively developed
+
+---
+
 ### Arize Phoenix — `Arize-ai/phoenix`
 
 **Pitch:** "AI observability and evaluation platform — trace, evaluate, and troubleshoot LLM applications and agents in production."
