@@ -24,6 +24,9 @@ type WorkspaceInfo struct {
 	LastErrorRate   float64         `json:"last_error_rate"`
 	LastSampleError string          `json:"last_sample_error"`
 	UptimeSeconds   int             `json:"uptime_seconds"`
+	// Phase 30 — surface the runtime so molecli can flag remote agents
+	// (runtime='external') distinctly from local Docker workspaces.
+	Runtime string `json:"runtime"`
 }
 
 // AgentCardInfo represents parsed fields from the agent_card JSON.

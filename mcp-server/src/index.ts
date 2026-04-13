@@ -732,6 +732,134 @@ export async function handleDeleteKV(params: { workspace_id: string; key: string
 }
 
 // ============================================================
+// Phase 30 — Remote agent management handlers
+// ============================================================
+
+// Fetch the workspace list, filter to runtime='external'. The platform
+// has no dedicated /remote-agents endpoint — we filter client-side
+// because the workspace list is small (tens to low-hundreds, never
+// pagination scale) and adding a server endpoint would be a separate PR.
+export async function handleListRemoteAgents() {
+  const data = await apiCall("GET", "/workspaces");
+  if (!Array.isArray(data)) {
+    return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  }
+  const remote = data
+    .filter((w: { runtime?: string }) => w.runtime === "external")
+    .map((w: Record<string, unknown>) => ({
+      id: w.id,
+      name: w.name,
+      status: w.status,
+      url: w.url,
+      last_heartbeat_at: w.last_heartbeat_at,
+      uptime_seconds: w.uptime_seconds,
+      tier: w.tier,
+    }));
+  return { content: [{ type: "text" as const, text: JSON.stringify({ count: remote.length, agents: remote }, null, 2) }] };
+}
+
+// Phase 30.4 — token-gated; from MCP we don't have a workspace bearer
+// (we're an operator surface), so we hit the lightweight unauthenticated
+// /workspaces/:id endpoint and project the same shape. Still useful as
+// a focused tool that doesn't dump the full workspace blob.
+export async function handleGetRemoteAgentState(params: { workspace_id: string }) {
+  const data = await apiCall("GET", `/workspaces/${params.workspace_id}`);
+  if (data && typeof data === "object" && "error" in data) {
+    return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+  }
+  const w = data as Record<string, unknown>;
+  const projected = {
+    workspace_id: w.id,
+    status: w.status,
+    paused: w.status === "paused",
+    deleted: w.status === "removed",
+    runtime: w.runtime,
+    last_heartbeat_at: w.last_heartbeat_at,
+  };
+  return { content: [{ type: "text" as const, text: JSON.stringify(projected, null, 2) }] };
+}
+
+export async function handleGetRemoteAgentSetupCommand(params: { workspace_id: string }) {
+  // Verify the workspace exists and is runtime='external' before generating
+  // the command — saves the operator from pasting a bash line that will
+  // fail because the workspace was a Docker workspace they typed by mistake.
+  const ws = await apiCall("GET", `/workspaces/${params.workspace_id}`);
+  if (ws && typeof ws === "object" && "error" in ws) {
+    return { content: [{ type: "text" as const, text: JSON.stringify(ws, null, 2) }] };
+  }
+  const w = ws as { id: string; name: string; runtime?: string };
+  if (w.runtime !== "external") {
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          error: "workspace is not external; setup command only applies to runtime='external'",
+          workspace_id: w.id,
+          actual_runtime: w.runtime,
+        }, null, 2),
+      }],
+    };
+  }
+  const setupCmd = [
+    `# Run on the remote machine where the agent will live:`,
+    `pip install starfire-agent  # (or: pip install -e <starfire-checkout>/sdk/python)`,
+    ``,
+    `WORKSPACE_ID=${w.id} \\`,
+    `PLATFORM_URL=${PLATFORM_URL} \\`,
+    `python3 -m examples.remote-agent.run`,
+    ``,
+    `# The agent will register, mint its bearer token (cached at`,
+    `# ~/.starfire/${w.id}/.auth_token), pull secrets, then heartbeat.`,
+  ].join("\n");
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        workspace_id: w.id,
+        workspace_name: w.name,
+        platform_url: PLATFORM_URL,
+        setup_command: setupCmd,
+      }, null, 2),
+    }],
+  };
+}
+
+export async function handleCheckRemoteAgentFreshness(params: {
+  workspace_id: string;
+  threshold_seconds?: number;
+}) {
+  const ws = await apiCall("GET", `/workspaces/${params.workspace_id}`);
+  if (ws && typeof ws === "object" && "error" in ws) {
+    return { content: [{ type: "text" as const, text: JSON.stringify(ws, null, 2) }] };
+  }
+  const w = ws as { last_heartbeat_at?: string; status?: string; runtime?: string };
+  const threshold = params.threshold_seconds ?? 90;
+  const heartbeatStr = w.last_heartbeat_at;
+  let secondsSince: number | null = null;
+  if (heartbeatStr) {
+    const heartbeatMs = Date.parse(heartbeatStr);
+    if (!isNaN(heartbeatMs)) {
+      secondsSince = Math.floor((Date.now() - heartbeatMs) / 1000);
+    }
+  }
+  const fresh = secondsSince !== null && secondsSince <= threshold;
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        workspace_id: params.workspace_id,
+        status: w.status,
+        runtime: w.runtime,
+        last_heartbeat_at: heartbeatStr,
+        seconds_since_heartbeat: secondsSince,
+        threshold_seconds: threshold,
+        fresh,
+      }, null, 2),
+    }],
+  };
+}
+
+// ============================================================
 // MCP Server registration
 // ============================================================
 
@@ -1478,6 +1606,37 @@ export function createServer() {
     "Delete a single K/V memory entry.",
     { workspace_id: z.string(), key: z.string() },
     handleDeleteKV,
+  );
+
+  // ==========================================================
+  // Phase 30 — Remote agent management (SaaS surface)
+  // ==========================================================
+  srv.tool(
+    "list_remote_agents",
+    "List all workspaces with runtime='external' (Phase 30 remote agents). Returns id, name, status, last_heartbeat_at, url. Useful for spotting offline remote agents from a Claude session.",
+    {},
+    handleListRemoteAgents,
+  );
+
+  srv.tool(
+    "get_remote_agent_state",
+    "Phase 30.4 lightweight state poll for a remote workspace. Returns {status, paused, deleted}. Faster than get_workspace because it doesn't include config/agent_card. Useful when you only need to know whether a remote agent is alive.",
+    { workspace_id: z.string() },
+    handleGetRemoteAgentState,
+  );
+
+  srv.tool(
+    "get_remote_agent_setup_command",
+    "Build a one-shot bash command an operator can paste into a remote machine to register an agent against this Starfire platform. Returns a string like `WORKSPACE_ID=... PLATFORM_URL=... python3 -m starfire_agent.bootstrap`. The workspace must exist and be runtime='external'.",
+    { workspace_id: z.string() },
+    handleGetRemoteAgentSetupCommand,
+  );
+
+  srv.tool(
+    "check_remote_agent_freshness",
+    "Compare a remote workspace's last_heartbeat_at against now. Returns {seconds_since_heartbeat, fresh, threshold_seconds} where `fresh` is true if the agent heartbeated within the platform's stale-after window. Useful for pre-flight checks before delegating work.",
+    { workspace_id: z.string(), threshold_seconds: z.number().optional() },
+    handleCheckRemoteAgentFreshness,
   );
 
   return srv;

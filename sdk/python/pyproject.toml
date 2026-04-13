@@ -3,21 +3,33 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "starfire-plugin"
-version = "0.1.0"
-description = "SDK for building Starfire plugins (rules, skills, per-runtime adaptors)."
+name = "starfire-sdk"
+version = "0.2.0"
+description = "Starfire SDK — build plugins (starfire_plugin) AND remote agents that join a Starfire org from another machine (starfire_agent)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Starfire" }]
+keywords = ["agents", "ai", "multi-agent", "a2a", "plugins", "saas", "remote-agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "pyyaml>=6.0",
+    "requests>=2.31",
 ]
 
 [project.urls]
 Homepage = "https://github.com/hongmingw/Starfire-AgentTeam"
 Repository = "https://github.com/hongmingw/Starfire-AgentTeam"
+Documentation = "https://github.com/hongmingw/Starfire-AgentTeam/tree/main/sdk/python"
 
 [tool.setuptools.packages.find]
-include = ["starfire_plugin*"]
+include = ["starfire_plugin*", "starfire_agent*"]
 exclude = ["template*", "tests*"]
