@@ -103,7 +103,7 @@ for the full code audit.
 
 ### Shipping order (eight bounded steps, ~2 weeks to GA)
 
-- [ ] **30.1 Workspace auth tokens** — foundation; prevents spoofing.
+- [x] **30.1 Workspace auth tokens** — foundation; prevents spoofing.
   New `workspace_auth_tokens` table; `POST /registry/register` issues
   a token; middleware validates `Authorization: Bearer <token>` on
   `/registry/heartbeat`, `/registry/update-card`. Lazy bootstrap so
@@ -111,7 +111,7 @@ for the full code audit.
   containers — provisioner carries the token through the existing env-var
   pattern. No feature flag.
 
-- [ ] **30.2 Secrets pull endpoint** — `GET /workspaces/:id/secrets`
+- [x] **30.2 Secrets pull endpoint** — `GET /workspaces/:id/secrets/values`
   returns decrypted secrets JSON, gated by the 30.1 token. Local agents
   can use it too (removes env-at-create coupling for rotating secrets).
 
@@ -119,12 +119,12 @@ for the full code audit.
   returns a tarball; agent unpacks locally. Replaces Docker-exec plugin
   install for remote agents. Behind `REMOTE_PLUGIN_DOWNLOAD_ENABLED`.
 
-- [ ] **30.4 Workspace state polling** — `GET /workspaces/:id/state`
+- [x] **30.4 Workspace state polling** — `GET /workspaces/:id/state`
   returns `{status, paused, deleted_at, pending_events[]}` as a drop-in
   for the WebSocket feed remote agents can't reach. Behind
   `REMOTE_STATE_POLLING_ENABLED`.
 
-- [ ] **30.5 A2A proxy token validation** — the proxy enforces the caller's
+- [x] **30.5 A2A proxy token validation** — the proxy enforces the caller's
   auth token on `POST /workspaces/:id/a2a`. Mutual auth between agents.
 
 - [ ] **30.6 Direct sibling discovery + URL caching** — agents call
@@ -137,7 +137,7 @@ for the full code audit.
   another. Health sweep routes by runtime. Behind
   `REMOTE_LIVENESS_POLLING_ENABLED`.
 
-- [ ] **30.8 Remote-agent SDK + docs** — `sdk/python/starfire_agent/`
+- [x] **30.8 Remote-agent SDK + docs** — `sdk/python/starfire_agent/`
   thin client: register → pull secrets → run A2A loop → poll state →
   heartbeat. Working `examples/remote-agent/` a new user can run on a
   laptop. Remove the three feature flags. Remote workspaces become GA.

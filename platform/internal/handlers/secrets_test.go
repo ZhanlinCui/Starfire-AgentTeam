@@ -534,3 +534,153 @@ func TestSecretsGetModel_DBError(t *testing.T) {
 		t.Errorf("unmet sqlmock expectations: %v", err)
 	}
 }
+
+// ==================== Values — Phase 30.2 decrypted pull ====================
+
+// These tests target the secrets.Values handler (GET /workspaces/:id/secrets/values)
+// which returns decrypted key→value pairs so remote agents can bootstrap their env
+// without the provisioner pushing at container-create time. Auth follows the
+// Phase 30.1 lazy-bootstrap contract: workspaces with any live token MUST present
+// a matching Bearer, legacy workspaces (no tokens yet) are grandfathered through.
+
+const testWsID = "550e8400-e29b-41d4-a716-446655440000"
+
+// secretsValuesRequest builds a GET request with the given Authorization header.
+func secretsValuesRequest(w http.ResponseWriter, auth string) *gin.Context {
+	c, _ := gin.CreateTestContext(w.(*httptest.ResponseRecorder))
+	c.Params = gin.Params{{Key: "id", Value: testWsID}}
+	req := httptest.NewRequest("GET", "/workspaces/"+testWsID+"/secrets/values", nil)
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	c.Request = req
+	return c
+}
+
+func TestSecretsValues_LegacyWorkspaceGrandfathered(t *testing.T) {
+	mock := setupTestDB(t)
+	handler := NewSecretsHandler(nil)
+
+	// No tokens on file → grandfather path
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(testWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT key, encrypted_value, encryption_version FROM global_secrets`).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "encrypted_value", "encryption_version"}).
+			AddRow("GLOBAL_KEY", []byte("plainvalue"), 0))
+	mock.ExpectQuery(`SELECT key, encrypted_value, encryption_version FROM workspace_secrets WHERE workspace_id`).
+		WithArgs(testWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "encrypted_value", "encryption_version"}).
+			AddRow("WS_KEY", []byte("ws_plainvalue"), 0))
+
+	w := httptest.NewRecorder()
+	c := secretsValuesRequest(w, "") // no auth — grandfathered
+	handler.Values(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("bad JSON: %v", err)
+	}
+	if body["GLOBAL_KEY"] != "plainvalue" || body["WS_KEY"] != "ws_plainvalue" {
+		t.Errorf("unexpected body: %+v", body)
+	}
+}
+
+func TestSecretsValues_MissingTokenWhenOnFile(t *testing.T) {
+	mock := setupTestDB(t)
+	handler := NewSecretsHandler(nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(testWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	w := httptest.NewRecorder()
+	c := secretsValuesRequest(w, "")
+	handler.Values(c)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSecretsValues_WrongToken(t *testing.T) {
+	mock := setupTestDB(t)
+	handler := NewSecretsHandler(nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(testWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// ValidateToken lookup returns nothing
+	mock.ExpectQuery(`SELECT id, workspace_id FROM workspace_auth_tokens`).
+		WillReturnError(sql.ErrNoRows)
+
+	w := httptest.NewRecorder()
+	c := secretsValuesRequest(w, "Bearer wrong-token")
+	handler.Values(c)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSecretsValues_ValidTokenReturnsDecryptedMerge(t *testing.T) {
+	mock := setupTestDB(t)
+	handler := NewSecretsHandler(nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs(testWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id, workspace_id FROM workspace_auth_tokens`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "workspace_id"}).AddRow("tok-1", testWsID))
+	mock.ExpectExec(`UPDATE workspace_auth_tokens SET last_used_at`).
+		WithArgs("tok-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// Global and workspace secrets — workspace overrides SHARED_KEY
+	mock.ExpectQuery(`SELECT key, encrypted_value, encryption_version FROM global_secrets`).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "encrypted_value", "encryption_version"}).
+			AddRow("ONLY_GLOBAL", []byte("global_val"), 0).
+			AddRow("SHARED_KEY", []byte("global_loses"), 0))
+	mock.ExpectQuery(`SELECT key, encrypted_value, encryption_version FROM workspace_secrets WHERE workspace_id`).
+		WithArgs(testWsID).
+		WillReturnRows(sqlmock.NewRows([]string{"key", "encrypted_value", "encryption_version"}).
+			AddRow("ONLY_WS", []byte("ws_val"), 0).
+			AddRow("SHARED_KEY", []byte("ws_wins"), 0))
+
+	w := httptest.NewRecorder()
+	c := secretsValuesRequest(w, "Bearer good-token")
+	handler.Values(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["ONLY_GLOBAL"] != "global_val" {
+		t.Errorf("global missing: %v", body)
+	}
+	if body["ONLY_WS"] != "ws_val" {
+		t.Errorf("ws missing: %v", body)
+	}
+	if body["SHARED_KEY"] != "ws_wins" {
+		t.Errorf("workspace should override global: got %q", body["SHARED_KEY"])
+	}
+}
+
+func TestSecretsValues_InvalidWorkspaceID(t *testing.T) {
+	setupTestDB(t)
+	handler := NewSecretsHandler(nil)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{{Key: "id", Value: "not-a-uuid"}}
+	c.Request = httptest.NewRequest("GET", "/workspaces/not-a-uuid/secrets/values", nil)
+	handler.Values(c)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}

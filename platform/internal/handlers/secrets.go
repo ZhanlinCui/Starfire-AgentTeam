@@ -8,6 +8,7 @@ import (
 
 	"github.com/agent-molecule/platform/internal/crypto"
 	"github.com/agent-molecule/platform/internal/db"
+	"github.com/agent-molecule/platform/internal/wsauth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -91,6 +92,101 @@ func (h *SecretsHandler) List(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, secrets)
+}
+
+// Values handles GET /workspaces/:id/secrets/values — returns the merged
+// decrypted secrets as a flat `{"KEY": "value"}` JSON map so remote agents
+// can pull their secrets on startup instead of having them pushed at
+// container-create time. Phase 30.2.
+//
+// Authentication: the workspace must present its own Phase 30.1 auth token
+// in `Authorization: Bearer …`. Legacy workspaces with no live token on file
+// are grandfathered through (same lazy-bootstrap contract as
+// /registry/heartbeat) so in-flight workspaces keep working during the
+// rollout. Anything else → 401.
+//
+// The same merge rule as List applies: workspace secrets override globals
+// with the same key. Values are returned verbatim (no base64, no JSON
+// escaping beyond the standard), matching the env-var shape the provisioner
+// would have injected at container-create.
+func (h *SecretsHandler) Values(c *gin.Context) {
+	workspaceID := c.Param("id")
+	if !uuidRegex.MatchString(workspaceID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace ID"})
+		return
+	}
+	ctx := c.Request.Context()
+
+	// Auth gate (Phase 30.1/30.2): enforce the bearer token when the
+	// workspace has any live token on file. Grandfather legacy workspaces
+	// through so a rolling upgrade doesn't lock them out.
+	hasLive, hlErr := wsauth.HasAnyLiveToken(ctx, db.DB, workspaceID)
+	if hlErr != nil {
+		// DB hiccup checking token existence — the handler's security
+		// posture is "fail closed" here because unlike heartbeat, we're
+		// about to return plaintext secrets. Heartbeat can safely
+		// fail-open because it only reports state.
+		log.Printf("wsauth: HasAnyLiveToken(%s) failed for secrets.Values: %v", workspaceID, hlErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth check failed"})
+		return
+	}
+	if hasLive {
+		tok := wsauth.BearerTokenFromHeader(c.GetHeader("Authorization"))
+		if tok == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing workspace auth token"})
+			return
+		}
+		if err := wsauth.ValidateToken(ctx, db.DB, workspaceID, tok); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid workspace auth token"})
+			return
+		}
+	}
+
+	// Merged secrets: globals first, then workspace overrides (same as
+	// provisioner path in workspace_provision.go so env-vars look identical
+	// whether the workspace was bootstrapped locally or remotely).
+	out := map[string]string{}
+
+	globalRows, gErr := db.DB.QueryContext(ctx,
+		`SELECT key, encrypted_value, encryption_version FROM global_secrets`)
+	if gErr == nil {
+		defer globalRows.Close()
+		for globalRows.Next() {
+			var k string
+			var v []byte
+			var ver int
+			if globalRows.Scan(&k, &v, &ver) == nil {
+				decrypted, decErr := crypto.DecryptVersioned(v, ver)
+				if decErr != nil {
+					log.Printf("secrets.Values: decrypt global %s failed (version=%d): %v — skipping", k, ver, decErr)
+					continue
+				}
+				out[k] = string(decrypted)
+			}
+		}
+	}
+
+	wsRows, wErr := db.DB.QueryContext(ctx,
+		`SELECT key, encrypted_value, encryption_version FROM workspace_secrets WHERE workspace_id = $1`,
+		workspaceID)
+	if wErr == nil {
+		defer wsRows.Close()
+		for wsRows.Next() {
+			var k string
+			var v []byte
+			var ver int
+			if wsRows.Scan(&k, &v, &ver) == nil {
+				decrypted, decErr := crypto.DecryptVersioned(v, ver)
+				if decErr != nil {
+					log.Printf("secrets.Values: decrypt workspace %s failed (version=%d): %v — skipping", k, ver, decErr)
+					continue
+				}
+				out[k] = string(decrypted) // workspace override wins over global
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, out)
 }
 
 // Set handles POST /workspaces/:id/secrets
