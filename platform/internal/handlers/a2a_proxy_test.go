@@ -602,3 +602,134 @@ func TestProxyA2AError_BusyShape(t *testing.T) {
 		t.Errorf(`body["retry_after"]: got %v, want %d`, body["retry_after"], busyRetryAfterSeconds)
 	}
 }
+
+// ==================== validateCallerToken — Phase 30.5 ====================
+
+// The A2A proxy validates the *caller's* token (not the target's) when the
+// caller is a workspace. Canvas (empty X-Workspace-ID), system callers
+// (webhook:/system:/test: prefixes), and self-calls all bypass.
+
+func TestValidateCallerToken_LegacyCallerGrandfathered(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	// Caller has no live tokens → grandfather path → returns nil
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("ws-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/workspaces/x/a2a", bytes.NewBufferString("{}"))
+
+	if err := validateCallerToken(context.Background(), c, "ws-legacy"); err != nil {
+		t.Errorf("legacy caller should grandfather through; got %v", err)
+	}
+	if w.Code != 200 {
+		// gin default before c.JSON is 200; we want no error response written
+		if w.Body.Len() != 0 {
+			t.Errorf("legacy path should not write a response body; got %s", w.Body.String())
+		}
+	}
+}
+
+func TestValidateCallerToken_MissingTokenWhenOnFile(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("ws-authed").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/workspaces/x/a2a", bytes.NewBufferString("{}"))
+	// No Authorization header set
+
+	err := validateCallerToken(context.Background(), c, "ws-authed")
+	if err == nil {
+		t.Fatal("expected error for missing token")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("missing caller auth token")) {
+		t.Errorf("expected specific error, got %s", w.Body.String())
+	}
+}
+
+func TestValidateCallerToken_InvalidToken(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("ws-authed").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id, workspace_id FROM workspace_auth_tokens`).
+		WillReturnError(sql.ErrNoRows)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("POST", "/workspaces/x/a2a", bytes.NewBufferString("{}"))
+	req.Header.Set("Authorization", "Bearer wrong")
+	c.Request = req
+
+	if err := validateCallerToken(context.Background(), c, "ws-authed"); err == nil {
+		t.Fatal("expected error for bad token")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestValidateCallerToken_ValidToken(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("ws-authed").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id, workspace_id FROM workspace_auth_tokens`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "workspace_id"}).AddRow("t1", "ws-authed"))
+	mock.ExpectExec(`UPDATE workspace_auth_tokens SET last_used_at`).
+		WithArgs("t1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("POST", "/workspaces/x/a2a", bytes.NewBufferString("{}"))
+	req.Header.Set("Authorization", "Bearer goodtok")
+	c.Request = req
+
+	if err := validateCallerToken(context.Background(), c, "ws-authed"); err != nil {
+		t.Errorf("valid token should pass; got %v", err)
+	}
+}
+
+func TestValidateCallerToken_WrongWorkspaceBindingRejected(t *testing.T) {
+	// Attacker has token T issued to ws-A. Tries to call A2A claiming
+	// X-Workspace-ID: ws-B. Token validates against hash but workspace
+	// mismatch → rejected.
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("ws-b-attacker").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id, workspace_id FROM workspace_auth_tokens`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "workspace_id"}).AddRow("t-a", "ws-a-owner"))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest("POST", "/workspaces/x/a2a", bytes.NewBufferString("{}"))
+	req.Header.Set("Authorization", "Bearer tok-for-A")
+	c.Request = req
+
+	if err := validateCallerToken(context.Background(), c, "ws-b-attacker"); err == nil {
+		t.Fatal("token from A must not authenticate caller B")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
