@@ -195,6 +195,11 @@ class OpenClawA2AExecutor(AgentExecutor):
 
     def __init__(self, heartbeat=None):
         self._heartbeat = heartbeat
+        # Use a stable session ID derived from the workspace so that conversational
+        # skills (e.g. Miaoda App Builder) can maintain state across multiple A2A
+        # messages.  Using context.task_id would create a new session per message,
+        # breaking multi-turn skill workflows.
+        self._session_id = os.environ.get("WORKSPACE_ID", "starfire-default")
 
     async def execute(self, context, event_queue):
         from a2a.utils import new_agent_text_message
@@ -211,7 +216,7 @@ class OpenClawA2AExecutor(AgentExecutor):
         try:
             proc = await asyncio.create_subprocess_exec(
                 "openclaw", "agent",
-                "--session-id", context.task_id or "default",
+                "--session-id", self._session_id,
                 "--message", user_message,
                 "--json", "--timeout", "120",
                 stdout=asyncio.subprocess.PIPE,
