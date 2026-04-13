@@ -3,6 +3,7 @@ package handlers
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -15,9 +16,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/envx"
 	"github.com/agent-molecule/platform/internal/plugins"
 	"github.com/agent-molecule/platform/internal/provisioner"
+	"github.com/agent-molecule/platform/internal/wsauth"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -808,4 +811,149 @@ func (h *PluginsHandler) copyPluginToContainer(ctx context.Context, containerNam
 
 	// Copy to /configs — the tar's plugins/<name>/ prefix creates the directory
 	return h.docker.CopyToContainer(ctx, containerName, "/configs", &buf, container.CopyToContainerOptions{})
+}
+
+// Download handles GET /workspaces/:id/plugins/:name/download?source=<scheme://spec>
+//
+// Phase 30.3 — stream the named plugin as a gzipped tarball so remote
+// agents can pull and unpack locally. Replaces the Docker-exec install
+// path for `runtime='external'` workspaces.
+//
+// The `source` query parameter is optional. When omitted we default to
+// `local://<name>` (the platform's curated registry). When set, any
+// registered scheme works — `github://owner/repo`, future `clawhub://…`,
+// etc. — which lets a workspace install plugins from upstream repos
+// without the platform pre-staging them.
+//
+// Auth: requires the workspace's bearer token (same shape as 30.2). A
+// plugin tarball often ships rule text + skill files that reference
+// internal APIs, so we prefer fail-closed on DB errors to prevent a
+// hiccup from turning this into an unauth'd download endpoint.
+func (h *PluginsHandler) Download(c *gin.Context) {
+	workspaceID := c.Param("id")
+	pluginName := c.Param("name")
+	ctx := c.Request.Context()
+
+	if err := validatePluginName(pluginName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Auth gate — workspace token required (fail-closed on DB errors).
+	hasLive, hlErr := wsauth.HasAnyLiveToken(ctx, db.DB, workspaceID)
+	if hlErr != nil {
+		log.Printf("wsauth: plugin.Download HasAnyLiveToken(%s) failed: %v", workspaceID, hlErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth check failed"})
+		return
+	}
+	if hasLive {
+		tok := wsauth.BearerTokenFromHeader(c.GetHeader("Authorization"))
+		if tok == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing workspace auth token"})
+			return
+		}
+		if err := wsauth.ValidateToken(ctx, db.DB, workspaceID, tok); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid workspace auth token"})
+			return
+		}
+	}
+
+	// Resolve source — default to local://<name> when caller doesn't
+	// specify. This is the common case: pulling a platform-curated
+	// plugin by its canonical name.
+	source := c.Query("source")
+	if source == "" {
+		source = "local://" + pluginName
+	}
+
+	// Reuse the existing install-layer bounds so download shares
+	// fetch-timeout, body limits, and staged-dir size caps with Install.
+	timeout := envx.Duration("PLUGIN_INSTALL_FETCH_TIMEOUT", defaultInstallFetchTimeout)
+	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := h.resolveAndStage(fetchCtx, installRequest{Source: source})
+	if err != nil {
+		var he *httpErr
+		if errors.As(err, &he) {
+			c.JSON(he.Status, he.Body)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer os.RemoveAll(result.StagedDir)
+
+	// Sanity: resolved plugin name must match the URL path param.
+	// Resolvers can return a plugin.yaml-derived name that differs
+	// from the URL segment; reject the mismatch rather than ship a
+	// tarball labeled "foo" that actually contains plugin "bar".
+	if result.PluginName != pluginName {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":          fmt.Sprintf("source resolved to plugin %q but URL requested %q", result.PluginName, pluginName),
+			"resolved_name":  result.PluginName,
+			"requested_name": pluginName,
+		})
+		return
+	}
+
+	// Stream the staged tree as application/gzip. We set Content-Disposition
+	// with the canonical filename so wget/curl -O land the bytes at
+	// "<name>.tar.gz" without the caller specifying a path.
+	c.Header("Content-Type", "application/gzip")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.tar.gz"`, pluginName))
+	c.Header("X-Plugin-Name", pluginName)
+	c.Header("X-Plugin-Source", result.Source.Raw())
+
+	gz := gzip.NewWriter(c.Writer)
+	tw := tar.NewWriter(gz)
+	if err := streamDirAsTar(result.StagedDir, tw); err != nil {
+		// Headers likely already sent — we can't cleanly emit a JSON
+		// error body, so log and abort. Caller sees truncated stream,
+		// which is the standard HTTP streaming failure mode.
+		log.Printf("plugin.Download: tar stream failed for %s: %v", pluginName, err)
+	}
+	_ = tw.Close()
+	_ = gz.Close()
+}
+
+// streamDirAsTar writes every regular file + dir under `root` to the tar
+// writer, using paths relative to root so the caller's unpack produces
+// `<name>/<original-layout>` without any leading tempdir components.
+// Symlinks are skipped intentionally — they would usually point outside
+// the staged tree and we don't want to expose platform filesystem paths.
+func streamDirAsTar(root string, tw *tar.Writer) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil // skip symlinks — see doc comment
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = rel
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(tw, f)
+		return err
+	})
 }

@@ -526,3 +526,222 @@ def test_peer_info_dataclass_defaults():
     assert p.tier == 2
     assert p.status == "unknown"
     assert p.agent_card == {}
+
+
+# ---------------------------------------------------------------------------
+# Phase 30.3 — install_plugin
+# ---------------------------------------------------------------------------
+
+import io
+import tarfile
+
+from starfire_agent.client import _safe_extract_tar
+
+
+def _make_tarball(files: dict[str, bytes]) -> bytes:
+    """Build a gzipped tarball in memory from a {name: content} dict."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, content in files.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(content)
+            info.mode = 0o644
+            tf.addfile(info, io.BytesIO(content))
+    return buf.getvalue()
+
+
+class _StreamingResp:
+    """requests-shaped response that supports .iter_content + context-manager."""
+    def __init__(self, status: int, body: bytes):
+        self.status_code = status
+        self._body = body
+    def __enter__(self): return self
+    def __exit__(self, *a): return None
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+    def iter_content(self, chunk_size=64*1024):
+        i = 0
+        while i < len(self._body):
+            yield self._body[i:i+chunk_size]
+            i += chunk_size
+
+
+def test_install_plugin_unpacks_into_per_workspace_dir(client: RemoteAgentClient, tmp_path):
+    client.save_token("t")
+    tarball = _make_tarball({
+        "plugin.yaml": b"name: hello\nversion: 1.0.0\n",
+        "rules.md":    b"some rules\n",
+        "skills/x/SKILL.md": b"---\nname: x\n---\n",
+    })
+
+    # Stub out the streaming GET (used inside `with`)
+    def fake_get(url, headers=None, params=None, stream=False, timeout=None):
+        assert "/plugins/hello/download" in url
+        assert headers["Authorization"] == "Bearer t"
+        return _StreamingResp(200, tarball)
+    client._session.get.side_effect = fake_get
+    # POST install record — also stubbed
+    client._session.post.return_value = FakeResponse(200, {"status": "installed"})
+
+    target = client.install_plugin("hello")
+
+    assert target.exists()
+    assert (target / "plugin.yaml").read_bytes() == b"name: hello\nversion: 1.0.0\n"
+    assert (target / "skills" / "x" / "SKILL.md").read_text().startswith("---\nname: x\n")
+    # Atomic-rename means no .staging-* leftover
+    assert not any(p.name.startswith(".staging-") for p in client.plugins_dir.iterdir())
+    # Reported the install
+    post_url = client._session.post.call_args[0][0]
+    assert post_url.endswith(f"/workspaces/{client.workspace_id}/plugins")
+
+
+def test_install_plugin_passes_source_query_when_given(client: RemoteAgentClient):
+    client.save_token("t")
+    tarball = _make_tarball({"plugin.yaml": b"name: gh\nversion: 0.1.0\n"})
+    captured = {}
+    def fake_get(url, headers=None, params=None, stream=False, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        return _StreamingResp(200, tarball)
+    client._session.get.side_effect = fake_get
+    client._session.post.return_value = FakeResponse(200, {})
+
+    client.install_plugin("gh", source="github://acme/my-plugin")
+    assert captured["params"] == {"source": "github://acme/my-plugin"}
+
+
+def test_install_plugin_atomic_rollback_on_corrupt_tarball(client: RemoteAgentClient):
+    client.save_token("t")
+    # Truncated gzip — tarfile.open will raise
+    client._session.get.side_effect = lambda *a, **k: _StreamingResp(200, b"not a gzip")
+    client._session.post.return_value = FakeResponse(200, {})
+
+    import pytest as _pytest
+    with _pytest.raises(Exception):
+        client.install_plugin("broken")
+    # No .staging-* dir lingering, no half-installed plugin dir
+    assert not list(client.plugins_dir.iterdir()) if client.plugins_dir.exists() else True
+
+
+def test_install_plugin_overwrites_existing(client: RemoteAgentClient):
+    client.save_token("t")
+    # Pre-populate an old version
+    old_dir = client.plugins_dir / "rotateme"
+    old_dir.mkdir(parents=True)
+    (old_dir / "old-marker").write_text("old")
+
+    new_tarball = _make_tarball({
+        "plugin.yaml": b"name: rotateme\nversion: 2.0.0\n",
+        "new-marker": b"new",
+    })
+    client._session.get.side_effect = lambda *a, **k: _StreamingResp(200, new_tarball)
+    client._session.post.return_value = FakeResponse(200, {})
+
+    client.install_plugin("rotateme")
+    assert not (client.plugins_dir / "rotateme" / "old-marker").exists()
+    assert (client.plugins_dir / "rotateme" / "new-marker").read_text() == "new"
+
+
+def test_install_plugin_runs_setup_sh_when_present(client: RemoteAgentClient, tmp_path):
+    client.save_token("t")
+    # setup.sh that drops a sentinel file we can verify
+    sentinel = tmp_path / "ran"
+    setup_script = f"#!/bin/bash\nset -e\ntouch {sentinel}\n".encode()
+    tarball = _make_tarball({
+        "plugin.yaml": b"name: withsetup\n",
+        "setup.sh":    setup_script,
+    })
+    client._session.get.side_effect = lambda *a, **k: _StreamingResp(200, tarball)
+    client._session.post.return_value = FakeResponse(200, {})
+
+    client.install_plugin("withsetup")
+
+    # setup.sh extracted with 0644 perms (tar default), so script execution
+    # depends on bash interpreting the file contents. The bash invocation
+    # runs without the +x bit because we call `bash <setup>` not `<setup>`.
+    assert sentinel.exists(), "setup.sh did not run"
+
+
+def test_install_plugin_skips_setup_when_disabled(client: RemoteAgentClient, tmp_path):
+    client.save_token("t")
+    sentinel = tmp_path / "should-not-exist"
+    tarball = _make_tarball({
+        "setup.sh": f"#!/bin/bash\ntouch {sentinel}\n".encode(),
+    })
+    client._session.get.side_effect = lambda *a, **k: _StreamingResp(200, tarball)
+    client._session.post.return_value = FakeResponse(200, {})
+
+    client.install_plugin("nosetup", run_setup_sh=False)
+    assert not sentinel.exists()
+
+
+def test_install_plugin_skips_platform_report_when_disabled(client: RemoteAgentClient):
+    client.save_token("t")
+    tarball = _make_tarball({"plugin.yaml": b"name: silent\n"})
+    client._session.get.side_effect = lambda *a, **k: _StreamingResp(200, tarball)
+
+    client.install_plugin("silent", report_to_platform=False)
+    # POST never called when report disabled
+    client._session.post.assert_not_called()
+
+
+def test_install_plugin_404_raises_with_useful_url(client: RemoteAgentClient):
+    client.save_token("t")
+    client._session.get.side_effect = lambda *a, **k: _StreamingResp(404, b"")
+    import pytest as _pytest
+    with _pytest.raises(Exception):
+        client.install_plugin("missing")
+
+
+# ---------------------------------------------------------------------------
+# _safe_extract_tar
+# ---------------------------------------------------------------------------
+
+def test_safe_extract_rejects_path_traversal(tmp_path: Path):
+    """Tar slip CVE: an entry named '../escape' must be rejected."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        info = tarfile.TarInfo(name="../escape.txt")
+        data = b"oops"
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    buf.seek(0)
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        import pytest as _pytest
+        with _pytest.raises(ValueError, match="refusing tar entry escaping"):
+            _safe_extract_tar(tf, tmp_path)
+
+
+def test_safe_extract_rejects_absolute_paths(tmp_path: Path):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        info = tarfile.TarInfo(name="/etc/passwd")
+        data = b"oops"
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    buf.seek(0)
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        import pytest as _pytest
+        with _pytest.raises(ValueError):
+            _safe_extract_tar(tf, tmp_path)
+
+
+def test_safe_extract_skips_symlinks_silently(tmp_path: Path):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        sym = tarfile.TarInfo(name="link.lnk")
+        sym.type = tarfile.SYMTYPE
+        sym.linkname = "/etc/passwd"
+        tf.addfile(sym)
+        # Plus a normal file alongside
+        info = tarfile.TarInfo(name="real.md")
+        data = b"ok"
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    buf.seek(0)
+    with tarfile.open(fileobj=buf, mode="r") as tf:
+        _safe_extract_tar(tf, tmp_path)
+    assert (tmp_path / "real.md").exists()
+    assert not (tmp_path / "link.lnk").exists()

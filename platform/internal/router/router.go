@@ -235,6 +235,9 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	r.GET("/workspaces/:id/plugins/compatibility", plgh.CheckRuntimeCompatibility)
 	r.POST("/workspaces/:id/plugins", plgh.Install)
 	r.DELETE("/workspaces/:id/plugins/:name", plgh.Uninstall)
+	// Phase 30.3 — stream plugin as tar.gz so remote agents can pull +
+	// unpack locally instead of going through Docker exec.
+	r.GET("/workspaces/:id/plugins/:name/download", plgh.Download)
 
 	// Bundles
 	bh := handlers.NewBundleHandler(broadcaster, prov, platformURL, configsDir, dockerCli)
