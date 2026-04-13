@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/provisioner"
 	"github.com/agent-molecule/platform/internal/registry"
+	"github.com/agent-molecule/platform/internal/wsauth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -27,6 +30,14 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 	if callerID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "X-Workspace-ID header is required"})
 		return
+	}
+
+	// Phase 30.6 — verify the caller's bearer token before revealing any
+	// peer URL. Without this, a random internet host that knows a
+	// workspace ID could enumerate siblings. Legacy workspaces (no
+	// live tokens) grandfather through the same way heartbeat does.
+	if err := validateDiscoveryCaller(c.Request.Context(), c, callerID); err != nil {
+		return // response already written
 	}
 
 	if callerID != "" {
@@ -133,6 +144,15 @@ func (h *DiscoveryHandler) Discover(c *gin.Context) {
 func (h *DiscoveryHandler) Peers(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
+
+	// Phase 30.6 — the peer list leaks sibling identities and URLs.
+	// Require the bearer token bound to `workspaceID` before returning it.
+	// The caller HERE is identified by the URL path param, not a header,
+	// because `/registry/:id/peers` is scoped to "my own peers" — a
+	// workspace asking for its own view of the team.
+	if err := validateDiscoveryCaller(ctx, c, workspaceID); err != nil {
+		return // response already written
+	}
 
 	var parentID sql.NullString
 	err := db.DB.QueryRowContext(ctx, `SELECT parent_id FROM workspaces WHERE id = $1`, workspaceID).
@@ -253,4 +273,34 @@ func (h *DiscoveryHandler) CheckAccess(c *gin.Context) {
 
 	allowed := registry.CanCommunicate(payload.CallerID, payload.TargetID)
 	c.JSON(http.StatusOK, gin.H{"allowed": allowed})
+}
+
+// validateDiscoveryCaller enforces the Phase 30.6 bearer-token contract
+// on the discovery endpoints. Same lazy-bootstrap shape as the registry
+// and secrets handlers: legacy workspaces with no tokens are grandfathered,
+// workspaces with tokens must present a matching Bearer, token binding
+// is strict (A's token cannot authenticate caller B).
+//
+// Fail-closed on DB errors: discovery reveals peer identities and URLs,
+// so we prefer a 500 to a silent auth bypass.
+func validateDiscoveryCaller(ctx context.Context, c *gin.Context, workspaceID string) error {
+	hasLive, err := wsauth.HasAnyLiveToken(ctx, db.DB, workspaceID)
+	if err != nil {
+		log.Printf("wsauth: discovery HasAnyLiveToken(%s) failed: %v", workspaceID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth check failed"})
+		return err
+	}
+	if !hasLive {
+		return nil // legacy / pre-upgrade
+	}
+	tok := wsauth.BearerTokenFromHeader(c.GetHeader("Authorization"))
+	if tok == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing workspace auth token"})
+		return errors.New("missing token")
+	}
+	if err := wsauth.ValidateToken(ctx, db.DB, workspaceID, tok); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid workspace auth token"})
+		return err
+	}
+	return nil
 }
