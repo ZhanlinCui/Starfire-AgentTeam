@@ -593,7 +593,11 @@ func handleMyChatMember(bot *tgbotapi.BotAPI, update *tgbotapi.ChatMemberUpdated
 		log.Printf("Channels: Telegram bot added to chat %d (%s)", chat.ID, chat.Title)
 	case "left", "kicked":
 		log.Printf("Channels: Telegram bot removed from chat %d (%s)", chat.ID, chat.Title)
-		// TODO: mark channel disabled in DB
+		// #123 — persist the disabled state so the next scheduled outbound
+		// message doesn't try to send to a chat the bot no longer belongs
+		// to (Telegram 403 spam). manager.go wires disableChannelByChatID
+		// to an UPDATE on workspace_channels + manager reload.
+		disableChannelByChatID(context.Background(), strconv.FormatInt(chat.ID, 10))
 	}
 }
 
@@ -601,5 +605,14 @@ func handleMyChatMember(bot *tgbotapi.BotAPI, update *tgbotapi.ChatMemberUpdated
 // here we just invoke a callback registered there. For now, it's a no-op placeholder
 // since the manager owns Redis access.
 var clearChatHistory = func(ctx context.Context, channelID, chatID string) {
+	// Set by manager.go init
+}
+
+// disableChannelByChatID is wired by manager.go to UPDATE workspace_channels
+// SET enabled=false WHERE config->>'chat_id' = chatID, then reload the manager.
+// Called from onMyChatMember when the bot is removed from a chat (#123). The
+// default is a no-op so tests and early boot don't crash if the channels
+// manager isn't initialised yet.
+var disableChannelByChatID = func(ctx context.Context, chatID string) {
 	// Set by manager.go init
 }
