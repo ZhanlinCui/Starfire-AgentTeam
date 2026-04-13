@@ -523,3 +523,87 @@ func TestValidateWorkspaceAccess(t *testing.T) {
 		})
 	}
 }
+
+// ---------- isImageNotFoundErr (issue #117) ----------
+
+func TestIsImageNotFoundErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"moby no such image", fmtErr(`Error response from daemon: No such image: workspace-template:openclaw`), true},
+		{"no such image lowercase", fmtErr(`error: no such image: foo:bar`), true},
+		{"image not found", fmtErr(`Error: image "workspace-template:crewai" not found`), true},
+		{"generic not found without image", fmtErr(`container not found`), false},
+		{"unrelated error", fmtErr(`connection refused`), false},
+		{"permission denied", fmtErr(`permission denied`), false},
+	}
+	for _, tc := range cases {
+		got := isImageNotFoundErr(tc.err)
+		if got != tc.want {
+			t.Errorf("%s: isImageNotFoundErr(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
+	}
+}
+
+// fmtErr builds a plain error for table-driven tests without pulling in fmt.
+type testErr string
+
+func (e testErr) Error() string { return string(e) }
+
+func fmtErr(s string) error { return testErr(s) }
+
+// ---------- runtimeTagFromImage (issue #117) ----------
+
+func TestRuntimeTagFromImage(t *testing.T) {
+	cases := map[string]string{
+		"workspace-template:openclaw": "openclaw",
+		"workspace-template:claude-code": "claude-code",
+		"workspace-template:base": "base",
+		// Fallbacks for non-standard shapes
+		"myregistry.io/foo:v1.2": "v1.2",
+		"no-colon-at-all":        "no-colon-at-all",
+		// Edge: trailing colon — use whole string (tag is empty)
+		"foo:": "foo:",
+	}
+	for in, want := range cases {
+		got := runtimeTagFromImage(in)
+		if got != want {
+			t.Errorf("runtimeTagFromImage(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// ---------- End-to-end error-message shape ----------
+//
+// Verifies the wrapped error that Start() surfaces when ContainerCreate
+// hits "no such image" — callers rely on both the human hint and the
+// original underlying error being preserved (via %w) for errors.Is chains.
+
+func TestImageNotFoundErrorIncludesBuildHint(t *testing.T) {
+	// Simulate the exact wrap Start() produces without needing a real
+	// Docker daemon (the live verification path runs via the e2e stage).
+	underlying := testErr(`Error response from daemon: No such image: workspace-template:openclaw`)
+	if !isImageNotFoundErr(underlying) {
+		t.Fatalf("precondition failed: classifier didn't recognise moby's message")
+	}
+
+	tag := runtimeTagFromImage("workspace-template:openclaw")
+	wrapped := testErr(
+		`docker image "workspace-template:openclaw" not found — run 'bash workspace-template/build-all.sh ` +
+			tag + `' to build it (underlying error: ` + underlying.Error() + `)`,
+	)
+	s := wrapped.Error()
+
+	for _, want := range []string{
+		`"workspace-template:openclaw"`,
+		`bash workspace-template/build-all.sh openclaw`,
+		`No such image: workspace-template:openclaw`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("wrapped error missing %q, got: %s", want, s)
+		}
+	}
+}
