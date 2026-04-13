@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 import os
 import stat
+import subprocess
+import tarfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -42,6 +44,46 @@ DEFAULT_STATE_POLL_INTERVAL = 30.0   # seconds
 # moved (restart with new port) is picked up quickly; long enough that
 # we don't hit the discovery endpoint on every A2A call.
 DEFAULT_URL_CACHE_TTL = 300.0        # 5 minutes
+
+
+def _safe_extract_tar(tf: tarfile.TarFile, dest: Path) -> None:
+    """Extract a tarfile, refusing entries that would escape `dest`
+    and silently skipping symlinks/hardlinks.
+
+    Tar archives can include ``..`` and absolute paths. Without explicit
+    rejection we'd risk the classic "tar slip" CVE — a malicious plugin
+    source could overwrite the agent's home files. We resolve every
+    entry's target to an absolute path, verify it lives inside dest, and
+    extract one-by-one so the symlink-skip actually takes effect (a bare
+    ``extractall`` would still write the symlinks we marked as skipped).
+    """
+    dest_abs = dest.resolve()
+    for member in tf.getmembers():
+        # Symlinks and hardlinks could point outside the staged tree;
+        # skip them entirely (matches the platform-side tar producer).
+        if member.issym() or member.islnk():
+            continue
+        target = (dest / member.name).resolve()
+        try:
+            target.relative_to(dest_abs)
+        except ValueError as exc:
+            raise ValueError(
+                f"refusing tar entry escaping dest: {member.name!r} -> {target}"
+            ) from exc
+        tf.extract(member, dest)
+
+
+def _rmtree_quiet(path: Path) -> None:
+    """rm -rf <path> swallowing missing-file errors. Used for atomic
+    install rollback where we sometimes call this on a non-existent
+    staging dir."""
+    import shutil
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        logger.warning("rmtree(%s) failed: %s", path, exc)
 
 
 @dataclass
@@ -452,6 +494,122 @@ class RemoteAgentClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    # ------------------------------------------------------------------
+    # Plugin install (Phase 30.3)
+    # ------------------------------------------------------------------
+
+    @property
+    def plugins_dir(self) -> Path:
+        """Where pulled plugins are unpacked. Lives under the same
+        per-workspace directory as the auth token (``~/.starfire/<id>/``)
+        so a single rm cleans the agent's local state."""
+        return self._token_dir / "plugins"
+
+    def install_plugin(
+        self,
+        name: str,
+        source: str | None = None,
+        run_setup_sh: bool = True,
+        report_to_platform: bool = True,
+    ) -> Path:
+        """Pull a plugin tarball from the platform, unpack it, optionally
+        run its ``setup.sh``, and report success.
+
+        Phase 30.3 contract:
+
+        1. Stream ``GET /workspaces/:id/plugins/:name/download[?source=…]``
+        2. Atomically extract into ``~/.starfire/<workspace>/plugins/<name>/``
+           via a sibling-tempdir + rename so a partial extract never
+           leaves the directory in a half-installed state.
+        3. If ``setup.sh`` exists in the unpacked tree, run it (bash) so
+           pip/npm deps land on the agent's machine. Failures from
+           ``setup.sh`` are logged but don't prevent the install record
+           — the agent author can re-run setup manually.
+        4. POST ``/workspaces/:id/plugins`` with the source string so the
+           platform's ``workspace_plugins`` table reflects the install.
+
+        Returns the path to the unpacked plugin directory.
+        Raises ``requests.HTTPError`` on download failure (401 / 404 / etc.).
+        """
+        target = self.plugins_dir / name
+        staging = self.plugins_dir / f".staging-{name}-{uuid.uuid4().hex[:8]}"
+        self.plugins_dir.mkdir(parents=True, exist_ok=True)
+
+        url = f"{self.platform_url}/workspaces/{self.workspace_id}/plugins/{name}/download"
+        params: dict[str, str] = {}
+        if source:
+            params["source"] = source
+
+        # Stream so we don't blow memory on a large plugin
+        with self._session.get(
+            url, headers=self._auth_headers(), params=params,
+            stream=True, timeout=60.0,
+        ) as resp:
+            resp.raise_for_status()
+            staging.mkdir(parents=True)
+            try:
+                # Use raw byte-stream + tarfile so we don't depend on
+                # requests' .raw being seekable.
+                import io as _io
+                buf = _io.BytesIO()
+                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        buf.write(chunk)
+                buf.seek(0)
+                with tarfile.open(fileobj=buf, mode="r:gz") as tf:
+                    _safe_extract_tar(tf, staging)
+            except Exception:
+                # Roll back the partial extract
+                _rmtree_quiet(staging)
+                raise
+
+        # Atomic swap: remove old dir if present, rename staging into place.
+        if target.exists():
+            _rmtree_quiet(target)
+        staging.rename(target)
+        logger.info("plugin %s unpacked to %s", name, target)
+
+        # 3. setup.sh — best-effort. We never raise on its failure because
+        # the plugin files are now correctly installed; setup is just for
+        # heavy deps that the agent author can rerun manually.
+        if run_setup_sh:
+            setup = target / "setup.sh"
+            if setup.is_file():
+                try:
+                    proc = subprocess.run(
+                        ["bash", str(setup)],
+                        cwd=str(target),
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if proc.returncode == 0:
+                        logger.info("plugin %s setup.sh ok", name)
+                    else:
+                        logger.warning(
+                            "plugin %s setup.sh exit=%d stderr=%s",
+                            name, proc.returncode, proc.stderr[:200],
+                        )
+                except subprocess.TimeoutExpired:
+                    logger.warning("plugin %s setup.sh timed out (120s)", name)
+                except FileNotFoundError:
+                    logger.warning("plugin %s setup.sh present but bash not found", name)
+
+        # 4. Report to platform — write a workspace_plugins row so List
+        # reflects the install. Best-effort; the local files are correct
+        # regardless of whether this POST succeeds.
+        if report_to_platform:
+            try:
+                report_source = source or f"local://{name}"
+                self._session.post(
+                    f"{self.platform_url}/workspaces/{self.workspace_id}/plugins",
+                    headers=self._auth_headers(),
+                    json={"source": report_source},
+                    timeout=10.0,
+                )
+            except Exception as exc:
+                logger.warning("plugin %s install record POST failed: %s", name, exc)
+
+        return target
 
     # ------------------------------------------------------------------
     # Run loop
