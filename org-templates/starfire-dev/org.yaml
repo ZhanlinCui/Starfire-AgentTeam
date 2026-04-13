@@ -144,7 +144,7 @@ workspaces:
               6. Wait for tasks from Dev Lead.
             schedules:
               - name: Security audit (every 12h)
-                cron_expr: "0 */12 * * *"
+                cron_expr: "7 6,18 * * *"
                 prompt: |
                   Recurring security audit. Be thorough and incremental.
 
