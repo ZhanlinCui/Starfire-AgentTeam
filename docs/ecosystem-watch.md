@@ -483,7 +483,59 @@ builders; Starfire users are developers building agent companies.
 - If AG2 ships persistent agent state → direct competitor to our Claude Code and LangGraph adapters.
 
 **Last reviewed:** 2026-04-13 · **Stars / activity:** ~40k ⭐ (primary community repo for AutoGen lineage)
+---
 
+### Zep — `getzep/zep`
+
+**Pitch:** "Long-term memory for AI Assistants — fast, scalable, and production-ready."
+
+**Shape:** Go server + Python/TypeScript SDK (Apache 2.0), ~3.5k ⭐ on OSS server. Zep runs as a sidecar service that processes conversation history: it extracts facts, entities, and summaries automatically via background LLM calls, stores them with vector embeddings, and serves the most relevant memories at query time. Supports self-hosted (Docker) and Zep Cloud. The Python SDK wraps a REST API; sessions map to users, conversations map to sessions. Zep Cloud adds a managed embedding + retrieval layer, temporal reasoning ("what did the user prefer last month?"), and automatic entity resolution.
+
+**Overlap with us:** Zep's `session` → `conversation` → `memory` hierarchy is an operational parallel to our `workspace` → `activity_logs` → `agent_memories` stack. Both store per-entity conversation context that survives process restarts. Zep's background extraction pipeline (the model reads conversation turns and writes structured facts without the agent asking) is the same gap Mem0's extraction fills — and it's the gap between our raw key-value `commit_memory` tool and what a truly autonomous long-running agent needs. Zep's entity graph (people, places, organizations extracted from conversation) has no equivalent in our current memory model.
+
+**Differentiation:** Zep is a memory service, not an agent platform. No workspace lifecycle, no org hierarchy, no A2A, no canvas, no scheduling. The key technical difference from Mem0: Zep emphasizes **temporal memory** (time-aware retrieval — what was true when) and **entity resolution** (merging references to the same real-world entity across conversations), while Mem0 emphasizes semantic similarity search. Zep is server-based (separate HTTP service) whereas Mem0 can run embedded. Starfire could integrate Zep as the backend for our `/workspaces/:id/memories` endpoint without changing the API surface.
+
+**Worth borrowing:**
+- **Background extraction on every activity log write** — Zep processes new conversation turns asynchronously. We could trigger a lightweight extraction job whenever a new `activity_log` row is inserted, building a structured fact store without agents explicitly calling `commit_memory`.
+- **Temporal memory queries** — "what did this agent know before PR #102 merged?" is currently unanswerable in our system. Timestamped fact entries with an `invalidated_at` column would enable this for auditing and rollback.
+
+**Terminology collisions:**
+- "session" — Zep: a conversation thread for one user. Ours: not a defined term; our closest analogue is the workspace's activity log.
+- "memory" — same word, overlapping intent; Zep memories are extracted and time-stamped; ours are explicit key-value pairs.
+
+**Signals to react to:**
+- If Zep ships a multi-user / multi-agent scoped memory store → directly competes with our team memory model.
+- If Zep's entity graph API stabilises → evaluate as a plug-in backend for our `/workspaces/:id/memories` to get entity resolution for free.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~3.5k ⭐ OSS server, Zep Cloud GA
+
+---
+
+### Cline — `cline/cline`
+
+**Pitch:** "Autonomous coding agent in your IDE — reads files, writes code, runs commands, uses the browser."
+
+**Shape:** VS Code extension (Apache 2.0), ~40k ⭐. Cline (formerly Claude Dev) runs as a VS Code sidebar agent that can read any file in your workspace, write and edit files, execute terminal commands, use the browser via Playwright, and call MCP tools — all with human approval gates on each action. Supports Claude, GPT-4, Gemini, local models via Ollama. Per-task cost tracking. "Auto-approve" mode for trusted operations. Extensible via MCP servers (Cline can both call MCP tools and act as an MCP host).
+
+**Overlap with us:** Cline's approval gate (`approve / reject` per file write or command) is the same pattern as our `POST /workspaces/:id/approvals` — both gate autonomous actions on human sign-off before execution. Cline's MCP tool integration (it can call any MCP server) means Cline users can already point Cline at our `mcp-server` and have Cline manage Starfire workspaces from VS Code without any native Cline integration. The "autonomous engineer agent" abstraction — read codebase → plan → write code → run tests → iterate — is exactly what our Backend Engineer and Frontend Engineer workspaces approximate via A2A delegation. Cline is the best-executed OSS implementation of this pattern; studying its approval UX, context window management, and task decomposition is directly applicable.
+
+**Differentiation:** Cline is a **single-user, single-IDE, single-task tool**. No persistent workspace identity between tasks, no org hierarchy, no A2A between agents, no scheduling, no channels. Cline users who want a team of agents collaborating asynchronously are our target upgrade customer. Cline lacks Starfire's cross-runtime flexibility (six adapters), the Canvas org view, and the platform API that lets non-developer tools query agent state.
+
+**Worth borrowing:**
+- **Per-action approval UI** — Cline's sidebar shows a diff before each file write and a command preview before each terminal execution. Our `approvals` table has the data model; the Canvas approval UX could adopt this granularity instead of one approve-all-or-nothing gate.
+- **Task cost tracking** — Cline shows token cost per task in real time. Our `activity_logs` table captures the raw data; surfacing cost estimates in the Canvas chat panel would close a UX gap that enterprise buyers care about.
+- **Context window compaction** — Cline manages its own context window, summarising old turns to stay within limits. Our long-running agents (Security Auditor, QA Engineer on 12h cron) would benefit from the same pattern rather than hitting context limits and failing silently.
+
+**Terminology collisions:**
+- "task" — Cline: a single autonomous coding session. Ours: `current_task` field on a workspace heartbeat. Overlapping concept, different scope.
+- "MCP server" — both support it; no collision, but Cline's MCP host role means it can drive Starfire via our mcp-server today.
+
+**Signals to react to:**
+- If Cline ships multi-agent support (multiple Cline instances collaborating) → they enter our space directly; watch the VS Code extension API for agent-to-agent message passing.
+- If Cline's approval UX pattern becomes the industry default → align our Canvas approval flow with it for familiarity.
+- Cline + our mcp-server is already a working integration path; consider documenting it as an official "Cline → Starfire" quickstart.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~40k ⭐, ~2M VS Code installs, actively maintained
 ---
 
 ## Candidates to add (backlog)

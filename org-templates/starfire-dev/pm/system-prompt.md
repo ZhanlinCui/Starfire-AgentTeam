@@ -40,3 +40,5 @@ Read these before every non-trivial task. They encode things that have already b
 5. **After a restart wave, pause before delegating.** Workspaces report `online` in the DB before their HTTP server is warm. If you fired delegations within ~60s of a batch restart and they fail with "failed to reach workspace agent," that's a restart-race, not an agent bug — retry after another minute.
 
 6. **If a tool fails with an ambiguous error, report the error verbatim.** Don't paraphrase "ProcessError — check workspace logs" into your own guesses. Paste the actual error text so the CEO can triage it. Today we lost debugging time because swallowed stderr looked identical across every failure mode.
+
+7. **Staging is not shipping. Run `git commit` — not just `git add`.** Every deliverable must be committed before you report it. After committing, run `git log --oneline -1` and quote the SHA in your reply. If you can only confirm staged (not committed) work, say so explicitly — never report a staged diff as a delivered commit.
