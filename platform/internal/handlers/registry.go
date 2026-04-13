@@ -35,6 +35,12 @@ func (h *RegistryHandler) Register(c *gin.Context) {
 	// Upsert workspace: update url, agent_card, status if already exists.
 	// On INSERT (workspace not yet created via POST /workspaces), use ID as name placeholder.
 	// Keep existing URL if provisioner already set a host-accessible one (starts with http://127.0.0.1).
+	//
+	// #73 guard: `WHERE workspaces.status IS DISTINCT FROM 'removed'` prevents
+	// a late heartbeat from a workspace that was just deleted from resurrecting
+	// the row. Without this guard, bulk deletes left tier-3 stragglers because
+	// the last pre-teardown heartbeat flipped status back to 'online' after
+	// Delete's UPDATE.
 	_, err := db.DB.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, url, agent_card, status, last_heartbeat_at)
 		VALUES ($1, $2, $3, $4::jsonb, 'online', now())
@@ -47,6 +53,7 @@ func (h *RegistryHandler) Register(c *gin.Context) {
 			status = 'online',
 			last_heartbeat_at = now(),
 			updated_at = now()
+		WHERE workspaces.status IS DISTINCT FROM 'removed'
 	`, payload.ID, payload.ID, payload.URL, agentCardStr)
 	if err != nil {
 		log.Printf("Registry register error: %v (id=%s)", err, payload.ID)
@@ -104,7 +111,10 @@ func (h *RegistryHandler) Heartbeat(c *gin.Context) {
 	var prevTask string
 	_ = db.DB.QueryRowContext(ctx, `SELECT COALESCE(current_task, '') FROM workspaces WHERE id = $1`, payload.WorkspaceID).Scan(&prevTask)
 
-	// Update heartbeat columns
+	// Update heartbeat columns. #73 guard: exclude 'removed' rows so a
+	// late heartbeat from a container that's being torn down doesn't
+	// refresh last_heartbeat_at on a tombstoned workspace (which would
+	// otherwise confuse the liveness monitor).
 	_, err := db.DB.ExecContext(ctx, `
 		UPDATE workspaces SET
 			last_heartbeat_at = now(),
@@ -114,7 +124,7 @@ func (h *RegistryHandler) Heartbeat(c *gin.Context) {
 			uptime_seconds    = $5,
 			current_task      = $6,
 			updated_at        = now()
-		WHERE id = $1
+		WHERE id = $1 AND status != 'removed'
 	`, payload.WorkspaceID, payload.ErrorRate, payload.SampleError,
 		payload.ActiveTasks, payload.UptimeSeconds, payload.CurrentTask)
 	if err != nil {
@@ -169,9 +179,11 @@ func (h *RegistryHandler) evaluateStatus(c *gin.Context, payload models.Heartbea
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.WorkspaceID, map[string]interface{}{})
 	}
 
-	// Recovery: if workspace was offline but is now sending heartbeats, bring it back online
+	// Recovery: if workspace was offline but is now sending heartbeats, bring it back online.
+	// #73 guard: `AND status = 'offline'` makes the flip conditional in a single statement,
+	// so a Delete that races with this recovery can't flip 'removed' back to 'online'.
 	if currentStatus == "offline" {
-		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1`, payload.WorkspaceID); err != nil {
+		if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'online', updated_at = now() WHERE id = $1 AND status = 'offline'`, payload.WorkspaceID); err != nil {
 			log.Printf("Heartbeat: failed to recover %s from offline: %v", payload.WorkspaceID, err)
 		}
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_ONLINE", payload.WorkspaceID, map[string]interface{}{})

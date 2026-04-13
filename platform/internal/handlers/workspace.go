@@ -453,7 +453,31 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		}
 	}
 
-	// Stop containers + remove volumes for all descendants (any depth)
+	// #73 fix: mark rows 'removed' in the DB FIRST, BEFORE stopping containers
+	// or removing volumes. Previously the sequence was stop → update-status,
+	// which left a gap where:
+	//   - the container's last pre-teardown heartbeat could resurrect the row
+	//     via the register-handler UPSERT (now also guarded in #73)
+	//   - the liveness monitor could observe 'online' status + expired Redis
+	//     TTL and trigger RestartByID, recreating a container we're trying
+	//     to destroy
+	// Marking 'removed' first makes both of those paths no-op via their
+	// existing `status NOT IN ('removed', ...)` guards.
+	allIDs := append([]string{id}, descendantIDs...)
+	if _, err := db.DB.ExecContext(ctx,
+		`UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = ANY($1::uuid[])`,
+		pq.Array(allIDs)); err != nil {
+		log.Printf("Delete status update error for %s: %v", id, err)
+	}
+	if _, err := db.DB.ExecContext(ctx,
+		`DELETE FROM canvas_layouts WHERE workspace_id = ANY($1::uuid[])`,
+		pq.Array(allIDs)); err != nil {
+		log.Printf("Delete canvas_layouts error for %s: %v", id, err)
+	}
+
+	// Now stop containers + remove volumes for all descendants (any depth).
+	// Any concurrent heartbeat / registration / liveness-triggered restart
+	// will see status='removed' and bail out early.
 	for _, descID := range descendantIDs {
 		if h.provisioner != nil {
 			h.provisioner.Stop(ctx, descID)
@@ -465,33 +489,14 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", descID, map[string]interface{}{})
 	}
 
-	// Batch DB update — mark all descendants removed + clear their canvas layouts
-	if len(descendantIDs) > 0 {
-		if _, err := db.DB.ExecContext(ctx,
-			`UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = ANY($1::uuid[])`,
-			pq.Array(descendantIDs)); err != nil {
-			log.Printf("Delete cascade DB error for %s: %v", id, err)
-		}
-		if _, err := db.DB.ExecContext(ctx,
-			`DELETE FROM canvas_layouts WHERE workspace_id = ANY($1::uuid[])`,
-			pq.Array(descendantIDs)); err != nil {
-			log.Printf("Delete cascade layouts error for %s: %v", id, err)
-		}
-	}
-
-	// Delete the workspace itself
+	// Stop + remove volume for the workspace itself
 	if h.provisioner != nil {
 		h.provisioner.Stop(ctx, id)
 		if err := h.provisioner.RemoveVolume(ctx, id); err != nil {
 			log.Printf("Delete %s volume removal warning: %v", id, err)
 		}
 	}
-	if _, err := db.DB.ExecContext(ctx, `UPDATE workspaces SET status = 'removed', updated_at = now() WHERE id = $1`, id); err != nil {
-		log.Printf("Delete %s status update error: %v", id, err)
-	}
-	if _, err := db.DB.ExecContext(ctx, `DELETE FROM canvas_layouts WHERE workspace_id = $1`, id); err != nil {
-		log.Printf("Delete %s layout error: %v", id, err)
-	}
+	db.ClearWorkspaceKeys(ctx, id)
 
 	h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_REMOVED", id, map[string]interface{}{
 		"cascade_deleted": len(descendantIDs),

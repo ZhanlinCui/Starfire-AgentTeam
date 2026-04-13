@@ -431,25 +431,17 @@ func TestWorkspaceDelete_CascadeWithChildren(t *testing.T) {
 		WithArgs("ws-parent-del").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("ws-child-del"))
 
-	// Expect broadcast for child WORKSPACE_REMOVED
+	// #73: single batch UPDATE covering [self + descendants] BEFORE stopping
+	// containers (prevents heartbeat/restart resurrection races).
+	mock.ExpectExec("UPDATE workspaces SET status = 'removed'").
+		WillReturnResult(sqlmock.NewResult(2, 2))
+	// Batch canvas_layouts DELETE for the same id set.
+	mock.ExpectExec("DELETE FROM canvas_layouts WHERE workspace_id = ANY").
+		WillReturnResult(sqlmock.NewResult(2, 2))
+	// Broadcast for child WORKSPACE_REMOVED (fires during the descendant loop).
 	mock.ExpectExec("INSERT INTO structure_events").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	// Expect batch cascade: mark all descendants removed via ANY($1::uuid[])
-	mock.ExpectExec("UPDATE workspaces SET status = 'removed'").
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	// Expect batch cascade: delete canvas layouts via ANY($1::uuid[])
-	mock.ExpectExec("DELETE FROM canvas_layouts WHERE workspace_id = ANY").
-		WillReturnResult(sqlmock.NewResult(1, 1))
-
-	// Expect parent status update
-	mock.ExpectExec("UPDATE workspaces SET status = 'removed'").
-		WithArgs("ws-parent-del").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	// Expect parent canvas layout delete
-	mock.ExpectExec("DELETE FROM canvas_layouts WHERE workspace_id").
-		WithArgs("ws-parent-del").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	// Expect broadcast for parent WORKSPACE_REMOVED
+	// Broadcast for parent WORKSPACE_REMOVED (fires after parent cleanup).
 	mock.ExpectExec("INSERT INTO structure_events").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
