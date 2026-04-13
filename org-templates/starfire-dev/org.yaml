@@ -104,7 +104,13 @@ workspaces:
               5. Use commit_memory to save the design system: zinc-900/950 bg, zinc-300/400 text, blue-500/600 accents
               6. Wait for tasks from Dev Lead.
           - name: Backend Engineer
-            role: Go platform, Postgres, Redis, A2A
+            role: >-
+              Owns the Go/Gin platform layer: REST handlers, WebSocket hub,
+              workspace provisioner, and A2A proxy. Manages Postgres schema,
+              migrations, and parameterized query safety; Redis pub/sub,
+              heartbeat TTLs, and per-workspace key cleanup. Enforces access
+              control on every endpoint and structured error handling across
+              all platform/ code. Primary reviewer for any platform-layer PR.
             tier: 3
             model: opus
             files_dir: backend-engineer
