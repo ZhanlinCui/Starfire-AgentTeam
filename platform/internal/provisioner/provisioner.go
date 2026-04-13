@@ -31,6 +31,7 @@ var RuntimeImages = map[string]string{
 	"deepagents":  "workspace-template:deepagents",
 	"crewai":      "workspace-template:crewai",
 	"autogen":     "workspace-template:autogen",
+	"hermes":      "workspace-template:hermes", // Hermes (NousResearch) — adapter.py in adapters/hermes/
 }
 
 const (
