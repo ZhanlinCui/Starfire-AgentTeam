@@ -357,3 +357,79 @@ func TestUpdateCard_DBError(t *testing.T) {
 		t.Errorf("unmet sqlmock expectations: %v", err)
 	}
 }
+
+// TestRegister_GuardAgainstResurrectingRemovedRow verifies the #73 fix:
+// the ON CONFLICT UPSERT must carry a `WHERE status IS DISTINCT FROM 'removed'`
+// clause so that a late heartbeat from a workspace that was just deleted
+// does not resurrect the row to 'online'.
+//
+// sqlmock matches on a substring of the rendered SQL — we assert the WHERE
+// clause is present in the statement issued by Register().
+func TestRegister_GuardAgainstResurrectingRemovedRow(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewRegistryHandler(broadcaster)
+
+	// This regex-ish match requires the guard. If the handler ever drops
+	// the clause the test fails because the emitted SQL won't match.
+	mock.ExpectExec("ON CONFLICT.*WHERE workspaces.status IS DISTINCT FROM 'removed'").
+		WithArgs("ws-resurrect", "ws-resurrect", "http://localhost:8000", `{"name":"x"}`).
+		WillReturnResult(sqlmock.NewResult(0, 0)) // 0 rows affected = correctly guarded
+	mock.ExpectQuery("SELECT url FROM workspaces WHERE id").
+		WithArgs("ws-resurrect").
+		WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("http://127.0.0.1:54321"))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/registry/register",
+		bytes.NewBufferString(`{"id":"ws-resurrect","url":"http://localhost:8000","agent_card":{"name":"x"}}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Register(c)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("#73 guard not present in UPSERT SQL: %v", err)
+	}
+}
+
+// TestHeartbeat_SkipsRemovedRows verifies #73: heartbeat UPDATE carries
+// `AND status != 'removed'` so a late heartbeat from a torn-down container
+// doesn't refresh last_heartbeat_at on a tombstoned workspace.
+func TestHeartbeat_SkipsRemovedRows(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	broadcaster := newTestBroadcaster()
+	handler := NewRegistryHandler(broadcaster)
+
+	// prevTask lookup
+	mock.ExpectQuery("SELECT COALESCE\\(current_task").
+		WithArgs("ws-zombie").
+		WillReturnRows(sqlmock.NewRows([]string{"current_task"}).AddRow(""))
+
+	// UPDATE must include `AND status != 'removed'`. 0 rows affected is fine —
+	// this is the tombstoned case the fix protects against.
+	mock.ExpectExec("UPDATE workspaces SET.*WHERE id = .* AND status != 'removed'").
+		WithArgs("ws-zombie", 0.0, "", 0, int64(0), "").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	// evaluateStatus SELECT
+	mock.ExpectQuery("SELECT status FROM workspaces WHERE id").
+		WithArgs("ws-zombie").
+		WillReturnError(sql.ErrNoRows) // row effectively removed from view
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/registry/heartbeat",
+		bytes.NewBufferString(`{"workspace_id":"ws-zombie","error_rate":0,"sample_error":"","active_tasks":0,"uptime_seconds":0,"current_task":""}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.Heartbeat(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("heartbeat handler must still return 200 even on tombstoned row, got %d", w.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("#73 guard not present in heartbeat UPDATE SQL: %v", err)
+	}
+}

@@ -25,15 +25,14 @@ func TestExtended_WorkspaceDelete(t *testing.T) {
 		WithArgs("ws-del").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 
-	// Expect status update to 'removed'
+	// #73: batch UPDATE happens BEFORE any container teardown.
+	// Uses ANY($1::uuid[]) even with a single ID for consistency.
 	mock.ExpectExec("UPDATE workspaces SET status = 'removed'").
-		WithArgs("ws-del").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	// Expect canvas layout delete
-	mock.ExpectExec("DELETE FROM canvas_layouts WHERE workspace_id").
-		WithArgs("ws-del").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	// Batch canvas layout delete (same id set).
+	mock.ExpectExec("DELETE FROM canvas_layouts WHERE workspace_id = ANY").
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Expect RecordAndBroadcast INSERT for WORKSPACE_REMOVED
 	mock.ExpectExec("INSERT INTO structure_events").
