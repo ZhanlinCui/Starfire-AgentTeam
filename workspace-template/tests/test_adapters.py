@@ -639,7 +639,7 @@ class TestAdapterRegistry:
         from adapters import discover_adapters
         adapters = discover_adapters()
         names = set(adapters.keys())
-        expected = {"langgraph", "crewai", "claude-code", "autogen", "deepagents", "openclaw"}
+        expected = {"langgraph", "crewai", "claude-code", "autogen", "deepagents", "openclaw", "hermes"}
         assert expected == names, f"Missing: {expected - names}, Extra: {names - expected}"
 
     def test_no_duplicate_names(self):

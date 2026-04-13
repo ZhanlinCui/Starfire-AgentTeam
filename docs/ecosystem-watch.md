@@ -625,6 +625,46 @@ builders; Starfire users are developers building agent companies.
 
 ---
 
+### Cline — `cline/cline`
+
+**Pitch:** "AI coding assistant that lives in VS Code and can autonomously edit files, run commands, and browse the web."
+
+**Shape:** VS Code extension (Apache-2.0), ~44k ⭐, pushed daily. Wraps any LLM (Claude, GPT-4o, Gemini, DeepSeek, local via Ollama) with a system-level tool belt: read/write files, run shell commands, call browser MCP. Single active session per VS Code window. Marketplace install, no containers, no persistent agent identity between sessions.
+
+**Overlap with us:** Cline's Claude-backed coding session is the same core loop as a Starfire Claude Code workspace — both wrap Claude with file+shell tools and stream results. super-dev explicitly runs inside Cline. Developers who discover Cline as a quick "AI pair programmer" are exactly our target user for the Claude Code runtime.
+
+**Differentiation:** Cline is a VS Code-local tool, not a multi-agent platform. No persistent identity between sessions, no org hierarchy, no A2A between agents, no WebSocket canvas, no scheduling. "Done" for Cline means a code change lands in the editor; "done" for Starfire means a team of agents deployed a feature through a review pipeline. Complementary shapes — a Cline user who needs parallelism is a Starfire convert.
+
+**Worth borrowing:** Auto-approval modes (read-only → write → execute tiers) with per-command diff review — more granular than our single `approvals` gate. The "cost meter" (running token spend shown in UI) is a cheap trust-building feature for our Canvas.
+
+**Terminology collisions:** "task" — their in-session coding task vs our `current_task` heartbeat field. "tools" — same word, both mean structured LLM tool calls.
+
+**Signals to react to:** If Cline adds multi-session agent persistence or cross-window agent communication → direct threat to our Claude Code runtime story. If Cline's MCP support becomes the de facto way developers wire tools → align our workspace tool model to the same MCP surface.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~44k ⭐, pushed daily
+
+---
+
+### OpenHands — `All-Hands-AI/OpenHands`
+
+**Pitch:** "Open-source AI software engineer — let AI be your co-developer: browse the web, write code, run commands, and collaborate on tasks."
+
+**Shape:** Python + TypeScript (MIT), ~47k ⭐, v0.39.0. Web-hosted UI (or local Docker) where an AI agent operates inside a sandboxed runtime (browser, shell, files) to complete multi-step engineering tasks. Supports Claude, GPT-4o, Gemini, DeepSeek. SWE-Bench top-ranked open-source system. Community of ~3k contributors.
+
+**Overlap with us:** OpenHands is the closest open-source parallel to a Starfire Claude Code workspace — both run an AI agent with shell+file access inside a container. The sandbox model (Docker-isolated execution, browser use, file I/O) is identical to our `workspace-template` runtime layer. Starfire users building a "solo engineer" workspace are building what OpenHands ships out of the box.
+
+**Differentiation:** OpenHands is single-agent, single-task — no org hierarchy, no A2A between agents, no visual canvas, no scheduling, no persistent identity across sessions. A single "project" is one sandboxed run. Starfire is a persistent, multi-agent company with A2A, schedules, and a visual org chart. OpenHands is the reference implementation for the solo-agent shape; Starfire is the platform for the team shape.
+
+**Worth borrowing:** **CodeAct action space** — agent emits Python code instead of JSON tool schemas; code is executed directly in the sandbox. More expressive than JSON tool calls and simpler to extend. If our workspace agents need arbitrary tool composition, CodeAct is worth evaluating as an alternative to our MCP tool list.
+
+**Terminology collisions:** "workspace" — theirs is a sandboxed task run; ours is a long-lived Docker container with an agent role. "agent" — same word, different persistence model.
+
+**Signals to react to:** If OpenHands ships multi-agent coordination (agents spawning sub-agents with shared memory) → direct overlap with our team model. If their SWE-Bench rank approaches GPT-4o with an open model → cost-effective backend for our DevOps / QA workspaces.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~47k ⭐, v0.39.0, very active
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
