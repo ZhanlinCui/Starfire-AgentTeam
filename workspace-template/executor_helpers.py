@@ -188,6 +188,11 @@ async def set_current_task(heartbeat: "HeartbeatLoop | None", task: str) -> None
     if not (workspace_id and platform_url):
         return
     try:
+        try:
+            from platform_auth import auth_headers as _auth
+            _headers = _auth()
+        except Exception:
+            _headers = {}
         await get_http_client().post(
             f"{platform_url}/registry/heartbeat",
             json={
@@ -198,6 +203,7 @@ async def set_current_task(heartbeat: "HeartbeatLoop | None", task: str) -> None
                 "sample_error": "",
                 "uptime_seconds": 0,
             },
+            headers=_headers,
         )
     except Exception as exc:
         logger.debug("set_current_task: heartbeat push failed: %s", exc)

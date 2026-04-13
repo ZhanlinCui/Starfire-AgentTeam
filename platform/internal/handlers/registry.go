@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"github.com/agent-molecule/platform/internal/db"
 	"github.com/agent-molecule/platform/internal/events"
 	"github.com/agent-molecule/platform/internal/models"
+	"github.com/agent-molecule/platform/internal/wsauth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -94,7 +97,34 @@ func (h *RegistryHandler) Register(c *gin.Context) {
 		log.Printf("Registry broadcast error: %v", err)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "registered"})
+	// Phase 30.1: issue a workspace auth token on first registration.
+	//
+	// On re-registration (agent restart), we DON'T issue a new token —
+	// the agent is expected to keep the one it got the first time.
+	// Issuing on every register would flood the table and make log
+	// forensics noisier than it needs to be.
+	//
+	// Legacy workspaces that registered before tokens existed have no
+	// live token; they bootstrap one here on their next register call.
+	// New workspaces always pass through this path on their first boot.
+	response := gin.H{"status": "registered"}
+	if hasLive, hasLiveErr := wsauth.HasAnyLiveToken(ctx, db.DB, payload.ID); hasLiveErr == nil && !hasLive {
+		token, tokErr := wsauth.IssueToken(ctx, db.DB, payload.ID)
+		if tokErr != nil {
+			// Don't fail the whole register on token-issuance error — the
+			// agent is already online per the upsert above. Log and continue.
+			// If needed, the agent can call /registry/register again and
+			// we'll retry issuance. Alternative paths (/workspaces/:id/
+			// tokens POST, to be added in a later phase) can also mint one.
+			log.Printf("Registry: failed to issue auth token for %s: %v", payload.ID, tokErr)
+		} else {
+			response["auth_token"] = token
+		}
+	} else if hasLiveErr != nil {
+		log.Printf("Registry: token existence check failed for %s: %v", payload.ID, hasLiveErr)
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // Heartbeat handles POST /registry/heartbeat
@@ -106,6 +136,16 @@ func (h *RegistryHandler) Heartbeat(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	// Phase 30.1: require a valid workspace auth token on every heartbeat
+	// IF the workspace has any live tokens on file. Legacy workspaces that
+	// registered before tokens existed are grandfathered through (tokens
+	// get issued on their next /registry/register call); new workspaces
+	// always have one. This design lets us ship auth without forcing a
+	// synchronized restart of every running workspace.
+	if err := h.requireWorkspaceToken(ctx, c, payload.WorkspaceID); err != nil {
+		return // response already written
+	}
 
 	// Read previous current_task to detect changes (before the UPDATE)
 	var prevTask string
@@ -198,6 +238,11 @@ func (h *RegistryHandler) UpdateCard(c *gin.Context) {
 		return
 	}
 
+	// Phase 30.1 — same bootstrap-aware token gate as Heartbeat.
+	if err := h.requireWorkspaceToken(c.Request.Context(), c, payload.WorkspaceID); err != nil {
+		return // response already written
+	}
+
 	agentCardStr := string(payload.AgentCard)
 	_, err := db.DB.ExecContext(c.Request.Context(), `
 		UPDATE workspaces SET agent_card = $2::jsonb, updated_at = now() WHERE id = $1
@@ -214,3 +259,53 @@ func (h *RegistryHandler) UpdateCard(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
+
+// requireWorkspaceToken enforces the Phase 30.1 auth-token contract on an
+// inbound registry request (heartbeat / update-card today).
+//
+// The function has two distinct behaviours gated on whether the workspace
+// has any live tokens on file:
+//
+//   - workspace has at least one live token → Authorization: Bearer <token>
+//     is mandatory. Missing / malformed / wrong-workspace → 401.
+//   - workspace has zero live tokens → grandfathered. We let the request
+//     through and log a single DEBUG line. The agent's next
+//     /registry/register call will mint its first token, after which this
+//     branch never fires again for that workspace.
+//
+// Returns a non-nil error (and writes the 401 response via c) when the
+// caller should abort. A nil return means the handler may continue.
+//
+// SECURITY NOTE: the grandfathering path is only safe during the
+// transition window. Once every running workspace has re-registered
+// post-upgrade, step 30.5 flips this to hard-require.
+func (h *RegistryHandler) requireWorkspaceToken(
+	ctx gincontext, c *gin.Context, workspaceID string,
+) error {
+	hasLive, err := wsauth.HasAnyLiveToken(ctx, db.DB, workspaceID)
+	if err != nil {
+		// DB error checking token existence — fail open so we don't take
+		// the whole heartbeat path down on a transient hiccup. Log loudly.
+		log.Printf("wsauth: HasAnyLiveToken(%s) failed: %v — allowing request", workspaceID, err)
+		return nil
+	}
+	if !hasLive {
+		// Legacy / pre-upgrade workspace. Next register issues a token.
+		return nil
+	}
+	token := wsauth.BearerTokenFromHeader(c.GetHeader("Authorization"))
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing workspace auth token"})
+		return errors.New("missing token")
+	}
+	if err := wsauth.ValidateToken(ctx, db.DB, workspaceID, token); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid workspace auth token"})
+		return err
+	}
+	return nil
+}
+
+// gincontext is an alias for context.Context kept separate so callers can
+// see "gin.Context.Request.Context() is what we want" without re-typing
+// the import-heavy standard type.
+type gincontext = context.Context

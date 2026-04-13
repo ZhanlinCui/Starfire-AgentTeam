@@ -29,6 +29,11 @@ PLATFORM_URL = os.environ.get("PLATFORM_URL", "http://platform:8080")
 def set_status(task: str):
     """Push current_task to platform via heartbeat."""
     try:
+        try:
+            from platform_auth import auth_headers as _auth
+            _headers = _auth()
+        except Exception:
+            _headers = {}
         httpx.post(
             f"{PLATFORM_URL}/registry/heartbeat",
             json={
@@ -39,6 +44,7 @@ def set_status(task: str):
                 "sample_error": "",
                 "uptime_seconds": 0,
             },
+            headers=_headers,
             timeout=5.0,
         )
         if task:

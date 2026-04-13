@@ -38,8 +38,11 @@ class _FakePost:
         self._responses = responses or []
         self._idx = 0
 
-    def __call__(self, url, json=None, timeout=None):
-        self.calls.append({"url": url, "json": json, "timeout": timeout})
+    def __call__(self, url, json=None, timeout=None, headers=None):
+        # Phase 30.1 added a `headers` kwarg so the heartbeat can carry
+        # the workspace auth token. Record it so tests can assert either
+        # presence (authenticated) or absence (pre-token legacy).
+        self.calls.append({"url": url, "json": json, "timeout": timeout, "headers": headers})
         # Return a dummy object (not inspected by set_status)
         return object()
 
@@ -101,7 +104,7 @@ class TestSetStatus:
         """When httpx raises, set_status catches it and prints to stderr."""
         mod = _load_module(monkeypatch)
 
-        def exploding_post(url, json=None, timeout=None):
+        def exploding_post(url, json=None, timeout=None, headers=None):
             raise ConnectionError("platform unreachable")
 
         monkeypatch.setattr(mod.httpx, "post", exploding_post)
