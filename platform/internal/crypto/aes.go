@@ -1,4 +1,10 @@
 // Package crypto provides AES-256 encryption for workspace secrets.
+//
+// Production-mode fail-secure (Top-5 #5 from the ecosystem-research outcomes
+// doc, Security Auditor's top proposal): when STARFIRE_ENV=prod, Init
+// refuses to let the platform boot without a valid 32-byte key. Dev mode
+// retains the historical "warn + store plaintext" fallback so local
+// developers aren't forced to generate a key to run the test server.
 package crypto
 
 import (
@@ -7,10 +13,20 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
+)
+
+// ErrEncryptionKeyMissing is returned by InitStrict when STARFIRE_ENV=prod
+// and SECRETS_ENCRYPTION_KEY is unset, malformed, or the wrong length.
+// Callers (cmd/server/main.go) must treat this as a fatal boot error.
+var ErrEncryptionKeyMissing = errors.New(
+	"SECRETS_ENCRYPTION_KEY is required in production (STARFIRE_ENV=prod) " +
+		"and must be 32 bytes raw or base64-encoded",
 )
 
 var (
@@ -20,8 +36,26 @@ var (
 
 // Init loads the encryption key from SECRETS_ENCRYPTION_KEY env var.
 // Safe to call multiple times — only executes once in production.
+//
+// Legacy dev-mode entry point: logs a WARNING when the key is missing or
+// invalid and continues with encryption disabled. Production code paths
+// (cmd/server/main.go) should call InitStrict instead so that missing
+// keys abort boot when STARFIRE_ENV=prod.
 func Init() {
 	initOnce.Do(initKey)
+}
+
+// InitStrict is the fail-secure variant of Init. When STARFIRE_ENV=prod
+// (or any strconv.ParseBool-truthy value), missing / malformed / wrong-
+// length keys return ErrEncryptionKeyMissing so the caller can refuse to
+// boot. In all other environments the behaviour matches Init — warn and
+// continue with encryption disabled for local dev ergonomics.
+func InitStrict() error {
+	var initErr error
+	initOnce.Do(func() {
+		initErr = initKeyStrict()
+	})
+	return initErr
 }
 
 // ResetForTesting clears the encryption key and allows re-initialization.
@@ -32,25 +66,56 @@ func ResetForTesting() {
 }
 
 func initKey() {
+	if err := loadKeyFromEnv(); err != nil {
+		log.Printf("%s", err)
+	}
+}
+
+func initKeyStrict() error {
+	loadErr := loadKeyFromEnv()
+	if isProdEnv() && !IsEnabled() {
+		if loadErr != nil {
+			log.Printf("FATAL: %s", loadErr)
+		}
+		return fmt.Errorf("%w: refusing to boot without encryption in production", ErrEncryptionKeyMissing)
+	}
+	if loadErr != nil {
+		// Non-prod: match Init's historical warn-and-continue behaviour.
+		log.Printf("%s", loadErr)
+	}
+	return nil
+}
+
+// loadKeyFromEnv parses SECRETS_ENCRYPTION_KEY into encryptionKey.
+// Returns a non-nil error describing the problem when the env var is set
+// but unusable (wrong length, unparseable). Returns nil when the var is
+// unset OR successfully applied.
+func loadKeyFromEnv() error {
 	key := os.Getenv("SECRETS_ENCRYPTION_KEY")
 	if key == "" {
-		return
+		return nil
 	}
 	decoded, err := base64.StdEncoding.DecodeString(key)
 	if err != nil {
 		// Try raw key (must be exactly 32 bytes)
 		if len(key) == 32 {
 			encryptionKey = []byte(key)
-		} else {
-			log.Printf("WARNING: SECRETS_ENCRYPTION_KEY is set but invalid (not base64 and not 32 bytes). Encryption disabled.")
+			return nil
 		}
-		return
+		return fmt.Errorf("SECRETS_ENCRYPTION_KEY is set but invalid (not base64 and not 32 bytes). Encryption disabled")
 	}
 	if len(decoded) == 32 {
 		encryptionKey = decoded
-	} else {
-		log.Printf("WARNING: SECRETS_ENCRYPTION_KEY decoded to %d bytes (expected 32). Encryption disabled.", len(decoded))
+		return nil
 	}
+	return fmt.Errorf("SECRETS_ENCRYPTION_KEY decoded to %d bytes (expected 32). Encryption disabled", len(decoded))
+}
+
+// isProdEnv returns true when STARFIRE_ENV matches one of the canonical
+// production markers. Accepts case-insensitive "prod" / "production".
+func isProdEnv() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("STARFIRE_ENV")))
+	return v == "prod" || v == "production"
 }
 
 // IsEnabled returns true if encryption is configured.

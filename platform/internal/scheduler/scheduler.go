@@ -134,7 +134,9 @@ func (s *Scheduler) fireSchedule(ctx context.Context, sched scheduleRow) {
 
 	log.Printf("Scheduler: firing '%s' → workspace %s", sched.Name, sched.WorkspaceID[:12])
 
-	statusCode, _, proxyErr := s.proxy.ProxyA2ARequest(fireCtx, sched.WorkspaceID, a2aBody, "system:scheduler", true)
+	// Empty callerID = canvas-style request (bypasses access control, source_id=NULL in activity log).
+	// "system:scheduler" was invalid — source_id column is UUID and rejects non-UUID strings.
+	statusCode, _, proxyErr := s.proxy.ProxyA2ARequest(fireCtx, sched.WorkspaceID, a2aBody, "", true)
 
 	lastStatus := "ok"
 	lastError := ""
@@ -180,7 +182,7 @@ func (s *Scheduler) fireSchedule(ctx context.Context, sched scheduleRow) {
 	})
 	_, _ = db.DB.ExecContext(ctx, `
 		INSERT INTO activity_logs (workspace_id, activity_type, source_id, method, summary, request_body, status, created_at)
-		VALUES ($1, 'cron_run', 'system:scheduler', 'cron', $2, $3::jsonb, $4, now())
+		VALUES ($1, 'cron_run', NULL, 'cron', $2, $3::jsonb, $4, now())
 	`, sched.WorkspaceID, "Cron: "+sched.Name, string(cronMeta), lastStatus)
 
 	if s.broadcaster != nil {
