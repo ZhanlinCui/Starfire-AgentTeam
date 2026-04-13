@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -192,9 +193,18 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		log.Printf("Provisioner: creating %s from image %s (inspect failed: %v)", name, image, imgErr)
 	}
 
-	// Create and start container
+	// Create and start container. If the image isn't available locally,
+	// Docker returns a generic "No such image" error that's opaque to
+	// operators — wrap it with the resolved tag and the exact build
+	// command so last_sample_error surfaces something actionable. Issue #117.
 	resp, err := p.cli.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, name)
 	if err != nil {
+		if isImageNotFoundErr(err) {
+			return "", fmt.Errorf(
+				"docker image %q not found — run 'bash workspace-template/build-all.sh %s' to build it (underlying error: %w)",
+				image, runtimeTagFromImage(image), err,
+			)
+		}
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
@@ -622,4 +632,34 @@ func (p *Provisioner) DockerClient() *client.Client {
 // Close cleans up the Docker client.
 func (p *Provisioner) Close() error {
 	return p.cli.Close()
+}
+
+// isImageNotFoundErr classifies a Docker client error as "image not
+// available locally." The daemon wraps this message in a generic
+// SystemError type without exposing a typed sentinel, so we fall back
+// to substring match on the known messages emitted by moby. Used by
+// Start() to rewrite opaque ContainerCreate failures into actionable
+// "run build-all.sh" hints. Issue #117.
+func isImageNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "no such image") ||
+		strings.Contains(m, "not found") && strings.Contains(m, "image")
+}
+
+// runtimeTagFromImage extracts the runtime tag portion from a
+// "workspace-template:<runtime>" image reference for use in
+// user-facing build hints. Falls back to the full image string if the
+// shape is unrecognised.
+func runtimeTagFromImage(image string) string {
+	const prefix = "workspace-template:"
+	if strings.HasPrefix(image, prefix) {
+		return image[len(prefix):]
+	}
+	if i := strings.LastIndex(image, ":"); i >= 0 && i < len(image)-1 {
+		return image[i+1:]
+	}
+	return image
 }

@@ -79,9 +79,14 @@ func (h *WorkspaceHandler) provisionWorkspace(workspaceID, templatePath string, 
 
 	url, err := h.provisioner.Start(ctx, cfg)
 	if err != nil {
+		// Persist the error text to last_sample_error so the canvas and
+		// GET /workspaces/:id expose something actionable — previously the
+		// provision failure was only logged + broadcast, leaving the DB
+		// row with an empty last_sample_error. Issue #117.
 		log.Printf("Provisioner: failed to start workspace %s: %v", workspaceID, err)
 		if _, dbErr := db.DB.ExecContext(ctx,
-			`UPDATE workspaces SET status = 'failed', updated_at = now() WHERE id = $1`, workspaceID); dbErr != nil {
+			`UPDATE workspaces SET status = 'failed', last_sample_error = $2, updated_at = now() WHERE id = $1`,
+			workspaceID, err.Error()); dbErr != nil {
 			log.Printf("Provisioner: failed to mark workspace %s as failed: %v", workspaceID, dbErr)
 		}
 		h.broadcaster.RecordAndBroadcast(ctx, "WORKSPACE_PROVISION_FAILED", workspaceID, map[string]interface{}{
