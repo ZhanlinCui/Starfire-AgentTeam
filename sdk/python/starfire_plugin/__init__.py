@@ -56,6 +56,17 @@ from .manifest import (  # noqa: F401
     validate_skill,
 )
 from .protocol import DEFAULT_MEMORY_FILENAME, SKILLS_SUBDIR  # noqa: F401
+from .workspace import (  # noqa: F401
+    SUPPORTED_RUNTIMES,
+    ValidationError,
+    validate_workspace_template,
+)
+from .org import validate_org_template  # noqa: F401
+from .channel import (  # noqa: F401
+    SUPPORTED_CHANNEL_TYPES,
+    validate_channel_config,
+    validate_channel_file,
+)
 
 __version__ = "0.1.0"
 
@@ -72,9 +83,16 @@ __all__ = [
     "SKILL_NAME_MAX",
     "SKILL_NAME_RE",
     "SKIP_ROOT_MD",
+    "SUPPORTED_CHANNEL_TYPES",
+    "SUPPORTED_RUNTIMES",
+    "ValidationError",
     "parse_skill_md",
+    "validate_channel_config",
+    "validate_channel_file",
     "validate_manifest",
+    "validate_org_template",
     "validate_plugin",
     "validate_skill",
+    "validate_workspace_template",
     "__version__",
 ]

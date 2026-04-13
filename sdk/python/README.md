@@ -28,6 +28,33 @@ errors = validate_manifest("my-plugin/plugin.yaml")
 assert not errors, errors
 ```
 
+## CLI
+
+The SDK ships a CLI for validating Starfire artifacts before publishing:
+
+```bash
+python -m starfire_plugin validate plugin    my-plugin/
+python -m starfire_plugin validate workspace workspace-configs-templates/claude-code-default/
+python -m starfire_plugin validate org       org-templates/starfire-dev/
+python -m starfire_plugin validate channel   channels.yaml
+python -m starfire_plugin validate my-plugin/   # kind defaults to 'plugin'
+```
+
+Exit code is 0 when valid, 1 when any errors are found — suitable for CI.
+Add `-q` / `--quiet` to suppress success lines and emit only errors.
+
+Programmatic equivalents:
+
+```python
+from starfire_plugin import (
+    validate_plugin,
+    validate_workspace_template,
+    validate_org_template,
+    validate_channel_file,
+    validate_channel_config,
+)
+```
+
 ## Per-runtime adaptors — when to write a custom one
 
 The default `AgentskillsAdaptor` handles the common shape: rules go into
