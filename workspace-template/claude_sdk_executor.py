@@ -64,6 +64,11 @@ _NO_TEXT_MSG = "Error: message contained no text content."
 _NO_RESPONSE_MSG = "(no response generated)"
 _MAX_RETRIES = 3
 _BASE_RETRY_DELAY_S = 5
+# Cap for stderr captured from the CLI subprocess in the executor log. Keeps
+# log lines bounded while still surfacing enough context to diagnose crashes.
+# Fixes #66 (previously the executor logged nothing beyond the generic
+# "Check stderr output for details" message).
+_PROCESS_ERROR_STDERR_MAX_CHARS = 4096
 
 # Substrings in error messages that indicate a transient failure worth retrying.
 _RETRYABLE_PATTERNS = (
@@ -75,6 +80,30 @@ _RETRYABLE_PATTERNS = (
     "exit code 1",
     "try again",
 )
+
+
+def _format_process_error(exc: BaseException) -> str:
+    """Render a Claude-SDK ProcessError (or any ClaudeSDKError) with its full
+    captured context — exit code, stderr, exception type. Plain strings for
+    non-SDK exceptions fall back to str(exc).
+
+    Bounded at _PROCESS_ERROR_STDERR_MAX_CHARS so a runaway CLI can't spam
+    the log. Used by the executor's error path (fixes #66 — the SDK's
+    ProcessError carries `.stderr`/`.exit_code` attributes that the previous
+    code silently discarded, leaving every CLI crash with an identical
+    "Check stderr output for details" message in the workspace log).
+    """
+    parts = [f"{type(exc).__name__}: {exc}"]
+    exit_code = getattr(exc, "exit_code", None)
+    if exit_code is not None:
+        parts.append(f"exit_code={exit_code}")
+    stderr = getattr(exc, "stderr", None)
+    if stderr:
+        trimmed = stderr[:_PROCESS_ERROR_STDERR_MAX_CHARS]
+        if len(stderr) > _PROCESS_ERROR_STDERR_MAX_CHARS:
+            trimmed += f"... [{len(stderr) - _PROCESS_ERROR_STDERR_MAX_CHARS} more chars truncated]"
+        parts.append(f"stderr={trimmed!r}")
+    return " | ".join(parts)
 
 
 @dataclass
@@ -262,17 +291,22 @@ class ClaudeSDKExecutor(AgentExecutor):
                     response_text = result.text
                     break  # success
                 except Exception as exc:
+                    formatted = _format_process_error(exc)
                     if attempt < _MAX_RETRIES - 1 and self._is_retryable(exc):
                         delay = _BASE_RETRY_DELAY_S * (2 ** attempt)
                         logger.warning(
                             "SDK agent [claude-code] transient error (attempt %d/%d), "
                             "retrying in %ds: %s",
-                            attempt + 1, _MAX_RETRIES, delay, exc,
+                            attempt + 1, _MAX_RETRIES, delay, formatted,
                         )
                         await asyncio.sleep(delay)
                         continue
-                    # Non-retryable or exhausted retries
-                    logger.exception("SDK agent error [claude-code]")
+                    # Non-retryable or exhausted retries. Log exit_code +
+                    # stderr explicitly (fixes #66) so operators don't have
+                    # to reproduce the crash manually to find out why the
+                    # subprocess died.
+                    logger.error("SDK agent error [claude-code]: %s", formatted)
+                    logger.exception("SDK agent error [claude-code] — full traceback follows")
                     response_text = sanitize_agent_error(exc)
                     break
         finally:
