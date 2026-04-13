@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"encoding/base64"
+	"errors"
 	"os"
 	"testing"
 )
@@ -185,5 +186,99 @@ func TestIsEnabled_FalseByDefault(t *testing.T) {
 	resetKey()
 	if IsEnabled() {
 		t.Error("expected IsEnabled to return false when key is nil")
+	}
+}
+
+// -------- InitStrict: fail-secure in production (Top-5 #5) ---------
+
+func TestInitStrict_FailsInProdWhenKeyMissing(t *testing.T) {
+	resetKey()
+	t.Setenv("STARFIRE_ENV", "prod")
+	t.Setenv("SECRETS_ENCRYPTION_KEY", "")
+
+	err := InitStrict()
+	if err == nil {
+		t.Fatalf("InitStrict must return an error when STARFIRE_ENV=prod and key is missing")
+	}
+	if !errors.Is(err, ErrEncryptionKeyMissing) {
+		t.Errorf("error must wrap ErrEncryptionKeyMissing, got: %v", err)
+	}
+	if IsEnabled() {
+		t.Errorf("encryption must not be enabled when key was never loaded")
+	}
+}
+
+func TestInitStrict_FailsInProdOnWrongLengthKey(t *testing.T) {
+	resetKey()
+	t.Setenv("STARFIRE_ENV", "production")
+	// 24-char raw string — decodes as 18 bytes of base64, not 32.
+	t.Setenv("SECRETS_ENCRYPTION_KEY", "not-thirty-two-bytes-aaa")
+
+	err := InitStrict()
+	if err == nil {
+		t.Fatalf("InitStrict must return an error when the key has the wrong length in production")
+	}
+	if !errors.Is(err, ErrEncryptionKeyMissing) {
+		t.Errorf("error must wrap ErrEncryptionKeyMissing, got: %v", err)
+	}
+}
+
+func TestInitStrict_SucceedsInProdWithValidKey(t *testing.T) {
+	resetKey()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	t.Setenv("STARFIRE_ENV", "prod")
+	t.Setenv("SECRETS_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+
+	if err := InitStrict(); err != nil {
+		t.Fatalf("InitStrict must succeed with a valid 32-byte key in production: %v", err)
+	}
+	if !IsEnabled() {
+		t.Error("encryption must be enabled after a successful InitStrict")
+	}
+}
+
+func TestInitStrict_AllowsDevModeWithoutKey(t *testing.T) {
+	resetKey()
+	t.Setenv("STARFIRE_ENV", "") // unset → dev
+	t.Setenv("SECRETS_ENCRYPTION_KEY", "")
+
+	if err := InitStrict(); err != nil {
+		t.Errorf("InitStrict must NOT fail in dev mode when key is missing: %v", err)
+	}
+	if IsEnabled() {
+		t.Error("encryption must be disabled when key is unset in dev mode")
+	}
+}
+
+func TestInitStrict_AllowsStagingWithoutKey(t *testing.T) {
+	resetKey()
+	t.Setenv("STARFIRE_ENV", "staging")
+	t.Setenv("SECRETS_ENCRYPTION_KEY", "")
+
+	if err := InitStrict(); err != nil {
+		t.Errorf("InitStrict must NOT fail for non-prod environments: %v", err)
+	}
+}
+
+func TestIsProdEnv_CaseInsensitive(t *testing.T) {
+	cases := map[string]bool{
+		"prod":       true,
+		"PROD":       true,
+		"Prod":       true,
+		"production": true,
+		"PRODUCTION": true,
+		"  prod  ":   true, // trim
+		"staging":    false,
+		"dev":        false,
+		"":           false,
+	}
+	for env, want := range cases {
+		t.Setenv("STARFIRE_ENV", env)
+		if got := isProdEnv(); got != want {
+			t.Errorf("isProdEnv() with STARFIRE_ENV=%q = %v, want %v", env, got, want)
+		}
 	}
 }
