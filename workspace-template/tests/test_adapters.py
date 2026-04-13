@@ -1794,6 +1794,51 @@ class TestOpenClawExecuteOutputParsing:
 
 
 # ============================================================================
+# 7. Hermes Adapter
+# ============================================================================
+
+class TestHermesAdapter:
+
+    def test_static_identity(self):
+        from adapters.hermes.adapter import HermesAdapter
+        assert HermesAdapter.name() == "hermes"
+        assert HermesAdapter.display_name() == "Hermes (NousResearch)"
+        assert "model" in HermesAdapter.get_config_schema()
+        import inspect
+        assert inspect.iscoroutinefunction(HermesAdapter().setup)
+        assert inspect.iscoroutinefunction(HermesAdapter().create_executor)
+
+    @pytest.mark.asyncio
+    async def test_setup_raises_when_no_api_key(self, monkeypatch):
+        from adapters.hermes.adapter import HermesAdapter
+        monkeypatch.delenv("NOUS_API_KEY", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="NOUS_API_KEY"):
+            await HermesAdapter().setup(_make_config())
+
+    @pytest.mark.asyncio
+    async def test_setup_selects_nous_portal(self, monkeypatch):
+        from adapters.hermes.adapter import HermesAdapter
+        adapter = HermesAdapter()
+        _stub_common_setup(adapter, monkeypatch)
+        monkeypatch.setenv("NOUS_API_KEY", "test-nous-key")
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        await adapter.setup(_make_config())
+        assert adapter.system_prompt == "stub prompt"
+        assert "nousresearch.com" in adapter._base_url
+
+    @pytest.mark.asyncio
+    async def test_create_executor_returns_hermes_executor(self, monkeypatch):
+        from adapters.hermes.adapter import HermesAdapter, HermesA2AExecutor
+        adapter = HermesAdapter()
+        adapter.system_prompt = "hermes system"
+        adapter._api_key, adapter._base_url, adapter._model = "k", "https://api.nousresearch.com/v1", "nous-hermes-3"
+        result = await adapter.create_executor(_make_config())
+        assert isinstance(result, HermesA2AExecutor)
+        assert result._model == "nous-hermes-3"
+
+
+# ============================================================================
 # adapters/__init__.py: get_adapter() success path (line 41)
 # ============================================================================
 
