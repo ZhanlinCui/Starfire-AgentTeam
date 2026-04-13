@@ -131,7 +131,7 @@ for the full code audit.
   `GET /registry/{parent_id}/peers` once, cache sibling URLs, call them
   directly for A2A. Resilient to brief platform outages.
 
-- [ ] **30.7 Poll-liveness for external runtime** — `LivenessChecker`
+- [x] **30.7 Poll-liveness for external runtime** — `LivenessChecker`
   interface in `registry/`; `PollLiveness` marks offline if no heartbeat
   in 90s. Docker checker becomes one implementation, poll-liveness
   another. Health sweep routes by runtime. Behind
