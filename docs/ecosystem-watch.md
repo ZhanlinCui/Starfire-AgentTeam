@@ -568,6 +568,26 @@ builders; Starfire users are developers building agent companies.
 
 ---
 
+### Arize Phoenix — `Arize-ai/phoenix`
+
+**Pitch:** "AI observability and evaluation platform — trace, evaluate, and troubleshoot LLM applications and agents in production."
+
+**Shape:** Python + TypeScript (Apache-2.0), ~5k ⭐, v8.x. Self-hostable or Phoenix Cloud. Ships an OpenTelemetry-compatible tracing SDK (`pip install arize-phoenix-otel`) that auto-instruments LangChain, LangGraph, LlamaIndex, OpenAI, Anthropic, and more. Every LLM call, tool use, retrieval, and agent step is captured as an OpenTelemetry span and displayed in a trace waterfall UI. Built-in evaluation framework (hallucination, Q&A accuracy, toxicity) runs over captured traces.
+
+**Overlap with us:** Our `GET /workspaces/:id/traces` endpoint and Langfuse integration solve the same problem — making agent behaviour inspectable after the fact. Phoenix's span-level trace waterfall (LLM call → tool call → next LLM call) is more granular than our per-A2A-message `activity_logs`. Any team evaluating Starfire will compare our trace depth to Phoenix's.
+
+**Differentiation:** Phoenix is a pure observability layer — no agent runtime, no org hierarchy, no A2A, no workspace lifecycle. Starfire is the platform that runs agents; Phoenix can be wired in as the backend for our trace data. They're complementary by design: an OpenTelemetry exporter in each Starfire workspace adapter could ship spans to a Phoenix instance with zero code change.
+
+**Worth borrowing:** **Span-level trace waterfall** — tool calls, LLM inputs/outputs, and latency shown as a nested tree per agent run. Our current trace view shows A2A messages; this granularity is the natural next step. **Evaluation datasets from traces** — capturing production traces as an eval dataset is a clean pattern for improving agent quality without manual labeling.
+
+**Terminology collisions:** "traces" — same word, same meaning. Starfire's `GET /workspaces/:id/traces` → Langfuse; Phoenix offers an alternative or complementary backend.
+
+**Signals to react to:** If Phoenix becomes the de facto OTel backend for LangGraph + CrewAI workspaces → add an `OTEL_EXPORTER_OTLP_ENDPOINT` env var to our workspace containers and document Phoenix as the recommended trace backend. If Phoenix ships agent evaluation pipelines that score multi-turn A2A conversations → directly useful for Starfire's QA Engineer workspace.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~5k ⭐, v8.x, actively maintained
+
+---
+
 ### SWE-agent — `SWE-agent/SWE-agent`
 
 **Pitch:** "SWE-agent turns LLMs into software engineers that can fix real bugs and implement features in GitHub repos."
