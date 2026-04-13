@@ -767,3 +767,108 @@ async def test_execute_no_retry_on_non_transient_error():
     mock_sleep.assert_not_called()
     eq.enqueue_event.assert_called_once()
     assert "Agent error" in str(eq.enqueue_event.call_args[0][0])
+
+
+# ---------------------------------------------------------------------------
+# _format_process_error — #66: surface CLI subprocess stderr + exit_code
+# ---------------------------------------------------------------------------
+
+
+def test_format_process_error_with_stderr_and_exit_code():
+    """Rich ProcessError-style exception → log line includes all context."""
+    from claude_sdk_executor import _format_process_error
+
+    class FakeProcessError(Exception):
+        def __init__(self, msg, exit_code, stderr):
+            super().__init__(msg)
+            self.exit_code = exit_code
+            self.stderr = stderr
+
+    exc = FakeProcessError("Command failed", exit_code=1, stderr="permission denied: /auth-token")
+    out = _format_process_error(exc)
+    assert "FakeProcessError" in out
+    assert "Command failed" in out
+    assert "exit_code=1" in out
+    assert "permission denied: /auth-token" in out
+
+
+def test_format_process_error_truncates_huge_stderr():
+    """Runaway CLI can't spam the log — stderr is capped at _PROCESS_ERROR_STDERR_MAX_CHARS."""
+    from claude_sdk_executor import _format_process_error, _PROCESS_ERROR_STDERR_MAX_CHARS
+
+    class FakeProcessError(Exception):
+        def __init__(self, msg, stderr):
+            super().__init__(msg)
+            self.stderr = stderr
+            self.exit_code = None
+
+    huge = "X" * (_PROCESS_ERROR_STDERR_MAX_CHARS + 5000)
+    out = _format_process_error(FakeProcessError("boom", huge))
+    # Truncation note must mention how many chars were dropped
+    assert "more chars truncated" in out
+    # Must not contain the full huge string
+    assert out.count("X") <= _PROCESS_ERROR_STDERR_MAX_CHARS + 100  # slack for repr overhead
+
+
+def test_format_process_error_plain_exception():
+    """Non-SDK exceptions fall back to str(exc) without crashing on missing attrs."""
+    from claude_sdk_executor import _format_process_error
+
+    out = _format_process_error(RuntimeError("generic failure"))
+    assert "RuntimeError" in out
+    assert "generic failure" in out
+    # No exit_code / stderr pieces when the attrs don't exist
+    assert "exit_code=" not in out
+    assert "stderr=" not in out
+
+
+def test_format_process_error_no_stderr_but_has_exit_code():
+    """Exit code alone (no stderr) still gets surfaced."""
+    from claude_sdk_executor import _format_process_error
+
+    class PartialError(Exception):
+        def __init__(self, msg):
+            super().__init__(msg)
+            self.exit_code = 137  # SIGKILL
+            self.stderr = None
+
+    out = _format_process_error(PartialError("killed"))
+    assert "exit_code=137" in out
+    assert "stderr" not in out
+
+
+def test_process_error_reaches_logs_via_execute(caplog):
+    """End-to-end: a ProcessError in query() → executor logs both the
+    formatted summary and the full traceback. Fixes #66 — previously no
+    information leaked out of the subprocess."""
+    import logging
+    from claude_sdk_executor import ClaudeSDKExecutor
+
+    e = ClaudeSDKExecutor(system_prompt=None, config_path="/tmp", heartbeat=None)
+    ctx = _make_context(["do something"])
+    eq = _make_event_queue()
+
+    class FakeProcessError(Exception):
+        def __init__(self):
+            super().__init__("Command failed with exit code 1 (exit code: 1)")
+            self.exit_code = 1
+            self.stderr = "claude: CLAUDE_CODE_OAUTH_TOKEN invalid"
+
+    async def process_fail(prompt, options):
+        if False:
+            yield  # pragma: no cover
+        raise FakeProcessError()
+
+    with caplog.at_level(logging.ERROR), \
+         patch("claude_sdk_executor.recall_memories", new=AsyncMock(return_value="")), \
+         patch("claude_sdk_executor.read_delegation_results", return_value=""), \
+         patch("claude_sdk_executor.commit_memory", new=AsyncMock()), \
+         patch("claude_sdk_executor.set_current_task", new=AsyncMock()), \
+         patch("claude_agent_sdk.query", new=process_fail), \
+         patch("asyncio.sleep", new=AsyncMock()):
+        asyncio.run(e.execute(ctx, eq))
+
+    # Error-level log must include exit_code and stderr content
+    error_messages = " | ".join(r.message for r in caplog.records if r.levelname == "ERROR")
+    assert "exit_code=1" in error_messages
+    assert "CLAUDE_CODE_OAUTH_TOKEN invalid" in error_messages
