@@ -62,7 +62,16 @@ type WorkspaceConfig struct {
 	PlatformURL        string
 	AwarenessURL       string
 	AwarenessNamespace string
+	WorkspaceAccess    string // #65: "none" (default), "read_only", or "read_write"
 }
+
+// Workspace-access constants for #65. Matches the CHECK constraint on
+// the workspaces.workspace_access column (migration 019).
+const (
+	WorkspaceAccessNone      = "none"
+	WorkspaceAccessReadOnly  = "read_only"
+	WorkspaceAccessReadWrite = "read_write"
+)
 
 // ConfigVolumeName returns the Docker named volume for a workspace's configs.
 func ConfigVolumeName(workspaceID string) string {
@@ -133,18 +142,12 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 		},
 	}
 
-	// Host config with volume mounts
-	var workspaceMount string
-	if cfg.WorkspacePath != "" {
-		// Bind-mount host directory — all agents share the same codebase
-		workspaceMount = fmt.Sprintf("%s:/workspace", cfg.WorkspacePath)
-		log.Printf("Provisioner: bind-mounting host %s as /workspace", cfg.WorkspacePath)
-	} else {
-		// Isolated Docker named volume per workspace
-		volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
-		workspaceMount = fmt.Sprintf("%s:/workspace", volumeName)
-		log.Printf("Provisioner: workspace volume %s (created by Docker if new)", volumeName)
-	}
+	// Host config with volume mounts. #65: workspace_access controls whether
+	// a bind-mount is read-only (:ro) or read-write. Default "none" implies
+	// isolated volume; "read_only"/"read_write" require WorkspacePath set
+	// (validated at the handler layer before we get here).
+	workspaceMount := buildWorkspaceMount(cfg)
+	log.Printf("Provisioner: workspace mount = %q (access=%q)", workspaceMount, cfg.WorkspaceAccess)
 
 	// Mount configs as read-write named volume (agent and Files API need to write)
 	// Plugins are installed per-workspace into /configs/plugins/ via the platform API.
@@ -249,6 +252,58 @@ func (p *Provisioner) Start(ctx context.Context, cfg WorkspaceConfig) (string, e
 
 	log.Printf("Provisioner: started container %s for workspace %s at %s (internal: %s)", name, cfg.WorkspaceID, hostURL, InternalURL(cfg.WorkspaceID))
 	return hostURL, nil
+}
+
+// buildWorkspaceMount returns the Docker volume spec for /workspace (#65).
+//
+// Selection matrix:
+//
+//   cfg.WorkspacePath | cfg.WorkspaceAccess     | mount
+//   ------------------+-------------------------+--------------------------------
+//   ""                | "" / "none"             | <named-volume>:/workspace  (isolated, current default)
+//   "<host-dir>"      | "" / "read_write"       | <host-dir>:/workspace      (current PM behaviour)
+//   "<host-dir>"      | "read_only"             | <host-dir>:/workspace:ro   (research agents get read access without write risk)
+//   ""                | "read_only"/"read_write"| <named-volume>:/workspace  (degraded — access requires a mount; validated at handler layer)
+//
+// Kept pure + side-effect-free so it's unit-testable.
+func buildWorkspaceMount(cfg WorkspaceConfig) string {
+	// Named volume when no host path is configured.
+	if cfg.WorkspacePath == "" {
+		volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
+		return fmt.Sprintf("%s:/workspace", volumeName)
+	}
+	// Host bind mount. Append :ro for read-only mode; otherwise default
+	// (implicit read-write). "none" explicitly opts out of the mount
+	// even when a path is set.
+	if cfg.WorkspaceAccess == WorkspaceAccessNone {
+		volumeName := fmt.Sprintf("ws-%s-workspace", cfg.WorkspaceID)
+		return fmt.Sprintf("%s:/workspace", volumeName)
+	}
+	if cfg.WorkspaceAccess == WorkspaceAccessReadOnly {
+		return fmt.Sprintf("%s:/workspace:ro", cfg.WorkspacePath)
+	}
+	return fmt.Sprintf("%s:/workspace", cfg.WorkspacePath)
+}
+
+// ValidateWorkspaceAccess checks that a (access, path) pair is consistent.
+// Returns a clear error on mismatch so the handler layer can reject bad
+// payloads with a 400 before provisioning.
+//
+//   - read_only / read_write with empty path → error (needs a host dir)
+//   - unknown access value                   → error
+//   - none / ""                              → always valid
+func ValidateWorkspaceAccess(access, workspacePath string) error {
+	switch access {
+	case "", WorkspaceAccessNone:
+		return nil
+	case WorkspaceAccessReadOnly, WorkspaceAccessReadWrite:
+		if workspacePath == "" {
+			return fmt.Errorf("workspace_access=%q requires workspace_dir to be set", access)
+		}
+		return nil
+	default:
+		return fmt.Errorf("workspace_access=%q — must be 'none', 'read_only', or 'read_write'", access)
+	}
 }
 
 // buildContainerEnv assembles the initial environment variables injected

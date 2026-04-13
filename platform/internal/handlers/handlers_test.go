@@ -250,7 +250,7 @@ func TestWorkspaceCreate(t *testing.T) {
 
 	// Expect workspace INSERT (uuid is dynamic, use AnyArg for id, runtime, awareness_namespace)
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Test Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil).
+		WithArgs(sqlmock.AnyArg(), "Test Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil, "none").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect canvas_layouts INSERT

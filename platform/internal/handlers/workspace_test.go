@@ -148,7 +148,7 @@ func TestWorkspaceCreate_DBInsertError(t *testing.T) {
 
 	// Workspace INSERT fails
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Failing Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil).
+		WithArgs(sqlmock.AnyArg(), "Failing Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil, "none").
 		WillReturnError(sql.ErrConnDone)
 
 	w := httptest.NewRecorder()
@@ -177,7 +177,7 @@ func TestWorkspaceCreate_DefaultsApplied(t *testing.T) {
 
 	// Expect workspace INSERT with defaulted tier=1, runtime="langgraph"
 	mock.ExpectExec("INSERT INTO workspaces").
-		WithArgs(sqlmock.AnyArg(), "Default Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil).
+		WithArgs(sqlmock.AnyArg(), "Default Agent", nil, 1, "langgraph", sqlmock.AnyArg(), (*string)(nil), nil, "none").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// Expect canvas_layouts INSERT (x=0, y=0 — defaults)

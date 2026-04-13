@@ -87,11 +87,21 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		workspaceDir = payload.WorkspaceDir
 	}
 
+	// #65: validate workspace_access, default to "none".
+	workspaceAccess := payload.WorkspaceAccess
+	if workspaceAccess == "" {
+		workspaceAccess = provisioner.WorkspaceAccessNone
+	}
+	if err := provisioner.ValidateWorkspaceAccess(workspaceAccess, payload.WorkspaceDir); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	// Insert workspace with runtime persisted in DB
 	_, err := db.DB.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id, workspace_dir)
-		VALUES ($1, $2, $3, $4, $5, $6, 'provisioning', $7, $8)
-	`, id, payload.Name, role, payload.Tier, payload.Runtime, awarenessNamespace, payload.ParentID, workspaceDir)
+		INSERT INTO workspaces (id, name, role, tier, runtime, awareness_namespace, status, parent_id, workspace_dir, workspace_access)
+		VALUES ($1, $2, $3, $4, $5, $6, 'provisioning', $7, $8, $9)
+	`, id, payload.Name, role, payload.Tier, payload.Runtime, awarenessNamespace, payload.ParentID, workspaceDir, workspaceAccess)
 	if err != nil {
 		log.Printf("Create workspace error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workspace"})
@@ -164,6 +174,7 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		"id":                  id,
 		"status":              "provisioning",
 		"awareness_namespace": awarenessNamespace,
+		"workspace_access":    workspaceAccess,
 	})
 }
 

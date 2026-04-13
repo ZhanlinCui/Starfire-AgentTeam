@@ -455,3 +455,71 @@ func TestBuildContainerEnv_CustomEnvVarsAppended(t *testing.T) {
 		t.Errorf("STARFIRE_URL must still be set alongside custom envs")
 	}
 }
+
+// ---------- buildWorkspaceMount — #65 workspace_access ----------
+
+func TestBuildWorkspaceMount_SelectionMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		path       string
+		access     string
+		wantSuffix string // suffix of the mount string for partial match
+		wantBind   bool   // true if bind-mount (starts with path), false if named volume
+	}{
+		{"empty path + none → named volume", "", "none", ":/workspace", false},
+		{"empty path + empty access → named volume", "", "", ":/workspace", false},
+		{"host path + read_only → :ro bind", "/Users/x/repo", "read_only", "/Users/x/repo:/workspace:ro", true},
+		{"host path + read_write → rw bind", "/Users/x/repo", "read_write", "/Users/x/repo:/workspace", true},
+		{"host path + none → named volume (opts out of mount)", "/Users/x/repo", "none", ":/workspace", false},
+		{"host path + empty access → default rw bind", "/Users/x/repo", "", "/Users/x/repo:/workspace", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := WorkspaceConfig{
+				WorkspaceID:     "abc123",
+				WorkspacePath:   tc.path,
+				WorkspaceAccess: tc.access,
+			}
+			got := buildWorkspaceMount(cfg)
+			if tc.wantBind {
+				if got != tc.wantSuffix {
+					t.Errorf("want exact %q, got %q", tc.wantSuffix, got)
+				}
+			} else {
+				// Named volume: should NOT start with tc.path, should end in :/workspace
+				if strings.HasPrefix(got, tc.path+":") && tc.path != "" {
+					t.Errorf("expected named volume (not bind), got %q", got)
+				}
+				if !strings.HasSuffix(got, tc.wantSuffix) {
+					t.Errorf("want suffix %q, got %q", tc.wantSuffix, got)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateWorkspaceAccess(t *testing.T) {
+	cases := []struct {
+		name    string
+		access  string
+		path    string
+		wantErr bool
+	}{
+		{"none + empty path", "none", "", false},
+		{"empty access + empty path", "", "", false},
+		{"read_only + host path", "read_only", "/Users/x/repo", false},
+		{"read_write + host path", "read_write", "/Users/x/repo", false},
+		{"read_only + empty path (error)", "read_only", "", true},
+		{"read_write + empty path (error)", "read_write", "", true},
+		{"unknown value (error)", "wildcard", "/Users/x/repo", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateWorkspaceAccess(tc.access, tc.path)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateWorkspaceAccess(%q, %q) = %v, wantErr %v",
+					tc.access, tc.path, err, tc.wantErr)
+			}
+		})
+	}
+}

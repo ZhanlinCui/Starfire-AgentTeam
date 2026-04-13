@@ -60,8 +60,9 @@ type CreateWorkspacePayload struct {
 	Runtime      string  `json:"runtime"`       // "langgraph" (default), "claude-code", etc.
 	External     bool    `json:"external"`      // true = no Docker container, just a registered URL
 	URL          string  `json:"url"`           // for external workspaces: the A2A endpoint URL
-	WorkspaceDir string  `json:"workspace_dir"` // host path to mount as /workspace (empty = isolated volume)
-	ParentID     *string `json:"parent_id"`
+	WorkspaceDir    string  `json:"workspace_dir"`    // host path to mount as /workspace (empty = isolated volume)
+	WorkspaceAccess string  `json:"workspace_access"` // "none" (default), "read_only", or "read_write" — see #65
+	ParentID        *string `json:"parent_id"`
 	Canvas   struct {
 		X float64 `json:"x"`
 		Y float64 `json:"y"`
