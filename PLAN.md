@@ -119,7 +119,7 @@ for the full code audit.
   returns a tarball; agent unpacks locally. Replaces Docker-exec plugin
   install for remote agents. Behind `REMOTE_PLUGIN_DOWNLOAD_ENABLED`.
 
-- [ ] **30.4 Workspace state polling** — `GET /workspaces/:id/state`
+- [x] **30.4 Workspace state polling** — `GET /workspaces/:id/state`
   returns `{status, paused, deleted_at, pending_events[]}` as a drop-in
   for the WebSocket feed remote agents can't reach. Behind
   `REMOTE_STATE_POLLING_ENABLED`.
@@ -137,7 +137,7 @@ for the full code audit.
   another. Health sweep routes by runtime. Behind
   `REMOTE_LIVENESS_POLLING_ENABLED`.
 
-- [ ] **30.8 Remote-agent SDK + docs** — `sdk/python/starfire_agent/`
+- [x] **30.8 Remote-agent SDK + docs** — `sdk/python/starfire_agent/`
   thin client: register → pull secrets → run A2A loop → poll state →
   heartbeat. Working `examples/remote-agent/` a new user can run on a
   laptop. Remove the three feature flags. Remote workspaces become GA.
