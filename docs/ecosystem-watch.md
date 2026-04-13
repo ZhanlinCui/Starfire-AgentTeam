@@ -588,6 +588,103 @@ builders; Starfire users are developers building agent companies.
 
 ---
 
+### SWE-agent — `SWE-agent/SWE-agent`
+
+**Pitch:** "SWE-agent turns LLMs into software engineers that can fix real bugs and implement features in GitHub repos."
+
+**Shape:** Python framework (MIT), ~16k ⭐, v1.0.6 released March 2026. A research project from Princeton NLP. An LLM is given a **SWE-agent Computer Interface (ACI)** — a curated set of bash tools and file-viewing commands purpose-built for code navigation — and autonomously works through GitHub issues end-to-end. No persistent agent identity; each run is ephemeral. Benchmarked heavily on SWE-bench: scored ~12% (GPT-4 turbo) up to ~53% with Claude 3.7 Sonnet. The ACI (not the LLM) is the key innovation — existing tools like bash/grep/vim are replaced by search-and-edit primitives that reduce LLM confusion in large codebases.
+
+**Overlap with us:** SWE-agent's ACI is the reference design for what our Backend Engineer, Frontend Engineer, and QA Engineer workspaces *should* have as their tool surface. Our workspaces currently rely on Claude Code's built-in tooling (Read, Edit, Bash, Grep, Glob) plus MCP skills; SWE-agent's research shows that custom ACI primitives improve coding benchmark scores meaningfully. Both platforms run LLMs inside Docker containers to execute code safely.
+
+**Differentiation:** SWE-agent is a **single-run task solver** — give it an issue, get a patch. No persistent state, no org hierarchy, no scheduling, no multi-agent coordination, no canvas. It's a benchmark runner and research artifact, not an operational platform. Starfire workspaces remember context across sessions, hold roles, coordinate with siblings, and run on schedules. SWE-agent is what you'd want our Backend Engineer workspace to *invoke* for a focused one-shot task, not what replaces the workspace.
+
+**Worth borrowing:**
+- **Agent Computer Interface primitives** — `open`, `scroll`, `search_file`, `find_file`, `edit` with line ranges are strictly better than raw bash for LLM coding agents. Our workspaces could expose these as platform-installed skills to reduce token waste on naive bash usage.
+- **Thought/action/observation trace format** — SWE-agent logs a structured trace of every reasoning step. Worth adopting as the schema for our `GET /workspaces/:id/traces` endpoint instead of raw activity log text.
+- **Cost/performance tradeoff tracking** — SWE-bench results per model at different temperatures are published with cost estimates. This is the data we need for our `model_policy` routing strategy (cheap model for low-stakes tasks, expensive for SWE-bench-class tasks).
+
+**Terminology collisions:**
+- "agent" — SWE-agent: a one-shot issue-solving process. Ours: a long-lived Docker workspace.
+- "environment" — SWE-agent: a sandboxed Docker container with the repo. Ours: the `workspace_dir` bind-mount. Same concept, different lifecycle.
+- "trajectory" — SWE-agent: one full (thought+action+observation)* run. We should use this term for our trace schema going forward.
+
+**Signals to react to:**
+- If SWE-agent adds persistent memory between runs → crosses from benchmark tool to agent platform; reassess positioning.
+- If SWE-bench scores with Claude cross 70% → the underlying ACI + model combo is good enough for production unattended use; evaluate as a Starfire runtime adapter for one-shot engineering tasks.
+- If the ACI spec gets published as a standard tool surface → adopt it in our platform-installed skill set so Starfire coding agents benchmark cleanly on SWE-bench.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~16k ⭐, v1.0.6 March 2026
+
+---
+
+### Devin — `cognition.ai` *(commercial, no public repo)*
+
+**Pitch:** "The first AI software engineer — Devin works alongside your team to tackle complex engineering tasks end-to-end."
+
+**Shape:** Commercial SaaS (Cognition AI, ~$2B valuation). Devin is a fully autonomous AI software engineer: given a task (natural language, GitHub issue, or Slack message), it opens a browser and a terminal in a sandboxed environment, writes and runs code, debugs failures, opens PRs, and iterates until done — all without human intervention. Persistent session per task; Devin can pick up where it left off. Teams access via Slack bot or web UI. Enterprise-tier pricing, no self-serve API.
+
+**Overlap with us:** Devin's session model — a long-lived, role-holding agent with persistent state that can be assigned tasks asynchronously and delivers results via Slack — is the same shape as a Starfire `Backend Engineer` workspace. Both use Docker containers, both accept A2A-style message delegation, both hold a role across sessions. Cognition has productized exactly the "one AI teammate" use case that our per-workspace org model targets.
+
+**Differentiation:** Devin is a **single fully-managed AI engineer**, not a platform for building multi-agent teams. No org hierarchy, no canvas, no registry, no A2A protocol between multiple Devins. Starfire lets teams deploy *many* specialized workspaces that coordinate — a PM delegates to a Dev Lead who delegates to a Backend Engineer. Devin is one very capable engineer; Starfire is the company those engineers work in. Devin's moat is vertical depth and polish (browser, full IDE, PR workflow out of the box); ours is composability and multi-agent coordination.
+
+**Worth borrowing:**
+- **Slack-native task assignment** — Devin accepts tasks from Slack with zero friction: `@Devin fix the auth bug in PR #123`. Our Telegram channel integration is close, but formal Slack-bot task routing (task accepted, progress updates, done notification) should match this UX. Map to `workspace_channels` + `approvals` flow.
+- **Session replay / audit trail** — Devin records every browser action, terminal command, and file edit in a viewable replay. Our `GET /workspaces/:id/traces` and `activity_logs` give the data; a UI replay view would close the gap for customers who need to audit AI work.
+- **Task acceptance confirmation before execution** — Devin sends a plan and waits for explicit human approval before starting expensive work. This maps cleanly onto our `approvals` table: add a "plan approval" step before any long-running delegation.
+
+**Terminology collisions:**
+- "session" — Cognition: a self-contained task execution run with persistent context. Ours: not a first-class concept (workspace is the persistent unit). No hard collision; avoid using "session" in our Devin-comparison docs.
+- "teammate" — Devin's primary marketing metaphor. We use "agent" or "workspace." If Devin's framing wins the market, consider adopting "AI teammate" in our onboarding copy.
+
+**Signals to react to:**
+- If Cognition opens a public API for Devin → evaluate as a Starfire adapter (`devin` runtime). Teams could provision a Devin workspace alongside Claude Code workspaces for tasks that benefit from browser access.
+- If Devin adds multi-agent orchestration (multiple Devins coordinating on a project) → direct competitor to our multi-workspace org model; expect significant marketing push.
+- If SWE-bench scores plateau and Cognition shifts positioning toward "AI company" (not just "AI engineer") → direct brand conflict; double down on our team-of-agents narrative.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** commercial SaaS, ~$2B valuation, no public repo
+
+---
+
+### Cline — `cline/cline`
+
+**Pitch:** "AI coding assistant that lives in VS Code and can autonomously edit files, run commands, and browse the web."
+
+**Shape:** VS Code extension (Apache-2.0), ~44k ⭐, pushed daily. Wraps any LLM (Claude, GPT-4o, Gemini, DeepSeek, local via Ollama) with a system-level tool belt: read/write files, run shell commands, call browser MCP. Single active session per VS Code window. Marketplace install, no containers, no persistent agent identity between sessions.
+
+**Overlap with us:** Cline's Claude-backed coding session is the same core loop as a Starfire Claude Code workspace — both wrap Claude with file+shell tools and stream results. super-dev explicitly runs inside Cline. Developers who discover Cline as a quick "AI pair programmer" are exactly our target user for the Claude Code runtime.
+
+**Differentiation:** Cline is a VS Code-local tool, not a multi-agent platform. No persistent identity between sessions, no org hierarchy, no A2A between agents, no WebSocket canvas, no scheduling. "Done" for Cline means a code change lands in the editor; "done" for Starfire means a team of agents deployed a feature through a review pipeline. Complementary shapes — a Cline user who needs parallelism is a Starfire convert.
+
+**Worth borrowing:** Auto-approval modes (read-only → write → execute tiers) with per-command diff review — more granular than our single `approvals` gate. The "cost meter" (running token spend shown in UI) is a cheap trust-building feature for our Canvas.
+
+**Terminology collisions:** "task" — their in-session coding task vs our `current_task` heartbeat field. "tools" — same word, both mean structured LLM tool calls.
+
+**Signals to react to:** If Cline adds multi-session agent persistence or cross-window agent communication → direct threat to our Claude Code runtime story. If Cline's MCP support becomes the de facto way developers wire tools → align our workspace tool model to the same MCP surface.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~44k ⭐, pushed daily
+
+---
+
+### OpenHands — `All-Hands-AI/OpenHands`
+
+**Pitch:** "Open-source AI software engineer — let AI be your co-developer: browse the web, write code, run commands, and collaborate on tasks."
+
+**Shape:** Python + TypeScript (MIT), ~47k ⭐, v0.39.0. Web-hosted UI (or local Docker) where an AI agent operates inside a sandboxed runtime (browser, shell, files) to complete multi-step engineering tasks. Supports Claude, GPT-4o, Gemini, DeepSeek. SWE-Bench top-ranked open-source system. Community of ~3k contributors.
+
+**Overlap with us:** OpenHands is the closest open-source parallel to a Starfire Claude Code workspace — both run an AI agent with shell+file access inside a container. The sandbox model (Docker-isolated execution, browser use, file I/O) is identical to our `workspace-template` runtime layer. Starfire users building a "solo engineer" workspace are building what OpenHands ships out of the box.
+
+**Differentiation:** OpenHands is single-agent, single-task — no org hierarchy, no A2A between agents, no visual canvas, no scheduling, no persistent identity across sessions. A single "project" is one sandboxed run. Starfire is a persistent, multi-agent company with A2A, schedules, and a visual org chart. OpenHands is the reference implementation for the solo-agent shape; Starfire is the platform for the team shape.
+
+**Worth borrowing:** **CodeAct action space** — agent emits Python code instead of JSON tool schemas; code is executed directly in the sandbox. More expressive than JSON tool calls and simpler to extend. If our workspace agents need arbitrary tool composition, CodeAct is worth evaluating as an alternative to our MCP tool list.
+
+**Terminology collisions:** "workspace" — theirs is a sandboxed task run; ours is a long-lived Docker container with an agent role. "agent" — same word, different persistence model.
+
+**Signals to react to:** If OpenHands ships multi-agent coordination (agents spawning sub-agents with shared memory) → direct overlap with our team model. If their SWE-Bench rank approaches GPT-4o with an open model → cost-effective backend for our DevOps / QA workspaces.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~47k ⭐, v0.39.0, very active
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
