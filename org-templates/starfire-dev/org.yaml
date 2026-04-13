@@ -30,7 +30,7 @@ workspaces:
     tier: 3
     model: opus
     files_dir: pm
-    workspace_dir: /Users/hongming/Documents/GitHub/Starfire-AgentTeam
+    workspace_dir: ${WORKSPACE_DIR}
     canvas: { x: 400, y: 50 }
     # Auto-link Telegram so the user can talk to PM directly from Telegram.
     # Bot token + chat ID come from pm/.env (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID).

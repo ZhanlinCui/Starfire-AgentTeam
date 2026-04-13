@@ -317,6 +317,64 @@ builders; Starfire users are developers building agent companies.
 
 ---
 
+### Pydantic AI — `pydantic/pydantic-ai`
+
+**Pitch:** "AI Agent Framework, the Pydantic way."
+
+**Shape:** Python SDK (MIT), ~16.3k ⭐, last release v1.8.0 on April 10, 2026 — actively maintained at high velocity. Single and multi-agent, with typed dependency injection (`RunContext[DepsType]`), structured/validated outputs (`Agent[Deps, OutputType]`), composable capability bundles (tools + hooks + instructions + model settings), built-in streaming, and human-in-the-loop tool approvals. Supports A2A and MCP natively as first-class integrations. Model-agnostic: OpenAI, Anthropic, Gemini, Mistral, Cohere, DeepSeek, Bedrock, Vertex, Ollama, OpenRouter, and more. Observability via Pydantic Logfire.
+
+**Overlap with us:** A2A support means Pydantic AI agents can speak directly to Starfire workspaces over our native protocol — they're potential consumers of Starfire's registry, not just a parallel ecosystem. MCP integration mirrors our workspace tool model. The composable capability bundles are the same instinct as our plugin/skills system. Logfire's agent tracing is a polished alternative to our `GET /workspaces/:id/traces` + Langfuse stack.
+
+**Differentiation:** Pydantic AI is a library for building agents in Python — no visual canvas, no Docker workspace isolation, no registry/discovery, no scheduling, no WebSocket org chart, no channels. It's the in-process layer; we're the operational platform layer. The two are naturally complementary: a Starfire workspace *running* Pydantic AI agents is a valid architecture, not a contradiction.
+
+**Worth borrowing:**
+- **Typed dependency injection via `RunContext`** — passing strongly-typed deps (DB connection, API client, user object) into every tool and instruction without global state. Our `config.yaml` passes env vars; this pattern is safer and more testable.
+- **`Agent[Deps, OutputType]` generic typing** — structured, schema-validated agent outputs. Our A2A responses are freeform text; adopting structured output schemas at the A2A layer would enable typed inter-workspace contracts.
+- **Composable capability bundles** — reusable packages of tools + hooks + instructions. Our plugins install files; this is the right next evolution (code bundles, not just Markdown).
+
+**Terminology collisions:**
+- "capabilities" — their term for composable tool+instruction bundles; we use "plugins" or "skills."
+- "RunContext" — their typed dependency carrier; not a shared term, but will appear in codebases mixing Pydantic AI + Starfire adapters.
+- "tools" — same word, same meaning. No collision, but documentation should be explicit about Pydantic AI tools vs. MCP tools vs. Starfire skills.
+
+**Signals to react to:**
+- If Pydantic AI ships a workspace/session persistence layer → fills the one gap between it and Starfire's value; revisit our Python-SDK adapter story.
+- If `pydantic-deepagents` (`vstorm-co/pydantic-deepagents`) gains traction — "Claude Code–style deep agents on Pydantic AI" — it would become a direct competitor to our Claude Code runtime adapter.
+- If Logfire's agent tracing becomes the de facto standard → align our trace schema so Logfire can ingest Starfire workspace traces natively.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~16.3k ⭐, v1.8.0 released April 10, 2026
+
+---
+
+### Rivet — `Ironclad/rivet`
+
+**Pitch:** "The open-source visual AI programming environment and TypeScript library."
+
+**Shape:** Electron desktop app + TypeScript library (MIT), ~4.5k ⭐. Visual node-based editor where AI workflows are built by connecting nodes in a graph: LLM call nodes, tool nodes, subgraph nodes, conditional branches. Runs locally; exports workflows as `.rivet-project` files that can be embedded in applications via the `@ironclad/rivet-node` npm package. Built and open-sourced by Ironclad (a Series D contract intelligence company). Model-agnostic. Plugin marketplace for custom node types.
+
+**Overlap with us:** The canvas is the obvious overlap — both products present AI agent work as a visual graph. Rivet's subgraph nesting (complex workflows broken into reusable components) maps to our parent/child workspace hierarchy. The plugin marketplace for custom nodes mirrors our `plugins/` registry. Rivet workflows can call external APIs, making them potential consumers of Starfire's `/workspaces/:id/a2a` endpoint — a Rivet node that delegates to a Starfire agent is a plausible integration.
+
+**Differentiation:** Rivet is a **workflow authoring tool**, not an agent runtime. A `.rivet-project` file describes a static graph; there's no persistent agent identity, no memory across runs, no org hierarchy, no real-time WebSocket canvas, no scheduling, no Docker container management. The Rivet editor is for building workflows; Starfire is for running a live org of agents. The `/channels` angle is absent from Rivet — it has no concept of an agent receiving or sending messages via Telegram, Slack, or other social platforms. Rivet's audience is developers prototyping single pipelines; ours is teams deploying multi-agent organizations.
+
+**Worth borrowing:**
+- **Nested subgraph UX** — Rivet's handling of "graph within graph" as a first-class reusable node is the cleanest visual pattern for our parent/child workspace hierarchy. Our current Canvas flattens deeply nested teams into chips; Rivet's subgraph expand/collapse is the reference UX to study.
+- **Node-level debug inspector** — clicking any node in a completed run shows its exact inputs, outputs, and latency. Our Canvas chat shows A2A messages but not intra-workspace step-level data. This is the natural evolution of our trace view.
+- **`.rivet-project` portability** — workflow-as-file, embeddable in any TypeScript app via npm. Suggests we should support a "workspace bundle export" that can run outside Starfire, not just be imported back into it.
+
+**Terminology collisions:**
+- "graph" — their graph is a workflow definition (static); ours is the live org chart (dynamic, stateful). Different semantics, same word.
+- "node" — their nodes are workflow steps; our canvas nodes are workspaces. No runtime collision but documentation must be unambiguous.
+- "plugin" — both have plugin systems; theirs extends the node palette, ours extends the workspace runtime.
+
+**Signals to react to:**
+- If Rivet adds persistent agent state between runs → closes the gap with Starfire for simple use cases; revisit our "quick start" story for non-enterprise users.
+- If Rivet adds a "deploy workflow as agent endpoint" feature → their visual builder becomes a Starfire workspace creator; consider a Rivet → Starfire import adapter.
+- If `.rivet-project` format becomes a de facto workflow interchange standard → support importing Rivet projects as Starfire workspace configs.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~4.5k ⭐, actively maintained
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
