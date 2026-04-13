@@ -483,7 +483,36 @@ builders; Starfire users are developers building agent companies.
 - If AG2 ships persistent agent state → direct competitor to our Claude Code and LangGraph adapters.
 
 **Last reviewed:** 2026-04-13 · **Stars / activity:** ~40k ⭐ (primary community repo for AutoGen lineage)
+---
 
+### Super Dev — `shangyankeji/super-dev`
+
+**Pitch:** "Engineering workflow layer for AI coding tools — specs, review, quality gates, and traceability for commercial-grade AI-assisted delivery."
+
+**Shape:** Python 3.10+ CLI (MIT), ~217 ⭐, v2.3.7. Not an agent runtime — a governance overlay that injects structured workflow into existing AI coding hosts (Claude Code, Cursor, Cline, Codex). Users invoke via `/super-dev` inside their host tool. Delivers an 8-phase pipeline (research → PRD → architecture → UI/UX → spec → implementation → quality → delivery) with 11 domain-expert context injections per phase (PRODUCT, PM, ARCHITECT, UI, UX, SECURITY, CODE, DBA, QA, DEVOPS, RCA), YAML-driven validation rules, knowledge-file auto-injection, and DORA-4 delivery metrics. Primary audience: Chinese-market developers; bilingual README. 63 forks as of April 2026.
+
+**Overlap with us:** Both use a PM role, a "skills" directory convention, CLAUDE.md injection, and quality gates. Starfire users who run Claude Code workspaces may already use super-dev inside that workspace — orthogonal layers, not competitors.
+
+**Differentiation:** Super-dev engineers a solo developer's AI coding session; Starfire engineers a team of persistent AI agents collaborating via A2A. Super-dev has no agent identity, no workspace lifecycle, no Docker runtime, no multi-agent coordination. Starfire has no per-phase expert Playbooks or spec-traceability. Complementary shapes.
+
+**Worth borrowing:**
+- **Expert-Playbook injection** — 11 domain experts with 350-line Playbooks auto-injected per pipeline phase. Our org-template system-prompts are the equivalent, but super-dev's staged injection (only relevant experts per phase) is more surgical than our always-on prompts.
+- **Staged pipeline formalism** — explicit phase names (research → spec → quality) with mandatory confirmation gates. Formalizing this in Starfire's PM org-template would make agent hand-offs auditable.
+- **Spec-Code traceability** — `super-dev spec trace` links implementation files back to spec docs. Worth adding as a workflow convention even without tooling.
+- **YAML validation rules with multi-level severity** — 14 built-in rules + custom rules. Adapt for Starfire's own QA step.
+
+**Terminology collisions:**
+- "memory" — super-dev has 4 typed memory categories (user / feedback / project / reference) with dream consolidation; ours are key-value pairs programmatically set by agents.
+- "skills" — super-dev's `super-dev-skill/` is a host-injection convention; our `skills/` are composable agent behaviours loaded at workspace boot.
+- "PM" — their PM is an expert context fragment; ours is a live orchestrating agent.
+- "pipeline" — their 8-phase delivery sequence vs our runtime adapter selection + delegation chains.
+
+**Signals to react to:**
+- If super-dev ships multi-agent coordination (shared workspace state, agent hand-offs beyond single-host) → overlap increases materially; assess positioning.
+- If super-dev adds a Starfire workspace adapter (they already handle Claude Code, Cursor, Cline) → co-marketing / integration opportunity; our Claude Code adapter runs inside their pipeline.
+- If the "11 expert Playbook" pattern gets wide adoption → formalize equivalent staged-injection in our PM + Dev Lead system prompts.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~217 ⭐, 63 forks, v2.3.7 pushed Apr 13 2026
 ---
 
 ## Candidates to add (backlog)
