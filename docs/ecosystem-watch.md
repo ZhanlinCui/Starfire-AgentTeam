@@ -435,6 +435,57 @@ builders; Starfire users are developers building agent companies.
 
 ---
 
+### Mem0 — `mem0ai/mem0`
+
+**Pitch:** "The memory layer for AI agents — add persistent, adaptive memory to any LLM application."
+
+**Shape:** Python/TypeScript SDK (Apache 2.0), ~25k ⭐. Runs as an embedded library or managed cloud service. Extracts structured memory objects from conversations (facts, preferences, relationships), stores them with embeddings, and retrieves relevant memories on each new interaction. Supports multiple vector backends (Qdrant, Pinecone, Chroma, Postgres pgvector). REST API available.
+
+**Overlap with us:** Starfire ships `agent_memories` + `/workspaces/:id/memories` for per-agent memory. Mem0 targets exactly this use case and is the incumbent OSS solution for add-on agent memory. Any team evaluating Starfire will compare our memory primitives to Mem0's.
+
+**Differentiation:** Mem0 is a memory service, not an agent platform. It has no workspace lifecycle, no org hierarchy, no A2A protocol, no canvas, no scheduling. Starfire memory is scoped per-workspace and stored in Postgres as raw key-value pairs; Mem0 extracts and semantically indexes facts across interactions using vector search. The extraction step is the critical gap — we store what agents explicitly save, Mem0 learns what matters automatically.
+
+**Worth borrowing:**
+- **Structured extraction** — Mem0 auto-extracts facts ("project uses zinc-900 palette") from conversation text. Adding extraction to our memory writes would improve recall quality for long-running agents without agents needing to explicitly call `commit_memory`.
+- **pgvector backend** — supports Postgres pgvector; we could add semantic memory search to our existing DB with no new infrastructure.
+
+**Terminology collisions:**
+- "memory" — same word, different semantics. Mem0 memories are extracted semantic facts; our memories are programmatically set key-value pairs.
+
+**Signals to react to:**
+- If Mem0 ships multi-agent scoped memories (shared across an org) → directly competes with our team memory model.
+- If Mem0 becomes default memory backend for LangGraph or CrewAI → assess whether our adapters should delegate to Mem0 under the hood.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~25k ⭐, actively maintained
+
+---
+
+### AG2 — `ag2ai/ag2`
+
+**Pitch:** "A programming framework for agentic AI — the continuation of AutoGen by the original team."
+
+**Shape:** Python library (Apache 2.0), ~40k ⭐ (combined AutoGen lineage). Community fork maintained by the original AutoGen core contributors after Microsoft redirected `microsoft/autogen` toward a new architecture. Preserves the classic AutoGen API: `AssistantAgent`, `UserProxyAgent`, `GroupChat`, `GroupChatManager`. Actively ships new features (tool calling, code execution, nested chats). `pip install ag2` is now the recommended path for the classic AutoGen experience.
+
+**Overlap with us:** Starfire ships an `autogen` runtime adapter targeting `microsoft/autogen`. AG2 is API-compatible for most use cases but is the fork with active community investment — our adapter should be validated against AG2 and the migration path assessed.
+
+**Differentiation:** AG2 is a conversation orchestration framework, not an agent platform. Agents are ephemeral Python objects per-conversation; no persistent workspace identity, no canvas, no Docker management, no org hierarchy, no A2A, no scheduling. Starfire workspaces are long-lived; AG2 sessions are not.
+
+**Worth borrowing:**
+- **GroupChat speaker selection** — AG2's `GroupChatManager` supports round-robin, auto (LLM-selected), and custom speaker strategies. More sophisticated than our linear PM → Lead → Engineer delegation; study for future dynamic routing.
+- **Hardened code execution sandbox** — AG2's Docker-isolated code execution container is the reference design for any Starfire feature where engineer agents run arbitrary code.
+
+**Terminology collisions:**
+- "agent" — their agents are ephemeral Python objects; ours are long-lived Docker workspaces.
+- "GroupChat" — their multi-agent coordination primitive; analogous to our PM + team hierarchy but stateless.
+
+**Signals to react to:**
+- If the `microsoft/autogen` ↔ AG2 split resolves → update our adapter target accordingly; don't maintain two paths.
+- If AG2 ships persistent agent state → direct competitor to our Claude Code and LangGraph adapters.
+
+**Last reviewed:** 2026-04-13 · **Stars / activity:** ~40k ⭐ (primary community repo for AutoGen lineage)
+
+---
+
 ## Candidates to add (backlog)
 
 Short-list of projects to write up next time someone has an hour:
