@@ -1,0 +1,36 @@
+# MeDo Smoke Test Org — single OpenClaw workspace for Miaoda App Builder skill testing.
+# Use this to validate the MeDo integration before wiring it into starfire-dev.
+#
+# Prerequisites (MUST run on operator machine before importing):
+#   bash workspace-template/build-all.sh openclaw
+#   # Verifies: docker images | grep workspace-template:openclaw
+#
+# Import via platform API:
+#   POST http://platform:8080/org/import
+#   Body: { "dir": "medo-smoke" }   ← requires this file to be on the platform's FS
+#   OR inline template (see docs/adapters/medo-integration.md §3)
+
+name: MeDo Smoke Test
+description: Single openclaw workspace for validating Miaoda App Builder skill end-to-end
+
+defaults:
+  runtime: openclaw
+  tier: 2
+  required_env:
+    - MIAODA_API_KEY     # From MeDo website → Settings → API Keys
+    - OPENROUTER_API_KEY # LLM provider for OpenClaw agent reasoning
+
+workspaces:
+  - name: MeDo Builder
+    role: Builds and publishes MeDo applications via the Miaoda App Builder OpenClaw skill
+    canvas: { x: 400, y: 300 }
+    initial_prompt: |
+      You are a MeDo App Builder. On first boot:
+      1. Install the Miaoda App Builder skill:
+         Send to yourself: "Install the Miaoda App Builder skill from ClawHub: seiriosPlus/miaoda-app-builder"
+         Wait for the skill to confirm installation.
+      2. Confirm MIAODA_API_KEY is set: echo $MIAODA_API_KEY (first 4 chars only for safety)
+      3. Report ready to parent via A2A.
+      When you receive a build task, relay it verbatim to the Miaoda skill.
+      App generation takes 5-8 minutes — wait patiently and poll if needed.
+      Always return the published app URL when done.
