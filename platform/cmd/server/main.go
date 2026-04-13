@@ -24,12 +24,17 @@ import (
 )
 
 func main() {
-	// Secrets encryption (optional — disabled if SECRETS_ENCRYPTION_KEY not set)
-	crypto.Init()
+	// Secrets encryption. In STARFIRE_ENV=prod, boot refuses to start
+	// without a valid SECRETS_ENCRYPTION_KEY (fail-secure — Top-5 #5).
+	// In any other environment, missing keys just log a warning and
+	// continue with encryption disabled for dev ergonomics.
+	if err := crypto.InitStrict(); err != nil {
+		log.Fatalf("Secrets encryption: %v", err)
+	}
 	if crypto.IsEnabled() {
 		log.Println("Secrets encryption: AES-256-GCM enabled")
 	} else {
-		log.Println("Secrets encryption: disabled (set SECRETS_ENCRYPTION_KEY for production)")
+		log.Println("Secrets encryption: disabled (set SECRETS_ENCRYPTION_KEY — required when STARFIRE_ENV=prod)")
 	}
 
 	// Database
