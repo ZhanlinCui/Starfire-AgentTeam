@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -939,4 +941,116 @@ func TestLogInstallLimitsOnce(t *testing.T) {
 	// If buf is empty: another test's NewPluginsHandler already called
 	// Once. That's also correct behavior — nothing to assert beyond "it
 	// didn't panic."
+}
+
+// ---------- regexpEscapeForAwk: special chars escaped ----------
+
+func TestRegexpEscapeForAwk(t *testing.T) {
+	cases := map[string]string{
+		"my-plugin":                 `my-plugin`,
+		"# Plugin: foo /":           `# Plugin: foo \/`,
+		"# Plugin: a.b /":           `# Plugin: a\.b \/`,
+		"foo[bar]":                  `foo\[bar\]`,
+		"a*b+c?":                    `a\*b\+c\?`,
+		"path|with|pipes":           `path\|with\|pipes`,
+		`back\slash`:                `back\\slash`,
+		"":                          ``,
+	}
+	for in, want := range cases {
+		got := regexpEscapeForAwk(in)
+		if got != want {
+			t.Errorf("regexpEscapeForAwk(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// ---------- stripPluginMarkersFromMemory: awk script logic ----------
+//
+// We can't unit-test the in-container exec without Docker, but we CAN
+// test the awk script against a real bash on the test runner — which is
+// exactly the same script that runs in the container. This catches
+// off-by-one block-stripping bugs without needing a workspace.
+
+func TestStripPluginMarkers_AwkScript(t *testing.T) {
+	tmp := t.TempDir()
+	memory := filepath.Join(tmp, "CLAUDE.md")
+
+	// Mirrors the layout AgentskillsAdaptor.append_to_memory writes:
+	// blank line, marker line, body line(s), blank line separator.
+	initial := `# Agent Workspace
+
+Original user content here.
+
+# Plugin: my-plugin / rule: foo.md
+
+These are my-plugin's rules.
+Multiple lines of content.
+
+# Plugin: keep-me / rule: bar.md
+
+Should remain untouched.
+
+# Plugin: my-plugin / fragment: baz.md
+
+Another my-plugin block.
+
+Trailing user content.
+`
+	if err := os.WriteFile(memory, []byte(initial), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Run the same awk pipeline the production code uses.
+	marker := "# Plugin: my-plugin /"
+	script := fmt.Sprintf(
+		`awk 'BEGIN{skip=0; blanks=0} /^%s/{skip=1; blanks=0; next} skip==1 && /^[[:space:]]*$/{blanks++; if(blanks>=2){skip=0; print; next} next} /^# Plugin: /{if(skip==1)skip=0} skip==1{next} {print}' %s > %s.new && mv %s.new %s`,
+		regexpEscapeForAwk(marker), memory, memory, memory, memory,
+	)
+	cmd := exec.Command("bash", "-c", script)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("awk run failed: %v\n%s", err, out)
+	}
+
+	got, _ := os.ReadFile(memory)
+	gs := string(got)
+
+	// The two my-plugin blocks must be gone, including their content.
+	if strings.Contains(gs, "my-plugin") {
+		t.Errorf("expected all my-plugin references stripped; got:\n%s", gs)
+	}
+	if strings.Contains(gs, "These are my-plugin's rules.") {
+		t.Errorf("plugin body content leaked through; got:\n%s", gs)
+	}
+	if strings.Contains(gs, "Another my-plugin block.") {
+		t.Errorf("second plugin block content leaked; got:\n%s", gs)
+	}
+
+	// The keep-me block and surrounding user content must survive intact.
+	for _, want := range []string{
+		"# Agent Workspace",
+		"Original user content here.",
+		"# Plugin: keep-me / rule: bar.md",
+		"Should remain untouched.",
+		"Trailing user content.",
+	} {
+		if !strings.Contains(gs, want) {
+			t.Errorf("expected %q to remain in CLAUDE.md; got:\n%s", want, gs)
+		}
+	}
+}
+
+// ---------- stripPluginMarkers: missing CLAUDE.md is silent ----------
+
+func TestStripPluginMarkers_MissingFileIsNoOp(t *testing.T) {
+	// Awk on a missing file is a non-zero exit (which our production code
+	// silently ignores via `_, _ =`). Verify that the local invocation
+	// behaves the same and doesn't crash the test process.
+	tmp := t.TempDir()
+	missing := filepath.Join(tmp, "does-not-exist.md")
+	script := fmt.Sprintf(
+		`awk 'BEGIN{skip=0; blanks=0} /^%s/{skip=1; blanks=0; next} skip==1 && /^[[:space:]]*$/{blanks++; if(blanks>=2){skip=0; print; next} next} /^# Plugin: /{if(skip==1)skip=0} skip==1{next} {print}' %s > /tmp/x.$$ 2>/dev/null && mv /tmp/x.$$ %s`,
+		regexpEscapeForAwk("# Plugin: x /"), missing, missing,
+	)
+	cmd := exec.Command("bash", "-c", script)
+	_ = cmd.Run() // expected to fail; we just check it doesn't hang/panic
 }
