@@ -629,7 +629,7 @@ func TestSecretsSet_TriggersAutoRestart(t *testing.T) {
 	handler := NewSecretsHandler(restartFunc)
 
 	mock.ExpectExec("INSERT INTO workspace_secrets").
-		WithArgs("77777777-7777-7777-7777-777777777777", "NEW_KEY", sqlmock.AnyArg()).
+		WithArgs("77777777-7777-7777-7777-777777777777", "NEW_KEY", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	w := httptest.NewRecorder()
@@ -665,7 +665,7 @@ func TestSecretsSet_NilRestartFuncNoPanic(t *testing.T) {
 	handler := NewSecretsHandler(nil) // nil restart func
 
 	mock.ExpectExec("INSERT INTO workspace_secrets").
-		WithArgs("88888888-8888-8888-8888-888888888888", "SAFE_KEY", sqlmock.AnyArg()).
+		WithArgs("88888888-8888-8888-8888-888888888888", "SAFE_KEY", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	w := httptest.NewRecorder()

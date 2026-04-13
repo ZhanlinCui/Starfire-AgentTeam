@@ -282,3 +282,111 @@ func TestIsProdEnv_CaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+// -------- DecryptVersioned + CurrentEncryptionVersion (#85) ---------
+
+func TestDecryptVersioned_PlaintextPassesThrough(t *testing.T) {
+	// Simulates the historical-row case: rows written when encryption was
+	// disabled. Current platform has a key but the row doesn't.
+	resetKey()
+	key := make([]byte, 32)
+	t.Setenv("SECRETS_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	initKey()
+
+	plaintext := []byte("fake-token-representing-historical-plaintext")
+	out, err := DecryptVersioned(plaintext, EncryptionVersionPlaintext)
+	if err != nil {
+		t.Fatalf("DecryptVersioned on plaintext version must not error, got: %v", err)
+	}
+	if string(out) != string(plaintext) {
+		t.Errorf("plaintext bytes must pass through unchanged, got %q", out)
+	}
+}
+
+func TestDecryptVersioned_AESGCMRoundTrip(t *testing.T) {
+	resetKey()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	t.Setenv("SECRETS_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	initKey()
+
+	plain := []byte("fake-plaintext-for-round-trip-test")
+	ct, err := Encrypt(plain)
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	out, err := DecryptVersioned(ct, EncryptionVersionAESGCM)
+	if err != nil {
+		t.Fatalf("DecryptVersioned(v=1) failed: %v", err)
+	}
+	if string(out) != string(plain) {
+		t.Errorf("round-trip mismatch: want %q got %q", plain, out)
+	}
+}
+
+func TestDecryptVersioned_AESGCMRequiresEnabledKey(t *testing.T) {
+	resetKey()
+	t.Setenv("SECRETS_ENCRYPTION_KEY", "")
+
+	out, err := DecryptVersioned([]byte("opaque"), EncryptionVersionAESGCM)
+	if err == nil {
+		t.Fatal("DecryptVersioned(v=1) must error when IsEnabled() is false")
+	}
+	if out != nil {
+		t.Errorf("expected nil bytes on error, got %q", out)
+	}
+}
+
+func TestDecryptVersioned_UnknownVersionRejected(t *testing.T) {
+	resetKey()
+	_, err := DecryptVersioned([]byte("any"), 999)
+	if err == nil {
+		t.Fatal("DecryptVersioned must reject unknown versions")
+	}
+}
+
+func TestCurrentEncryptionVersion_TracksKeyState(t *testing.T) {
+	resetKey()
+	t.Setenv("SECRETS_ENCRYPTION_KEY", "")
+	if v := CurrentEncryptionVersion(); v != EncryptionVersionPlaintext {
+		t.Errorf("key unset → plaintext version; got %d", v)
+	}
+
+	resetKey()
+	key := make([]byte, 32)
+	t.Setenv("SECRETS_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	initKey()
+	if v := CurrentEncryptionVersion(); v != EncryptionVersionAESGCM {
+		t.Errorf("key set → AES-GCM version; got %d", v)
+	}
+}
+
+func TestDecryptVersioned_HistoricalPlaintextAfterKeyEnabled(t *testing.T) {
+	// The exact #85 scenario: platform ran without a key, secrets were
+	// stored as plaintext (version=0), then a key was added. Old rows
+	// MUST still decrypt via the version=0 path, even though the current
+	// platform could run GCM.
+	resetKey()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = 1
+	}
+	t.Setenv("SECRETS_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key))
+	initKey()
+	if !IsEnabled() {
+		t.Fatal("test setup: expected IsEnabled() to be true")
+	}
+
+	// Simulate a historical plaintext row — bytes are literal token,
+	// version column stored the old default (0).
+	historicalPlaintext := []byte("fake-historical-plaintext-abcdef0123456789")
+	out, err := DecryptVersioned(historicalPlaintext, EncryptionVersionPlaintext)
+	if err != nil {
+		t.Fatalf("historical plaintext row must decrypt post-key-enable, got: %v", err)
+	}
+	if string(out) != string(historicalPlaintext) {
+		t.Errorf("historical plaintext must round-trip identically; got %q", out)
+	}
+}

@@ -301,3 +301,45 @@ func TestListDelegations_WithResults(t *testing.T) {
 		t.Errorf("unmet sqlmock expectations: %v", err)
 	}
 }
+
+// ---------- #74: isTransientProxyError retry classification ----------
+
+func TestIsTransientProxyError_RetriesOnRestartRaceStatuses(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    *proxyA2AError
+		expect bool
+	}{
+		{"nil", nil, false},
+		{"503 service unavailable (container restart triggered)",
+			&proxyA2AError{Status: http.StatusServiceUnavailable}, true},
+		{"502 bad gateway (connection refused)",
+			&proxyA2AError{Status: http.StatusBadGateway}, true},
+		{"404 workspace not found",
+			&proxyA2AError{Status: http.StatusNotFound}, false},
+		{"403 access denied — static, don't retry",
+			&proxyA2AError{Status: http.StatusForbidden}, false},
+		{"400 bad request — static, don't retry",
+			&proxyA2AError{Status: http.StatusBadRequest}, false},
+		{"500 generic — conservative, don't retry",
+			&proxyA2AError{Status: http.StatusInternalServerError}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTransientProxyError(tc.err); got != tc.expect {
+				t.Errorf("isTransientProxyError(%+v) = %v, want %v", tc.err, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestDelegationRetryDelay_IsSaneWindow(t *testing.T) {
+	// Regression guard: the retry delay must be long enough for the
+	// reactive URL refresh in proxyA2ARequest to kick in (which involves
+	// a Docker IsRunning check + DB update + RestartByID call) but short
+	// enough that a transient failure doesn't block the 30-min outer
+	// timeout. 8s is the chosen balance.
+	if delegationRetryDelay < 2*time.Second || delegationRetryDelay > 30*time.Second {
+		t.Errorf("delegationRetryDelay = %v, expected [2s, 30s]", delegationRetryDelay)
+	}
+}
