@@ -265,6 +265,39 @@ class ClaudeSDKExecutor(AgentExecutor):
         msg = str(exc).lower()
         return any(p in msg for p in _RETRYABLE_PATTERNS)
 
+    def _reset_session_after_error(self, exc: BaseException) -> None:
+        """Clear `_session_id` if the exception looks like a subprocess
+        crash (#75). On the next `_build_options()` call `resume=None` is
+        passed to the SDK, so the CLI boots a brand-new session instead of
+        trying to resume one the previous subprocess left in an
+        unrecoverable state.
+
+        Kept in its own method so the policy can evolve (e.g. also clear
+        on MessageParseError) without touching the retry loop. Logs at
+        INFO when a session was actually cleared; silent when there was
+        nothing to reset.
+        """
+        exc_name = type(exc).__name__
+        # Conservative: reset only on subprocess-level failures. Pure
+        # rate-limit / capacity errors don't leave the session in a bad
+        # state — keep the session_id so the resumed turn preserves
+        # conversational continuity.
+        is_subprocess_error = (
+            exc_name in ("ProcessError", "CLIConnectionError")
+            or getattr(exc, "exit_code", None) is not None
+            or "exit code" in str(exc).lower()
+        )
+        if not is_subprocess_error:
+            return
+        if self._session_id is None:
+            return
+        logger.info(
+            "SDK session reset after %s: clearing session_id so the next "
+            "attempt starts fresh (fixes #75 session contamination)",
+            exc_name,
+        )
+        self._session_id = None
+
     async def _execute_locked(self, user_input: str) -> str:
         """Body of execute() that runs under the run lock.
 
@@ -292,6 +325,15 @@ class ClaudeSDKExecutor(AgentExecutor):
                     break  # success
                 except Exception as exc:
                     formatted = _format_process_error(exc)
+                    # #75: CLI subprocess crashes leave our _session_id
+                    # referencing a session the next subprocess can't
+                    # resume. Without this reset the next attempt would
+                    # crash identically even when the underlying cause
+                    # was transient, cascading into "crashed once →
+                    # crashes forever until container restart." Clear
+                    # the session_id so the next attempt (retry or
+                    # next user turn) starts fresh.
+                    self._reset_session_after_error(exc)
                     if attempt < _MAX_RETRIES - 1 and self._is_retryable(exc):
                         delay = _BASE_RETRY_DELAY_S * (2 ** attempt)
                         logger.warning(
