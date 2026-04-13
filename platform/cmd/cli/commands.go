@@ -76,21 +76,37 @@ func newTabWriter() *tabwriter.Writer {
 }
 
 // printWorkspaceTable prints a slice of WorkspaceInfo as a table.
+//
+// Phase 30 — added a RUNTIME column so operators can see at a glance
+// which workspaces are local Docker containers vs. remote agents
+// (runtime='external'). Remote agents skip the auto-restart and
+// container-health-sweep paths, so when one shows offline the operator
+// knows to look at the agent's host machine, not Docker.
 func printWorkspaceTable(workspaces []WorkspaceInfo) {
 	tw := newTabWriter()
-	fmt.Fprintln(tw, "ID\tNAME\tSTATUS\tTIER\tTASKS\tERR%\tUPTIME")
+	fmt.Fprintln(tw, "ID\tNAME\tSTATUS\tRUNTIME\tTIER\tTASKS\tERR%\tUPTIME")
 	fmt.Fprintln(tw, strings.Repeat("-", 8)+"\t"+
 		strings.Repeat("-", 20)+"\t"+
 		strings.Repeat("-", 12)+"\t"+
+		strings.Repeat("-", 11)+"\t"+
 		strings.Repeat("-", 4)+"\t"+
 		strings.Repeat("-", 5)+"\t"+
 		strings.Repeat("-", 4)+"\t"+
 		strings.Repeat("-", 8))
 	for _, ws := range workspaces {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%.0f%%\t%s\n",
+		runtime := ws.Runtime
+		if runtime == "" {
+			runtime = "langgraph" // platform's default; matches DB COALESCE
+		}
+		// Visual cue: prepend ★ for remote agents so they pop in a long table.
+		if runtime == "external" {
+			runtime = "★ external"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%d\t%.0f%%\t%s\n",
 			shortID(ws.ID),
 			truncate(ws.Name, 20),
 			ws.Status,
+			runtime,
 			ws.Tier,
 			ws.ActiveTasks,
 			ws.LastErrorRate*100,
@@ -106,6 +122,13 @@ func printWorkspaceDetail(ws WorkspaceInfo) {
 	fmt.Fprintf(tw, "ID:\t%s\n", ws.ID)
 	fmt.Fprintf(tw, "Name:\t%s\n", ws.Name)
 	fmt.Fprintf(tw, "Status:\t%s\n", ws.Status)
+	if ws.Runtime != "" {
+		runtimeLabel := ws.Runtime
+		if ws.Runtime == "external" {
+			runtimeLabel = "external (Phase 30 remote agent)"
+		}
+		fmt.Fprintf(tw, "Runtime:\t%s\n", runtimeLabel)
+	}
 	fmt.Fprintf(tw, "Tier:\t%d\n", ws.Tier)
 	if ws.Role != nil && *ws.Role != "" {
 		fmt.Fprintf(tw, "Role:\t%s\n", *ws.Role)

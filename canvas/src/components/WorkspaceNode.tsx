@@ -136,12 +136,24 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
           </div>
         </div>
 
-        {/* Runtime badge */}
-        {data.agentCard && typeof (data.agentCard as Record<string, unknown>).runtime === "string" && (
-          <div className="mb-1">
-            <span className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-zinc-400 bg-zinc-800/60 border border-zinc-700/30">
-              {(data.agentCard as Record<string, string>).runtime}
-            </span>
+        {/* Runtime badge — prefers workspace.runtime (DB column) over
+            agent_card.runtime (agent-reported). Phase 30 remote agents
+            (runtime='external') get a distinct purple "REMOTE" pill so
+            operators can spot them in a sea of Docker workspaces. */}
+        {(data.runtime || (data.agentCard && typeof (data.agentCard as Record<string, unknown>).runtime === "string")) && (
+          <div className="mb-1 flex items-center gap-1">
+            {data.runtime === "external" ? (
+              <span
+                className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-violet-200 bg-violet-900/50 border border-violet-500/40"
+                title="Phase 30 remote agent — runs outside this platform's Docker network. Lifecycle managed via heartbeat-based polling, not Docker exec."
+              >
+                ★ REMOTE
+              </span>
+            ) : (
+              <span className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-zinc-400 bg-zinc-800/60 border border-zinc-700/30">
+                {data.runtime || (data.agentCard as Record<string, string>).runtime}
+              </span>
+            )}
           </div>
         )}
 

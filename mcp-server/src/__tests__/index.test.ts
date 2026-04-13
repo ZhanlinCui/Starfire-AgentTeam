@@ -72,6 +72,10 @@ import {
   handleResumeWorkspace,
   handleListOrgTemplates,
   handleImportOrg,
+  handleListRemoteAgents,
+  handleGetRemoteAgentState,
+  handleGetRemoteAgentSetupCommand,
+  handleCheckRemoteAgentFreshness,
   createServer,
 } from "../index.js";
 
@@ -1020,5 +1024,105 @@ describe("Pause/resume and org handlers", () => {
         body: JSON.stringify({ dir: "starfire-dev" }),
       })
     );
+  });
+});
+
+// ============================================================
+// Phase 30 — Remote agent management tools
+// ============================================================
+describe("Phase 30 remote-agent tools", () => {
+  test("handleListRemoteAgents filters runtime='external'", async () => {
+    global.fetch = mockFetch([
+      { id: "ws-1", name: "local", runtime: "claude-code", status: "online" },
+      { id: "ws-2", name: "remote-a", runtime: "external", status: "online", url: "remote://a", last_heartbeat_at: "2026-04-13T12:00:00Z" },
+      { id: "ws-3", name: "remote-b", runtime: "external", status: "offline", url: "remote://b" },
+    ]);
+    const res = await handleListRemoteAgents();
+    const body = JSON.parse(res.content[0].text);
+    expect(body.count).toBe(2);
+    expect(body.agents.map((a: { id: string }) => a.id).sort()).toEqual(["ws-2", "ws-3"]);
+    // Local workspace excluded
+    expect(body.agents.find((a: { id: string }) => a.id === "ws-1")).toBeUndefined();
+  });
+
+  test("handleListRemoteAgents handles non-array response gracefully", async () => {
+    global.fetch = mockFetch({ error: "boom" }, false, 500);
+    const res = await handleListRemoteAgents();
+    expect(res.content[0].text).toContain("HTTP 500");
+  });
+
+  test("handleGetRemoteAgentState projects the right fields", async () => {
+    global.fetch = mockFetch({
+      id: "ws-x", status: "paused", runtime: "external",
+      last_heartbeat_at: "2026-04-13T12:00:00Z",
+      agent_card: { name: "noisy" },  // deliberately omitted from projection
+    });
+    const res = await handleGetRemoteAgentState({ workspace_id: "ws-x" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.workspace_id).toBe("ws-x");
+    expect(body.status).toBe("paused");
+    expect(body.paused).toBe(true);
+    expect(body.deleted).toBe(false);
+    expect(body.runtime).toBe("external");
+    expect(body.agent_card).toBeUndefined();
+  });
+
+  test("handleGetRemoteAgentSetupCommand requires runtime='external'", async () => {
+    global.fetch = mockFetch({ id: "ws-local", name: "n", runtime: "claude-code" });
+    const res = await handleGetRemoteAgentSetupCommand({ workspace_id: "ws-local" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toContain("not external");
+    expect(body.actual_runtime).toBe("claude-code");
+  });
+
+  test("handleGetRemoteAgentSetupCommand emits bash for external workspace", async () => {
+    global.fetch = mockFetch({ id: "ws-ext", name: "remote-1", runtime: "external" });
+    const res = await handleGetRemoteAgentSetupCommand({ workspace_id: "ws-ext" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.workspace_id).toBe("ws-ext");
+    expect(body.workspace_name).toBe("remote-1");
+    expect(body.setup_command).toContain("WORKSPACE_ID=ws-ext");
+    expect(body.setup_command).toContain("PLATFORM_URL=");
+    expect(body.setup_command).toContain("starfire-agent");
+  });
+
+  test("handleCheckRemoteAgentFreshness fresh when heartbeat is recent", async () => {
+    const now = new Date();
+    const recent = new Date(now.getTime() - 30_000).toISOString();
+    global.fetch = mockFetch({
+      id: "ws-fresh", status: "online", runtime: "external",
+      last_heartbeat_at: recent,
+    });
+    const res = await handleCheckRemoteAgentFreshness({ workspace_id: "ws-fresh" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.fresh).toBe(true);
+    expect(body.seconds_since_heartbeat).toBeLessThan(35);
+    expect(body.threshold_seconds).toBe(90);
+  });
+
+  test("handleCheckRemoteAgentFreshness stale when past threshold", async () => {
+    const now = new Date();
+    const old = new Date(now.getTime() - 300_000).toISOString();
+    global.fetch = mockFetch({
+      id: "ws-stale", status: "online", runtime: "external",
+      last_heartbeat_at: old,
+    });
+    const res = await handleCheckRemoteAgentFreshness({
+      workspace_id: "ws-stale", threshold_seconds: 60,
+    });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.fresh).toBe(false);
+    expect(body.seconds_since_heartbeat).toBeGreaterThan(60);
+  });
+
+  test("handleCheckRemoteAgentFreshness handles missing heartbeat", async () => {
+    global.fetch = mockFetch({
+      id: "ws-new", status: "online", runtime: "external",
+      // last_heartbeat_at omitted entirely (just-registered agent)
+    });
+    const res = await handleCheckRemoteAgentFreshness({ workspace_id: "ws-new" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.fresh).toBe(false);
+    expect(body.seconds_since_heartbeat).toBeNull();
   });
 });
