@@ -63,6 +63,30 @@ func NewManager(proxy A2AProxy, broadcaster Broadcaster) *Manager {
 			db.RDB.Del(ctx, key)
 		}
 	}
+	// #123 — wire kicked/left events to mark the matching workspace_channels
+	// row disabled and reload in-memory manager state. Without this, outbound
+	// messages keep trying the dead chat and log 403s forever.
+	disableChannelByChatID = func(ctx context.Context, chatID string) {
+		if db.DB == nil {
+			return
+		}
+		res, err := db.DB.ExecContext(ctx, `
+			UPDATE workspace_channels
+			SET enabled = false, updated_at = now()
+			WHERE channel_type = 'telegram'
+			  AND enabled = true
+			  AND config->>'chat_id' = $1
+		`, chatID)
+		if err != nil {
+			log.Printf("Channels: failed to disable telegram chat_id=%s: %v", chatID, err)
+			return
+		}
+		if rows, _ := res.RowsAffected(); rows > 0 {
+			log.Printf("Channels: disabled %d telegram channel(s) for chat_id=%s (bot removed)", rows, chatID)
+			// Reload so the in-memory poller map drops the now-disabled row.
+			m.Reload(ctx)
+		}
+	}
 	return m
 }
 
