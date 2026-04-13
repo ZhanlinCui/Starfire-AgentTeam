@@ -120,6 +120,17 @@ func (h *WorkspaceHandler) ProxyA2A(c *gin.Context) {
 	workspaceID := c.Param("id")
 	ctx := c.Request.Context()
 
+	// X-Timeout: caller-specified timeout in seconds (0 = no timeout).
+	// Overrides the default canvas (5 min) / agent (30 min) timeouts.
+	if tStr := c.GetHeader("X-Timeout"); tStr != "" {
+		if tSec, err := strconv.Atoi(tStr); err == nil && tSec > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(tSec)*time.Second)
+			defer cancel()
+		}
+		// tSec == 0 means no timeout — use the raw context (no deadline)
+	}
+
 	// Read the incoming request body (capped at 1MB)
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxProxyRequestBody))
 	if err != nil {
@@ -237,18 +248,22 @@ func (h *WorkspaceHandler) proxyA2ARequest(ctx context.Context, workspaceID stri
 	}
 
 	// Forward to the agent. Uses WithoutCancel so delegation chains survive client
-	// disconnect (browser tab close). Canvas requests get 5-min timeout; agent-to-agent
-	// gets 30-min DoS safety cap.
+	// disconnect (browser tab close).
+	// Default timeouts: canvas = 5 min, agent-to-agent = 30 min.
+	// Callers can override via X-Timeout header (handled in ProxyA2A handler above).
 	startTime := time.Now()
 	forwardCtx := context.WithoutCancel(ctx)
-	if callerID == "" {
-		var cancel context.CancelFunc
-		forwardCtx, cancel = context.WithTimeout(forwardCtx, 5*time.Minute)
-		defer cancel()
-	} else {
-		var cancel context.CancelFunc
-		forwardCtx, cancel = context.WithTimeout(forwardCtx, 30*time.Minute)
-		defer cancel()
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		// No caller-specified deadline — apply defaults
+		if callerID == "" {
+			var cancel context.CancelFunc
+			forwardCtx, cancel = context.WithTimeout(forwardCtx, 5*time.Minute)
+			defer cancel()
+		} else {
+			var cancel context.CancelFunc
+			forwardCtx, cancel = context.WithTimeout(forwardCtx, 30*time.Minute)
+			defer cancel()
+		}
 	}
 	req, err := http.NewRequestWithContext(forwardCtx, "POST", agentURL, bytes.NewReader(body))
 	if err != nil {
