@@ -415,9 +415,13 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// If has children and not confirmed, return children list for confirmation
+	// If has children and not confirmed, return children list for confirmation.
+	// Uses HTTP 409 Conflict (not 200) so `curl --fail`, `fetch().ok`, and any
+	// client that treats HTTP 4xx as an error surfaces the confirmation
+	// requirement. Body shape unchanged so the canvas UI's parser keeps
+	// working. Fixes #88.
 	if len(children) > 0 && !confirm {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusConflict, gin.H{
 			"status":         "confirmation_required",
 			"message":        "This workspace has sub-workspaces. Delete with ?confirm=true to cascade delete.",
 			"children":       children,
