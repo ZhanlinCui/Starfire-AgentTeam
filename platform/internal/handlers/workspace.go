@@ -369,11 +369,24 @@ func (h *WorkspaceHandler) State(c *gin.Context) {
 		return
 	}
 
+	// Two delete paths: hard-delete (sql.ErrNoRows above → 404) AND
+	// soft-delete (status='removed' → also return 404 here so the SDK
+	// doesn't have to remember "is it 200 with deleted=true OR 404 with
+	// deleted=true?"). Same shape, same status code, same flag set.
+	if status == "removed" {
+		c.JSON(http.StatusNotFound, gin.H{
+			"workspace_id": workspaceID,
+			"status":       "removed",
+			"deleted":      true,
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"workspace_id": workspaceID,
 		"status":       status,
 		"paused":       status == "paused",
-		"deleted":      status == "removed",
+		"deleted":      false,
 	})
 }
 

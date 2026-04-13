@@ -27,6 +27,18 @@ MCP server that exposes Starfire platform operations as tools for AI coding agen
 | `list_pending_approvals` | List pending approval requests |
 | `decide_approval` | Approve or deny a request |
 
+### Phase 30 — Remote agent (SaaS) management
+
+Tools that surface workspaces with `runtime='external'` (agents that run on
+machines outside this platform's Docker network and join via HTTP).
+
+| Tool | Description |
+|------|-------------|
+| `list_remote_agents` | Filter the workspace list to remote agents only — id / status / url / heartbeat |
+| `get_remote_agent_state` | Lightweight `{status, paused, deleted}` projection — faster than `get_workspace` when you only need lifecycle |
+| `get_remote_agent_setup_command` | Emit a `WORKSPACE_ID=… PLATFORM_URL=… python3 …` bash one-liner an operator can paste into a remote shell |
+| `check_remote_agent_freshness` | Compare `last_heartbeat_at` against a threshold (default 90s) — returns `{fresh, seconds_since_heartbeat}` |
+
 ## Setup
 
 ### Claude Code

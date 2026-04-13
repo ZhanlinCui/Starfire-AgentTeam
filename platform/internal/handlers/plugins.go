@@ -897,24 +897,46 @@ func (h *PluginsHandler) Download(c *gin.Context) {
 		return
 	}
 
-	// Stream the staged tree as application/gzip. We set Content-Disposition
-	// with the canonical filename so wget/curl -O land the bytes at
-	// "<name>.tar.gz" without the caller specifying a path.
-	c.Header("Content-Type", "application/gzip")
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.tar.gz"`, pluginName))
-	c.Header("X-Plugin-Name", pluginName)
-	c.Header("X-Plugin-Source", result.Source.Raw())
-
-	gz := gzip.NewWriter(c.Writer)
+	// Buffer the full tar.gz before writing any response bytes. This lets
+	// us emit a clean 5xx if tar packing fails — previously, a partial
+	// stream surfaced as HTTP 200 + truncated body, which made remote
+	// agents fail at unpack time with cryptic gzip errors instead of
+	// distinguishing "platform borked" from "network glitch".
+	//
+	// Plugin sizes are bounded by PLUGIN_INSTALL_MAX_DIR_BYTES (default
+	// 100 MiB) which `resolveAndStage` already validated — buffering at
+	// that scale is acceptable. If we ever raise the cap above ~500 MiB,
+	// switch to a temp file backed io.ReadSeeker and use http.ServeContent.
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	if err := streamDirAsTar(result.StagedDir, tw); err != nil {
-		// Headers likely already sent — we can't cleanly emit a JSON
-		// error body, so log and abort. Caller sees truncated stream,
-		// which is the standard HTTP streaming failure mode.
-		log.Printf("plugin.Download: tar stream failed for %s: %v", pluginName, err)
+		log.Printf("plugin.Download: tar pack failed for %s: %v", pluginName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "failed to pack plugin",
+			"plugin": pluginName,
+		})
+		return
 	}
-	_ = tw.Close()
-	_ = gz.Close()
+	if err := tw.Close(); err != nil {
+		log.Printf("plugin.Download: tar close failed for %s: %v", pluginName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to finalize tar"})
+		return
+	}
+	if err := gz.Close(); err != nil {
+		log.Printf("plugin.Download: gzip close failed for %s: %v", pluginName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to finalize gzip"})
+		return
+	}
+
+	c.Header("Content-Type", "application/gzip")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.tar.gz"`, pluginName))
+	c.Header("Content-Length", fmt.Sprintf("%d", buf.Len()))
+	c.Header("X-Plugin-Name", pluginName)
+	c.Header("X-Plugin-Source", result.Source.Raw())
+	if _, err := c.Writer.Write(buf.Bytes()); err != nil {
+		log.Printf("plugin.Download: response write failed for %s: %v", pluginName, err)
+	}
 }
 
 // streamDirAsTar writes every regular file + dir under `root` to the tar

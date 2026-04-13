@@ -138,24 +138,35 @@ export function WorkspaceNode({ id, data }: NodeProps<Node<WorkspaceNodeData>>) 
 
         {/* Runtime badge — prefers workspace.runtime (DB column) over
             agent_card.runtime (agent-reported). Phase 30 remote agents
-            (runtime='external') get a distinct purple "REMOTE" pill so
-            operators can spot them in a sea of Docker workspaces. */}
-        {(data.runtime || (data.agentCard && typeof (data.agentCard as Record<string, unknown>).runtime === "string")) && (
-          <div className="mb-1 flex items-center gap-1">
-            {data.runtime === "external" ? (
-              <span
-                className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-violet-200 bg-violet-900/50 border border-violet-500/40"
-                title="Phase 30 remote agent — runs outside this platform's Docker network. Lifecycle managed via heartbeat-based polling, not Docker exec."
-              >
-                ★ REMOTE
-              </span>
-            ) : (
-              <span className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-zinc-400 bg-zinc-800/60 border border-zinc-700/30">
-                {data.runtime || (data.agentCard as Record<string, string>).runtime}
-              </span>
-            )}
-          </div>
-        )}
+            (runtime='external') get a distinct purple "REMOTE" pill.
+            We treat empty-string DB values as "missing" so an unbackfilled
+            row falls through to the agent-card value rather than rendering
+            a blank pill. */}
+        {(() => {
+          const dbRuntime = typeof data.runtime === "string" && data.runtime !== ""
+            ? data.runtime : null;
+          const cardRuntime = data.agentCard && typeof (data.agentCard as Record<string, unknown>).runtime === "string"
+            ? (data.agentCard as Record<string, string>).runtime
+            : null;
+          const runtime = dbRuntime ?? cardRuntime;
+          if (!runtime) return null;
+          return (
+            <div className="mb-1 flex items-center gap-1">
+              {runtime === "external" ? (
+                <span
+                  className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-violet-200 bg-violet-900/50 border border-violet-500/40"
+                  title="Phase 30 remote agent — runs outside this platform's Docker network. Lifecycle managed via heartbeat-based polling, not Docker exec."
+                >
+                  ★ REMOTE
+                </span>
+              ) : (
+                <span className="text-[7px] font-mono px-1.5 py-0.5 rounded-md text-zinc-400 bg-zinc-800/60 border border-zinc-700/30">
+                  {runtime}
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Role */}
         {data.role && (

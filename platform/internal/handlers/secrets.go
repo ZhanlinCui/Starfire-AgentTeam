@@ -146,6 +146,9 @@ func (h *SecretsHandler) Values(c *gin.Context) {
 	// provisioner path in workspace_provision.go so env-vars look identical
 	// whether the workspace was bootstrapped locally or remotely).
 	out := map[string]string{}
+	// Track decrypt failures so we can refuse the response with a list
+	// instead of returning a partial bundle that boots a broken agent.
+	var failedKeys []string
 
 	globalRows, gErr := db.DB.QueryContext(ctx,
 		`SELECT key, encrypted_value, encryption_version FROM global_secrets`)
@@ -158,7 +161,13 @@ func (h *SecretsHandler) Values(c *gin.Context) {
 			if globalRows.Scan(&k, &v, &ver) == nil {
 				decrypted, decErr := crypto.DecryptVersioned(v, ver)
 				if decErr != nil {
-					log.Printf("secrets.Values: decrypt global %s failed (version=%d): %v — skipping", k, ver, decErr)
+					// Fail-loud (mirrors workspace_provision.go's posture):
+					// a remote agent that boots with only PART of its secrets
+					// will fail at task time with mysterious KeyErrors. Better
+					// to refuse to serve the bundle and force the operator to
+					// rotate the broken key.
+					log.Printf("secrets.Values: decrypt global %s failed (version=%d): %v", k, ver, decErr)
+					failedKeys = append(failedKeys, "global:"+k)
 					continue
 				}
 				out[k] = string(decrypted)
@@ -178,12 +187,21 @@ func (h *SecretsHandler) Values(c *gin.Context) {
 			if wsRows.Scan(&k, &v, &ver) == nil {
 				decrypted, decErr := crypto.DecryptVersioned(v, ver)
 				if decErr != nil {
-					log.Printf("secrets.Values: decrypt workspace %s failed (version=%d): %v — skipping", k, ver, decErr)
+					log.Printf("secrets.Values: decrypt workspace %s failed (version=%d): %v", k, ver, decErr)
+					failedKeys = append(failedKeys, "workspace:"+k)
 					continue
 				}
 				out[k] = string(decrypted) // workspace override wins over global
 			}
 		}
+	}
+
+	if len(failedKeys) > 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":       "one or more secrets failed to decrypt; refusing to return partial bundle",
+			"failed_keys": failedKeys,
+		})
+		return
 	}
 
 	c.JSON(http.StatusOK, out)

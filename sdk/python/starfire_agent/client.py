@@ -541,23 +541,23 @@ class RemoteAgentClient:
         if source:
             params["source"] = source
 
-        # Stream so we don't blow memory on a large plugin
+        # We pull the whole tarball into memory before extracting. The
+        # platform side (PLUGIN_INSTALL_MAX_DIR_BYTES) caps plugin size
+        # at 100 MiB by default, which is comfortable to hold in process
+        # memory and lets us use tarfile's seekable r:gz mode (the
+        # streaming r|gz mode is sequential-only and breaks on tarballs
+        # whose entries weren't sorted by name, which we don't enforce).
+        # If the cap is ever raised above ~500 MiB, switch to a temp
+        # file: tarfile.open(fileobj=open(temp, "rb"), mode="r:gz").
         with self._session.get(
             url, headers=self._auth_headers(), params=params,
-            stream=True, timeout=60.0,
+            timeout=60.0,
         ) as resp:
             resp.raise_for_status()
             staging.mkdir(parents=True)
             try:
-                # Use raw byte-stream + tarfile so we don't depend on
-                # requests' .raw being seekable.
                 import io as _io
-                buf = _io.BytesIO()
-                for chunk in resp.iter_content(chunk_size=64 * 1024):
-                    if chunk:
-                        buf.write(chunk)
-                buf.seek(0)
-                with tarfile.open(fileobj=buf, mode="r:gz") as tf:
+                with tarfile.open(fileobj=_io.BytesIO(resp.content), mode="r:gz") as tf:
                     _safe_extract_tar(tf, staging)
             except Exception:
                 # Roll back the partial extract

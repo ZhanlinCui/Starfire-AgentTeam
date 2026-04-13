@@ -551,10 +551,17 @@ def _make_tarball(files: dict[str, bytes]) -> bytes:
 
 
 class _StreamingResp:
-    """requests-shaped response that supports .iter_content + context-manager."""
+    """requests-shaped response with .content + .iter_content + context-manager.
+
+    install_plugin switched from streaming reads to .content (we hold the
+    full <=100MiB tarball in memory before extract — see client.py comment),
+    but we keep iter_content available for any future test that wants to
+    exercise a streaming path.
+    """
     def __init__(self, status: int, body: bytes):
         self.status_code = status
         self._body = body
+        self.content = body  # used by .content readers (install_plugin today)
     def __enter__(self): return self
     def __exit__(self, *a): return None
     def raise_for_status(self):
@@ -565,6 +572,7 @@ class _StreamingResp:
         i = 0
         while i < len(self._body):
             yield self._body[i:i+chunk_size]
+            i += chunk_size
             i += chunk_size
 
 
