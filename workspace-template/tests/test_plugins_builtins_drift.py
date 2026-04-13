@@ -41,6 +41,14 @@ def _make_plugin(root: Path) -> Path:
     (root / "skills" / "s1" / "SKILL.md").write_text(
         "---\nname: s1\ndescription: d\n---\nbody"
     )
+    # setup.sh proves both adaptors run the hook (drift guard for the
+    # plugin-owned dependency-install step). The marker file lets the
+    # test assert the script actually executed.
+    setup = root / "setup.sh"
+    setup.write_text(
+        '#!/bin/bash\nset -e\ntouch "$CONFIGS_DIR/setup-ran-marker"\n'
+    )
+    setup.chmod(0o755)
     return root
 
 
@@ -81,4 +89,13 @@ async def test_sdk_and_runtime_produce_identical_side_effects(tmp_path: Path):
     assert rt_files == sdk_files, "copied-files lists diverge"
     assert rt_mem == sdk_mem, (
         "CLAUDE.md contents diverge between SDK and runtime AgentskillsAdaptor"
+    )
+    # Both adaptors must run setup.sh — the marker file proves it. If only
+    # one side runs the hook, plugin authors get false-pass unit tests
+    # against the SDK while production behaves differently.
+    assert (configs_runtime / "setup-ran-marker").is_file(), (
+        "runtime AgentskillsAdaptor did not execute setup.sh"
+    )
+    assert (configs_sdk / "setup-ran-marker").is_file(), (
+        "SDK AgentskillsAdaptor did not execute setup.sh — drift from runtime"
     )
