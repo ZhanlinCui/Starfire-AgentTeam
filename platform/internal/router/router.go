@@ -77,6 +77,12 @@ func Setup(hub *ws.Hub, broadcaster *events.Broadcaster, prov *provisioner.Provi
 	delh := handlers.NewDelegationHandler(wh, broadcaster)
 	r.POST("/workspaces/:id/delegate", delh.Delegate)
 	r.GET("/workspaces/:id/delegations", delh.ListDelegations)
+	// Record-only endpoint for agent-initiated delegations (#64). Agent-side
+	// delegate_to_workspace fires A2A directly for speed + OTEL propagation;
+	// this endpoint just adds an activity_logs row so GET /delegations returns
+	// the same set the agent's local `check_delegation_status` sees.
+	r.POST("/workspaces/:id/delegations/record", delh.Record)
+	r.POST("/workspaces/:id/delegations/:delegation_id/update", delh.UpdateStatus)
 
 	// Traces (Langfuse proxy)
 	trh := handlers.NewTracesHandler()

@@ -308,3 +308,111 @@ class TestA2AErrors:
 
         assert status["status"] == "failed"
         assert "refused" in status.get("error", "")
+
+
+# ---------- #64: platform-mirroring helpers ----------
+
+import asyncio as _asyncio_64
+from unittest.mock import AsyncMock as _AsyncMock_64, patch as _patch_64
+
+
+def test_record_delegation_on_platform_fires_http_post(delegation_mocks):
+    """Agent registers the delegation on the platform so GET /delegations sees it."""
+    mod, _, _, _ = delegation_mocks
+
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None):
+            calls.append({"url": url, "json": json})
+            class R:
+                status_code = 202
+            return R()
+
+    with _patch_64.object(mod.httpx, "AsyncClient", FakeClient):
+        with _patch_64.object(mod, "WORKSPACE_ID", "src-ws"), \
+             _patch_64.object(mod, "PLATFORM_URL", "http://platform"):
+            _asyncio_64.run(
+                mod._record_delegation_on_platform("task-1", "target-ws", "hello")
+            )
+
+    assert len(calls) == 1
+    assert calls[0]["url"] == "http://platform/workspaces/src-ws/delegations/record"
+    body = calls[0]["json"]
+    assert body == {"target_id": "target-ws", "task": "hello", "delegation_id": "task-1"}
+
+
+def test_record_delegation_on_platform_best_effort_on_error(delegation_mocks):
+    """Platform unreachable must NOT block the A2A delegation path."""
+    mod, _, _, _ = delegation_mocks
+
+    class FailingClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, *a, **kw):
+            raise RuntimeError("platform unreachable")
+
+    with _patch_64.object(mod.httpx, "AsyncClient", FailingClient):
+        with _patch_64.object(mod, "WORKSPACE_ID", "src-ws"), \
+             _patch_64.object(mod, "PLATFORM_URL", "http://platform"):
+            # Must not raise
+            _asyncio_64.run(
+                mod._record_delegation_on_platform("task-1", "target-ws", "hello")
+            )
+
+
+def test_update_delegation_on_platform_completed(delegation_mocks):
+    mod, _, _, _ = delegation_mocks
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None):
+            calls.append({"url": url, "json": json})
+            class R:
+                status_code = 200
+            return R()
+
+    with _patch_64.object(mod.httpx, "AsyncClient", FakeClient):
+        with _patch_64.object(mod, "WORKSPACE_ID", "src-ws"), \
+             _patch_64.object(mod, "PLATFORM_URL", "http://platform"):
+            _asyncio_64.run(
+                mod._update_delegation_on_platform(
+                    "task-1", "completed", "", "the result text"
+                )
+            )
+
+    assert calls[0]["url"] == "http://platform/workspaces/src-ws/delegations/task-1/update"
+    assert calls[0]["json"]["status"] == "completed"
+    assert calls[0]["json"]["response_preview"] == "the result text"
+
+
+def test_update_delegation_on_platform_truncates_large_preview(delegation_mocks):
+    """500-char cap protects log volume + mirrors the platform's 300-char truncate."""
+    mod, _, _, _ = delegation_mocks
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None):
+            calls.append({"url": url, "json": json})
+            class R:
+                status_code = 200
+            return R()
+
+    huge = "X" * 10000
+    with _patch_64.object(mod.httpx, "AsyncClient", FakeClient):
+        with _patch_64.object(mod, "WORKSPACE_ID", "src-ws"), \
+             _patch_64.object(mod, "PLATFORM_URL", "http://platform"):
+            _asyncio_64.run(
+                mod._update_delegation_on_platform("task-1", "completed", "", huge)
+            )
+    assert len(calls[0]["json"]["response_preview"]) == 500
