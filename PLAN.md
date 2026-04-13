@@ -144,8 +144,8 @@ point for "what else is out there."
 | Go (platform) | 476 | `go test -race` |
 | Python (workspace) | 1,040 | pytest |
 | Canvas (frontend) | 345 | Vitest |
-| SDK (python) | 50 | pytest |
-| **Total** | **1,911** | |
+| SDK (python) | 87 | pytest |
+| **Total** | **1,948** | |
 
 E2E: 68/68 comprehensive checks passing, 62 API tests.
 
