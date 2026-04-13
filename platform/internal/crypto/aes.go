@@ -123,8 +123,36 @@ func IsEnabled() bool {
 	return len(encryptionKey) == 32
 }
 
+// Encryption version tags. Stored in workspace_secrets.encryption_version +
+// global_secrets.encryption_version (migration 018). DecryptVersioned reads
+// the tag to decide whether to run GCM or pass bytes through. Prevents the
+// "turn on encryption → all historical secrets become unreadable" trap
+// documented in #85.
+const (
+	// EncryptionVersionPlaintext identifies rows written when the platform
+	// was running without a key. encrypted_value column holds literal
+	// plaintext bytes.
+	EncryptionVersionPlaintext = 0
+	// EncryptionVersionAESGCM identifies rows written with the current
+	// scheme (AES-256-GCM, 12-byte prefix nonce).
+	EncryptionVersionAESGCM = 1
+)
+
+// CurrentEncryptionVersion returns the version a new Encrypt call would
+// produce given the current key state. Callers use this as the value to
+// INSERT into encryption_version.
+func CurrentEncryptionVersion() int {
+	if IsEnabled() {
+		return EncryptionVersionAESGCM
+	}
+	return EncryptionVersionPlaintext
+}
+
 // Encrypt encrypts plaintext with AES-256-GCM.
 // If encryption is disabled, returns the plaintext as-is.
+//
+// Callers should persist CurrentEncryptionVersion() alongside the returned
+// bytes so Decrypt / DecryptVersioned knows how to read them back.
 func Encrypt(plaintext []byte) ([]byte, error) {
 	if !IsEnabled() {
 		return plaintext, nil
@@ -150,6 +178,12 @@ func Encrypt(plaintext []byte) ([]byte, error) {
 
 // Decrypt decrypts AES-256-GCM ciphertext.
 // If encryption is disabled, returns the data as-is.
+//
+// **Prefer DecryptVersioned** when the caller has access to the
+// encryption_version column — this function can't tell plaintext rows from
+// ciphertext and will attempt GCM on both when a key is set, mangling
+// plaintext-era secrets. Kept for backward compatibility with callers that
+// haven't migrated to the version-aware helper yet.
 func Decrypt(ciphertext []byte) ([]byte, error) {
 	if !IsEnabled() {
 		return ciphertext, nil
@@ -172,4 +206,31 @@ func Decrypt(ciphertext []byte) ([]byte, error) {
 
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 	return gcm.Open(nil, nonce, ciphertext, nil)
+}
+
+// DecryptVersioned is the #85 replacement for Decrypt. It reads the
+// encryption_version tag and picks the right path:
+//
+//   - EncryptionVersionPlaintext (0): return the bytes as-is. Correct both
+//     on installs that never had a key, AND on installs where the operator
+//     has since enabled encryption but existing rows predate the key.
+//   - EncryptionVersionAESGCM (1): run AES-256-GCM decrypt as before.
+//     Fails with a clear error if IsEnabled() is false — an operator who
+//     enabled then disabled encryption without re-encrypting rows.
+//
+// Callers that store rows this cycle should write
+// CurrentEncryptionVersion() into the encryption_version column alongside
+// the bytes produced by Encrypt.
+func DecryptVersioned(value []byte, version int) ([]byte, error) {
+	switch version {
+	case EncryptionVersionPlaintext:
+		return value, nil
+	case EncryptionVersionAESGCM:
+		if !IsEnabled() {
+			return nil, errors.New("row was encrypted (version=1) but SECRETS_ENCRYPTION_KEY is unset; cannot decrypt")
+		}
+		return Decrypt(value)
+	default:
+		return nil, fmt.Errorf("unknown encryption_version=%d; platform upgrade required", version)
+	}
 }

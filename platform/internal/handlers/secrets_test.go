@@ -208,7 +208,7 @@ func TestSecretsSet_Success(t *testing.T) {
 
 	// The crypto.Encrypt will use plaintext mode if SECRETS_ENCRYPTION_KEY is not set
 	mock.ExpectExec("INSERT INTO workspace_secrets").
-		WithArgs("550e8400-e29b-41d4-a716-446655440000", "API_KEY", sqlmock.AnyArg()).
+		WithArgs("550e8400-e29b-41d4-a716-446655440000", "API_KEY", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	w := httptest.NewRecorder()
@@ -253,7 +253,7 @@ func TestSecretsSet_AutoRestart(t *testing.T) {
 	handler := NewSecretsHandler(restartFunc)
 
 	mock.ExpectExec("INSERT INTO workspace_secrets").
-		WithArgs("550e8400-e29b-41d4-a716-446655440000", "DB_PASS", sqlmock.AnyArg()).
+		WithArgs("550e8400-e29b-41d4-a716-446655440000", "DB_PASS", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	w := httptest.NewRecorder()
@@ -290,7 +290,7 @@ func TestSecretsSet_DBError(t *testing.T) {
 	handler := NewSecretsHandler(nil)
 
 	mock.ExpectExec("INSERT INTO workspace_secrets").
-		WithArgs("550e8400-e29b-41d4-a716-446655440000", "API_KEY", sqlmock.AnyArg()).
+		WithArgs("550e8400-e29b-41d4-a716-446655440000", "API_KEY", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnError(sql.ErrConnDone)
 
 	w := httptest.NewRecorder()
@@ -479,7 +479,7 @@ func TestSecretsGetModel_Default(t *testing.T) {
 	handler := NewSecretsHandler(nil)
 
 	// No MODEL_PROVIDER secret
-	mock.ExpectQuery("SELECT encrypted_value FROM workspace_secrets").
+	mock.ExpectQuery("SELECT encrypted_value, encryption_version FROM workspace_secrets").
 		WithArgs("ws-model").
 		WillReturnError(sql.ErrNoRows)
 
@@ -515,7 +515,7 @@ func TestSecretsGetModel_DBError(t *testing.T) {
 	setupTestRedis(t)
 	handler := NewSecretsHandler(nil)
 
-	mock.ExpectQuery("SELECT encrypted_value FROM workspace_secrets").
+	mock.ExpectQuery("SELECT encrypted_value, encryption_version FROM workspace_secrets").
 		WithArgs("ws-model-err").
 		WillReturnError(sql.ErrConnDone)
 
