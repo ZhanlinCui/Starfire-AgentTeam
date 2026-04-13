@@ -115,7 +115,7 @@ for the full code audit.
   returns decrypted secrets JSON, gated by the 30.1 token. Local agents
   can use it too (removes env-at-create coupling for rotating secrets).
 
-- [ ] **30.3 Plugin tarball download** — `GET /plugins/:name/download`
+- [x] **30.3 Plugin tarball download** — `GET /plugins/:name/download`
   returns a tarball; agent unpacks locally. Replaces Docker-exec plugin
   install for remote agents. Behind `REMOTE_PLUGIN_DOWNLOAD_ENABLED`.
 

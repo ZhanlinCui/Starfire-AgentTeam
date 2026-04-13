@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 )
 
@@ -1053,4 +1056,173 @@ func TestStripPluginMarkers_MissingFileIsNoOp(t *testing.T) {
 	)
 	cmd := exec.Command("bash", "-c", script)
 	_ = cmd.Run() // expected to fail; we just check it doesn't hang/panic
+}
+
+// ================== Phase 30.3 — Download endpoint ==================
+
+// Download is exercised via an integration-style test because its main
+// work (stream tar.gz) is straightforward; the interesting paths are
+// the auth gate and the plugin-name mismatch guard.
+
+func TestPluginDownload_RejectsInvalidName(t *testing.T) {
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "ws-123"},
+		{Key: "name", Value: "../traversal"},
+	}
+	c.Request = httptest.NewRequest("GET", "/workspaces/ws-123/plugins/..%2Ftraversal/download", nil)
+	h.Download(c)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for traversal, got %d", w.Code)
+	}
+}
+
+func TestPluginDownload_MissingTokenWhenWorkspaceHasOne(t *testing.T) {
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+	h := NewPluginsHandler(t.TempDir(), nil, nil)
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("550e8400-e29b-41d4-a716-446655440000").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"},
+		{Key: "name", Value: "some-plugin"},
+	}
+	c.Request = httptest.NewRequest("GET", "/workspaces/X/plugins/some-plugin/download", nil)
+	h.Download(c)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 when token required and absent, got %d", w.Code)
+	}
+}
+
+func TestPluginDownload_LegacyWorkspaceStreamsTarball(t *testing.T) {
+	// Stage a small plugin dir; legacy workspace (no tokens on file) is
+	// grandfathered through; caller should get a tar.gz body back.
+	mock := setupTestDB(t)
+	setupTestRedis(t)
+
+	pluginsDir := t.TempDir()
+	pluginRoot := filepath.Join(pluginsDir, "hello-plugin")
+	if err := os.MkdirAll(pluginRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, "plugin.yaml"), []byte("name: hello-plugin\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, "rules.md"), []byte("some rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewPluginsHandler(pluginsDir, nil, nil)
+
+	// Legacy path — workspace has no live tokens.
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM workspace_auth_tokens`).
+		WithArgs("550e8400-e29b-41d4-a716-446655440000").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Params = gin.Params{
+		{Key: "id", Value: "550e8400-e29b-41d4-a716-446655440000"},
+		{Key: "name", Value: "hello-plugin"},
+	}
+	c.Request = httptest.NewRequest("GET", "/workspaces/X/plugins/hello-plugin/download", nil)
+	h.Download(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/gzip" {
+		t.Errorf("Content-Type: got %q, want application/gzip", ct)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="hello-plugin.tar.gz"`) {
+		t.Errorf("Content-Disposition missing canonical filename: %q", cd)
+	}
+	// Body should be gzip-magic-bytes prefixed
+	body := w.Body.Bytes()
+	if len(body) < 2 || body[0] != 0x1f || body[1] != 0x8b {
+		t.Errorf("body does not start with gzip magic (0x1f 0x8b); first bytes: %x", body[:min(4, len(body))])
+	}
+}
+
+// ================== streamDirAsTar helper ==================
+
+func TestStreamDirAsTar_RelativePaths(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "sub"), 0o755)
+	os.WriteFile(filepath.Join(root, "top.md"), []byte("top content"), 0o644)
+	os.WriteFile(filepath.Join(root, "sub", "nested.md"), []byte("nested content"), 0o644)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := streamDirAsTar(root, tw); err != nil {
+		t.Fatalf("streamDirAsTar: %v", err)
+	}
+	tw.Close()
+
+	tr := tar.NewReader(&buf)
+	seen := map[string]bool{}
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar read: %v", err)
+		}
+		seen[hdr.Name] = true
+		if strings.HasPrefix(hdr.Name, "/") || strings.Contains(hdr.Name, "..") {
+			t.Errorf("tar entry has unsafe path: %q", hdr.Name)
+		}
+	}
+	// Must include both our files with relative paths
+	if !seen["top.md"] {
+		t.Errorf("missing top.md; saw: %v", seen)
+	}
+	if !seen[filepath.Join("sub", "nested.md")] {
+		t.Errorf("missing sub/nested.md; saw: %v", seen)
+	}
+}
+
+func TestStreamDirAsTar_SkipsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), "outside.txt")
+	os.WriteFile(target, []byte("secret"), 0o600)
+	os.WriteFile(filepath.Join(root, "real.md"), []byte("real"), 0o644)
+	if err := os.Symlink(target, filepath.Join(root, "escape.lnk")); err != nil {
+		t.Skipf("symlink unsupported on this fs: %v", err)
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	streamDirAsTar(root, tw)
+	tw.Close()
+
+	tr := tar.NewReader(&buf)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hdr.Name == "escape.lnk" {
+			t.Error("symlink leaked into archive — would escape staged dir")
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
