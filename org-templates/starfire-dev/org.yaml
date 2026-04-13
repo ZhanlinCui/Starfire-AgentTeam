@@ -129,7 +129,19 @@ workspaces:
               5. Use commit_memory to save the API route table and key patterns
               6. Wait for tasks from Dev Lead.
           - name: DevOps Engineer
-            role: CI/CD, Docker, infrastructure
+            role: >-
+              Owns the container build pipeline: Dockerfiles for all six
+              runtime images (langgraph, claude-code, openclaw, crewai,
+              autogen, deepagents), docker-compose.infra.yml for the local
+              dev stack, and build-all.sh hygiene. Manages GitHub Actions
+              CI (platform-build, canvas-build, python-lint,
+              mcp-server-build), coverage thresholds, and secrets hygiene
+              in the pipeline. Keeps infra/scripts/setup.sh and nuke.sh
+              in sync whenever migrations or services change. Escalates to
+              Backend Engineer for schema/runtime-config changes and to
+              Frontend Engineer for canvas build failures. "Done" means:
+              all CI jobs green, all images buildable from a clean checkout,
+              no *.log or .env files leaked into image layers.
             tier: 3
             model: opus
             files_dir: devops-engineer
