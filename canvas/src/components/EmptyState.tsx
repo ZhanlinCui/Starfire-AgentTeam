@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useCanvasStore } from "@/store/canvas";
+import { OrgTemplatesSection } from "./TemplatePalette";
 
 interface Template {
   id: string;
@@ -147,6 +148,11 @@ export function EmptyState() {
         >
           {deploying === "blank" ? "Creating..." : "+ Create blank workspace"}
         </button>
+
+        {/* Org templates — instantiate a whole team in one click */}
+        <div className="mt-4 pt-4 border-t border-zinc-800/50 text-left">
+          <OrgTemplatesSection />
+        </div>
 
         {error && (
           <div className="mt-3 px-3 py-2 bg-red-950/40 border border-red-800/50 rounded-lg text-xs text-red-400">
